@@ -21,6 +21,35 @@ const isManage = computed(() => route.path.startsWith('/manage'))
 const isSkills = computed(() => route.path.startsWith('/skills'))
 const isMcp = computed(() => route.path.startsWith('/mcp'))
 
+interface SessionGroup {
+  dir: string
+  label: string
+  sessions: Session[]
+}
+
+const groupedSessions = computed<SessionGroup[]>(() => {
+  const groups = new Map<string, Session[]>()
+  for (const s of store.sessions) {
+    const dir = s.work_dir || ''
+    if (!groups.has(dir)) groups.set(dir, [])
+    groups.get(dir)!.push(s)
+  }
+  const result: SessionGroup[] = []
+  // Default group (empty work_dir) first
+  const defaultGroup = groups.get('')
+  if (defaultGroup) {
+    result.push({ dir: '', label: '系统默认', sessions: defaultGroup })
+    groups.delete('')
+  }
+  // Other groups sorted by directory path
+  const sortedDirs = [...groups.keys()].sort()
+  for (const dir of sortedDirs) {
+    const label = dir.replace(/^\/Users\/[^/]+/, '~')
+    result.push({ dir, label, sessions: groups.get(dir)! })
+  }
+  return result
+})
+
 function newChat() {
   store.newChat()
   router.push('/chat')
@@ -94,28 +123,31 @@ function formatTime(dateStr: string) {
     </div>
 
     <div class="session-list">
-      <div
-        v-for="s in store.sessions"
-        :key="s.id"
-        class="session-item"
-        :class="{ active: s.id === store.currentSessionId }"
-        @click="selectSession(s.id)"
-      >
-        <div class="session-info">
-          <div class="session-title-row">
-            <svg v-if="s.streaming" class="streaming-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21 12a9 9 0 11-6.219-8.56"/>
-            </svg>
-            <div class="session-title">{{ s.title }}</div>
+      <template v-for="group in groupedSessions" :key="group.dir">
+        <div v-if="groupedSessions.length > 1" class="group-label">{{ group.label }}</div>
+        <div
+          v-for="s in group.sessions"
+          :key="s.id"
+          class="session-item"
+          :class="{ active: s.id === store.currentSessionId }"
+          @click="selectSession(s.id)"
+        >
+          <div class="session-info">
+            <div class="session-title-row">
+              <svg v-if="s.streaming" class="streaming-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 12a9 9 0 11-6.219-8.56"/>
+              </svg>
+              <div class="session-title">{{ s.title }}</div>
+            </div>
+            <div class="session-time">{{ formatTime(s.updated_at) }}</div>
           </div>
-          <div class="session-time">{{ formatTime(s.updated_at) }}</div>
+          <button class="btn-delete" @click.stop="deleteTarget = s" title="Delete">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 6L6 18M6 6l12 12"/>
+            </svg>
+          </button>
         </div>
-        <button class="btn-delete" @click.stop="deleteTarget = s" title="Delete">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M18 6L6 18M6 6l12 12"/>
-          </svg>
-        </button>
-      </div>
+      </template>
       <div v-if="store.sessions.length === 0" class="no-sessions">
         No conversations yet
       </div>
@@ -202,6 +234,16 @@ function formatTime(dateStr: string) {
   flex: 1;
   overflow-y: auto;
   padding: 8px;
+}
+.group-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 8px 12px 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
 }
 .session-item {
   display: flex;

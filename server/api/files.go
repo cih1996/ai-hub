@@ -248,3 +248,93 @@ func GetTemplateVars(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, result)
 }
+
+// ---- Project-level rules API (operates on {workDir}/.claude/) ----
+
+func validateProjectPath(p string) bool {
+	return !strings.Contains(p, "..") && !strings.Contains(p, "~")
+}
+
+// ListProjectRules lists CLAUDE.md + rules/*.md under {workDir}/.claude/
+func ListProjectRules(c *gin.Context) {
+	workDir := c.Query("work_dir")
+	if workDir == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "work_dir is required"})
+		return
+	}
+	base := filepath.Join(workDir, ".claude")
+	var files []FileInfo
+
+	// CLAUDE.md
+	claudeMd := filepath.Join(base, "CLAUDE.md")
+	files = append(files, FileInfo{Name: "CLAUDE.md", Path: "CLAUDE.md", Exists: fileExists(claudeMd)})
+
+	// rules/*.md
+	rulesDir := filepath.Join(base, "rules")
+	os.MkdirAll(rulesDir, 0755)
+	entries, _ := os.ReadDir(rulesDir)
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
+			p := "rules/" + e.Name()
+			files = append(files, FileInfo{Name: e.Name(), Path: p, Exists: true})
+		}
+	}
+	c.JSON(http.StatusOK, files)
+}
+
+// ReadProjectRule reads a rule file from {workDir}/.claude/{path}
+func ReadProjectRule(c *gin.Context) {
+	workDir := c.Query("work_dir")
+	p := c.Query("path")
+	if workDir == "" || p == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "work_dir and path are required"})
+		return
+	}
+	if !validateProjectPath(p) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
+		return
+	}
+	full := filepath.Join(workDir, ".claude", p)
+	if !strings.HasPrefix(full, filepath.Join(workDir, ".claude")) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
+		return
+	}
+	data, err := os.ReadFile(full)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"content": ""})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"content": string(data)})
+}
+
+// WriteProjectRule writes a rule file to {workDir}/.claude/{path}
+func WriteProjectRule(c *gin.Context) {
+	var req struct {
+		WorkDir string `json:"work_dir"`
+		Path    string `json:"path"`
+		Content string `json:"content"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.WorkDir == "" || req.Path == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "work_dir and path are required"})
+		return
+	}
+	if !validateProjectPath(req.Path) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
+		return
+	}
+	full := filepath.Join(req.WorkDir, ".claude", req.Path)
+	if !strings.HasPrefix(full, filepath.Join(req.WorkDir, ".claude")) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
+		return
+	}
+	os.MkdirAll(filepath.Dir(full), 0755)
+	if err := os.WriteFile(full, []byte(req.Content), 0644); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}

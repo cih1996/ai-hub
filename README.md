@@ -85,12 +85,14 @@ POST /chat/send
 ```json
 {
   "session_id": 0,
-  "content": "你好"
+  "content": "你好",
+  "work_dir": "/path/to/project"
 }
 ```
 
 - `session_id = 0`：自动创建新会话
 - `session_id > 0`：在已有会话中发送
+- `work_dir`：可选，工作目录路径。CLI 将在此目录下运行，空值则使用用户 home 目录
 
 **响应：**
 
@@ -122,7 +124,7 @@ POST /chat/send
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/sessions` | 获取会话列表（含 `streaming` 状态字段） |
+| GET | `/sessions` | 获取会话列表（含 `streaming` 状态、`work_dir` 字段） |
 | POST | `/sessions` | 创建会话 |
 | GET | `/sessions/:id` | 获取单个会话 |
 | PUT | `/sessions/:id` | 更新会话 |
@@ -135,6 +137,16 @@ POST /chat/send
 |------|------|------|
 | GET | `/status` | 获取依赖状态（Node/npm/Claude CLI） |
 | POST | `/status/retry-install` | 重试安装 Claude Code CLI |
+
+### 项目级规则管理
+
+操作指定工作目录下 `{work_dir}/.claude/` 的规则文件，不走模板系统。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/project-rules?work_dir=xxx` | 列出 CLAUDE.md + rules/*.md |
+| GET | `/project-rules/content?work_dir=xxx&path=xxx` | 读取规则文件内容 |
+| PUT | `/project-rules/content` | 写入规则文件（body: `work_dir`, `path`, `content`） |
 
 ## WebSocket
 

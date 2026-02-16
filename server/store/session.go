@@ -17,8 +17,8 @@ func CreateSession(s *model.Session) error {
 		s.Title = "New Chat"
 	}
 	result, err := DB.Exec(
-		`INSERT INTO sessions (title, provider_id, claude_session_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
-		s.Title, s.ProviderID, s.ClaudeSessionID, s.CreatedAt, s.UpdatedAt,
+		`INSERT INTO sessions (title, provider_id, claude_session_id, work_dir, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		s.Title, s.ProviderID, s.ClaudeSessionID, s.WorkDir, s.CreatedAt, s.UpdatedAt,
 	)
 	if err != nil {
 		return err
@@ -32,7 +32,7 @@ func CreateSession(s *model.Session) error {
 }
 
 func ListSessions() ([]model.Session, error) {
-	rows, err := DB.Query(`SELECT id, title, provider_id, claude_session_id, created_at, updated_at FROM sessions ORDER BY updated_at DESC`)
+	rows, err := DB.Query(`SELECT id, title, provider_id, claude_session_id, work_dir, created_at, updated_at FROM sessions ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -40,7 +40,7 @@ func ListSessions() ([]model.Session, error) {
 	var list []model.Session
 	for rows.Next() {
 		var s model.Session
-		if err := rows.Scan(&s.ID, &s.Title, &s.ProviderID, &s.ClaudeSessionID, &s.CreatedAt, &s.UpdatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.Title, &s.ProviderID, &s.ClaudeSessionID, &s.WorkDir, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			return nil, err
 		}
 		list = append(list, s)
@@ -51,8 +51,8 @@ func ListSessions() ([]model.Session, error) {
 func GetSession(id int64) (*model.Session, error) {
 	var s model.Session
 	err := DB.QueryRow(
-		`SELECT id, title, provider_id, claude_session_id, created_at, updated_at FROM sessions WHERE id = ?`, id,
-	).Scan(&s.ID, &s.Title, &s.ProviderID, &s.ClaudeSessionID, &s.CreatedAt, &s.UpdatedAt)
+		`SELECT id, title, provider_id, claude_session_id, work_dir, created_at, updated_at FROM sessions WHERE id = ?`, id,
+	).Scan(&s.ID, &s.Title, &s.ProviderID, &s.ClaudeSessionID, &s.WorkDir, &s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -115,10 +115,11 @@ func GetMessages(sessionID int64) ([]model.Message, error) {
 	return list, nil
 }
 
-func CreateSessionWithMessage(providerID string, content string) (*model.Session, error) {
+func CreateSessionWithMessage(providerID string, content string, workDir string) (*model.Session, error) {
 	s := &model.Session{
 		Title:      truncateTitle(content),
 		ProviderID: providerID,
+		WorkDir:    workDir,
 	}
 	if err := CreateSession(s); err != nil {
 		return nil, fmt.Errorf("create session: %w", err)

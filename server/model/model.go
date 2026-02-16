@@ -35,6 +35,7 @@ type Session struct {
 	Title           string    `json:"title"`
 	ProviderID      string    `json:"provider_id"`
 	ClaudeSessionID string    `json:"claude_session_id"` // UUID for Claude Code CLI --session-id
+	WorkDir         string    `json:"work_dir"`           // 工作目录，空 = 系统默认(home)
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
 }

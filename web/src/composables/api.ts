@@ -34,10 +34,10 @@ export const getMessages = (sessionId: number) =>
   request<Message[]>(`/sessions/${sessionId}/messages`)
 
 // Chat
-export const sendChat = (sessionId: number, content: string) =>
+export const sendChat = (sessionId: number, content: string, workDir?: string) =>
   request<{ session_id: number; status: string }>('/chat/send', {
     method: 'POST',
-    body: JSON.stringify({ session_id: sessionId, content }),
+    body: JSON.stringify({ session_id: sessionId, content, work_dir: workDir || '' }),
   })
 
 // Status
@@ -115,4 +115,15 @@ export const toggleMcpServer = (name: string, enable: boolean) =>
   request<{ ok: boolean }>('/mcp/toggle', {
     method: 'POST',
     body: JSON.stringify({ name, enable }),
+  })
+
+// Project-level rules
+export const listProjectRules = (workDir: string) =>
+  request<FileItem[]>(`/project-rules?work_dir=${encodeURIComponent(workDir)}`)
+export const readProjectRule = (workDir: string, path: string) =>
+  request<{ content: string }>(`/project-rules/content?work_dir=${encodeURIComponent(workDir)}&path=${encodeURIComponent(path)}`)
+export const writeProjectRule = (workDir: string, path: string, content: string) =>
+  request<{ ok: boolean }>('/project-rules/content', {
+    method: 'PUT',
+    body: JSON.stringify({ work_dir: workDir, path, content }),
   })

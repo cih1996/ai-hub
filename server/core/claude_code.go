@@ -33,6 +33,7 @@ type ClaudeCodeRequest struct {
 	BaseURL      string
 	APIKey       string
 	ModelID      string
+	WorkDir      string // 工作目录，空 = home
 }
 
 func NewClaudeCodeClient() *ClaudeCodeClient {
@@ -75,9 +76,13 @@ func (c *ClaudeCodeClient) Stream(ctx context.Context, req ClaudeCodeRequest, on
 
 	cmd := exec.CommandContext(ctx, c.BinaryPath, args...)
 
-	// System-level: run from home dir, not tied to any project
-	home, _ := os.UserHomeDir()
-	cmd.Dir = home
+	// Set working directory: use specified work_dir or fall back to home
+	if req.WorkDir != "" {
+		cmd.Dir = req.WorkDir
+	} else {
+		home, _ := os.UserHomeDir()
+		cmd.Dir = home
+	}
 
 	// Inject provider config as env vars
 	cmd.Env = os.Environ()

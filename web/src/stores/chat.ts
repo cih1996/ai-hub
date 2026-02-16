@@ -14,6 +14,8 @@ export const useChatStore = defineStore('chat', () => {
   const toolCalls = ref<ToolCall[]>([])
   const ws = ref<WebSocket | null>(null)
 
+  const workDir = ref('')
+
   const currentSession = computed(() =>
     sessions.value.find((s) => s.id === currentSessionId.value)
   )
@@ -162,7 +164,10 @@ export const useChatStore = defineStore('chat', () => {
     toolCalls.value = []
     if (id === 0) {
       messages.value = []
+      workDir.value = ''
     } else {
+      const s = sessions.value.find((s) => s.id === id)
+      workDir.value = s?.work_dir || ''
       messages.value = await api.getMessages(id)
       // Subscribe to check if this session is still streaming
       if (ws.value && ws.value.readyState === WebSocket.OPEN) {
@@ -178,6 +183,7 @@ export const useChatStore = defineStore('chat', () => {
     streamingContent.value = ''
     thinkingContent.value = ''
     toolCalls.value = []
+    workDir.value = ''
   }
 
   async function deleteSessionById(id: number) {
@@ -205,7 +211,7 @@ export const useChatStore = defineStore('chat', () => {
     toolCalls.value = []
 
     try {
-      const resp = await api.sendChat(currentSessionId.value, content)
+      const resp = await api.sendChat(currentSessionId.value, content, workDir.value || undefined)
       // If it was a new session (id=0), update to the real session ID
       if (currentSessionId.value === 0 && resp.session_id) {
         currentSessionId.value = resp.session_id
@@ -244,6 +250,7 @@ export const useChatStore = defineStore('chat', () => {
     streamingContent,
     thinkingContent,
     toolCalls,
+    workDir,
     connectWS,
     loadProviders,
     loadSessions,

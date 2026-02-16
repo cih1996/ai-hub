@@ -178,6 +178,7 @@ func SendChat(c *gin.Context) {
 	var req struct {
 		SessionID int64  `json:"session_id"`
 		Content   string `json:"content"`
+		WorkDir   string `json:"work_dir"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: " + err.Error()})
@@ -197,7 +198,7 @@ func SendChat(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "No default provider configured. Go to Settings to add one."})
 			return
 		}
-		session, err = store.CreateSessionWithMessage(provider.ID, req.Content)
+		session, err = store.CreateSessionWithMessage(provider.ID, req.Content, req.WorkDir)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "create session failed: " + err.Error()})
 			return
@@ -274,7 +275,7 @@ func runStream(session *model.Session, query string, isNewSession bool) {
 	switch provider.Mode {
 	case "claude-code":
 		isResume := !isNewSession
-		fullResponse, err = streamClaudeCode(ctx, provider, query, session.ClaudeSessionID, isResume, stream.Send, session.ID)
+		fullResponse, err = streamClaudeCode(ctx, provider, query, session.ClaudeSessionID, isResume, stream.Send, session.ID, session.WorkDir)
 	default:
 		err = streamOpenAI(ctx, provider, session.ID, func(chunk string) {
 			fullResponse += chunk
@@ -300,7 +301,7 @@ func runStream(session *model.Session, query string, isNewSession bool) {
 	stream.Send(WSMessage{Type: "done", SessionID: session.ID})
 }
 
-func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID string, resume bool, send func(WSMessage), sessID int64) (string, error) {
+func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID string, resume bool, send func(WSMessage), sessID int64, workDir string) (string, error) {
 	req := core.ClaudeCodeRequest{
 		Query:     query,
 		SessionID: sessionID,
@@ -308,6 +309,7 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 		BaseURL:   p.BaseURL,
 		APIKey:    p.APIKey,
 		ModelID:   p.ModelID,
+		WorkDir:   workDir,
 	}
 	var fullResponse string
 

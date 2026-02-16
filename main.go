@@ -19,6 +19,9 @@ import (
 //go:embed web/dist/*
 var frontendFS embed.FS
 
+//go:embed skills/*
+var builtinSkillsFS embed.FS
+
 func main() {
 	port := flag.Int("port", 8080, "server port")
 	dataDir := flag.String("data", "", "data directory (default: ~/.ai-hub)")
@@ -44,6 +47,9 @@ func main() {
 
 	// Init API data dir (for skills disable path)
 	api.InitDataDir(*dataDir)
+
+	// Install built-in skills to ~/.claude/skills/
+	installBuiltinSkills()
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
@@ -78,6 +84,11 @@ func main() {
 		v1.POST("/files", api.CreateFile)
 		v1.DELETE("/files", api.DeleteFile)
 		v1.GET("/files/variables", api.GetTemplateVars)
+
+		// Project-level rules
+		v1.GET("/project-rules", api.ListProjectRules)
+		v1.GET("/project-rules/content", api.ReadProjectRule)
+		v1.PUT("/project-rules/content", api.WriteProjectRule)
 
 		// Status & deps
 		v1.GET("/status", api.GetStatus)
@@ -121,4 +132,35 @@ func main() {
 	if err := r.Run(addr); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// installBuiltinSkills copies embedded skills/* to ~/.claude/skills/ on every startup.
+func installBuiltinSkills() {
+	home, _ := os.UserHomeDir()
+	targetBase := filepath.Join(home, ".claude", "skills")
+
+	fs.WalkDir(builtinSkillsFS, "skills", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		// Strip the "skills/" prefix to get relative path
+		rel, _ := filepath.Rel("skills", path)
+		if rel == "." {
+			return nil
+		}
+		target := filepath.Join(targetBase, rel)
+
+		if d.IsDir() {
+			os.MkdirAll(target, 0755)
+			return nil
+		}
+		data, err := builtinSkillsFS.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		os.MkdirAll(filepath.Dir(target), 0755)
+		os.WriteFile(target, data, 0644)
+		return nil
+	})
+	log.Printf("[skills] built-in skills installed to %s", targetBase)
 }

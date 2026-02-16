@@ -58,7 +58,12 @@ func migrate() error {
 	CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, created_at);
 	`
 	_, err := DB.Exec(schema)
-	return err
+	if err != nil {
+		return err
+	}
+	// Safe column migration: add work_dir to sessions (SQLite ignores duplicate ALTER)
+	DB.Exec(`ALTER TABLE sessions ADD COLUMN work_dir TEXT NOT NULL DEFAULT ''`)
+	return nil
 }
 
 func Close() {

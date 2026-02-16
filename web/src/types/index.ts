@@ -14,6 +14,7 @@ export interface Session {
   id: number
   title: string
   provider_id: string
+  work_dir: string
   streaming: boolean
   created_at: string
   updated_at: string

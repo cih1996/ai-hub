@@ -2,6 +2,8 @@
 import { ref, nextTick, watch, computed } from 'vue'
 import { marked } from 'marked'
 import { useChatStore } from '../stores/chat'
+import * as api from '../composables/api'
+import type { FileItem } from '../composables/api'
 
 const store = useChatStore()
 const input = ref('')
@@ -9,6 +11,13 @@ const messagesEl = ref<HTMLElement>()
 const textareaEl = ref<HTMLTextAreaElement>()
 const stepsExpanded = ref(false)
 const isComposing = ref(false)
+
+// Rules modal state
+const showRulesModal = ref(false)
+const ruleFiles = ref<FileItem[]>([])
+const selectedRulePath = ref('')
+const ruleContent = ref('')
+const ruleSaving = ref(false)
 
 marked.setOptions({ breaks: true, gfm: true })
 
@@ -27,6 +36,16 @@ const stepCount = computed(() => {
 const hasActivity = computed(() =>
   store.streaming && (store.thinkingContent || store.toolCalls.length > 0)
 )
+
+const contextCount = computed(() => store.messages.length)
+
+const displayWorkDir = computed(() => {
+  const wd = store.currentSession?.work_dir
+  if (!wd) return '~ (系统默认)'
+  const home = '~'
+  // Try to shorten with ~ prefix
+  return wd.replace(/^\/Users\/[^/]+/, home)
+})
 
 function scrollToBottom() {
   nextTick(() => {
@@ -64,23 +83,48 @@ function autoResize() {
   el.style.height = Math.min(el.scrollHeight, 200) + 'px'
 }
 
+// Rules modal functions
+async function openRulesModal() {
+  const wd = store.currentSession?.work_dir
+  if (!wd) return
+  showRulesModal.value = true
+  ruleFiles.value = await api.listProjectRules(wd)
+  if (ruleFiles.value.length > 0 && ruleFiles.value[0]) {
+    await selectRule(ruleFiles.value[0].path)
+  }
+}
+
+async function selectRule(path: string) {
+  const wd = store.currentSession?.work_dir
+  if (!wd) return
+  selectedRulePath.value = path
+  const res = await api.readProjectRule(wd, path)
+  ruleContent.value = res.content
+}
+
+async function saveRule() {
+  const wd = store.currentSession?.work_dir
+  if (!wd || !selectedRulePath.value) return
+  ruleSaving.value = true
+  try {
+    await api.writeProjectRule(wd, selectedRulePath.value, ruleContent.value)
+  } finally {
+    ruleSaving.value = false
+  }
+}
+
 function formatToolInput(raw: string): string {
   if (!raw) return ''
   try {
     const obj = JSON.parse(raw)
     if (typeof obj === 'object' && obj !== null) {
-      // Bash: show command
       if (obj.command) return obj.command
-      // Read/Edit/Write: show file path
       if (obj.file_path) return obj.file_path
-      // Grep/Search: show pattern + path
       if (obj.pattern) return obj.pattern + (obj.path ? ` in ${obj.path}` : '')
-      // Fallback: show first string value
       const firstVal = Object.values(obj).find((v) => typeof v === 'string' && (v as string).length > 0)
       if (firstVal) return String(firstVal).slice(0, 300)
     }
   } catch {
-    // Partial JSON — try to extract useful bits
     const cmdMatch = raw.match(/"command"\s*:\s*"((?:[^"\\]|\\.)*)/)
     if (cmdMatch?.[1]) return cmdMatch[1].replace(/\\"/g, '"').replace(/\\n/g, '\n')
     const fileMatch = raw.match(/"file_path"\s*:\s*"((?:[^"\\]|\\.)*)/)
@@ -94,9 +138,32 @@ function formatToolInput(raw: string): string {
 
 <template>
   <div class="chat-panel">
+    <!-- Chat header bar -->
+    <div v-if="store.currentSession" class="chat-header">
+      <div class="header-left">
+        <div class="header-title">{{ store.currentSession.title }}</div>
+        <div class="header-workdir">{{ displayWorkDir }}</div>
+      </div>
+      <div class="header-right">
+        <span class="header-context">{{ contextCount }} 条上下文</span>
+        <button
+          v-if="store.currentSession.work_dir"
+          class="btn-rules"
+          @click="openRulesModal"
+          title="项目规则"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+          </svg>
+          规则
+        </button>
+      </div>
+    </div>
+
     <div class="messages" ref="messagesEl">
+      <!-- __CONTINUE_HERE__ -->
       <div class="messages-inner">
-        <!-- Previous messages -->
         <div
           v-for="msg in allMessages"
           :key="msg.id"
@@ -241,6 +308,50 @@ function formatToolInput(raw: string): string {
         </div>
       </div>
     </div>
+
+    <!-- Rules modal -->
+    <Teleport to="body">
+      <div v-if="showRulesModal" class="modal-overlay" @click="showRulesModal = false">
+        <div class="rules-modal" @click.stop>
+          <div class="rules-modal-header">
+            <span class="rules-modal-title">项目规则</span>
+            <span class="rules-modal-dir">{{ displayWorkDir }}</span>
+            <button class="rules-modal-close" @click="showRulesModal = false">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 6L6 18M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+          <div class="rules-modal-body">
+            <div class="rules-file-list">
+              <div
+                v-for="f in ruleFiles"
+                :key="f.path"
+                class="rules-file-item"
+                :class="{ active: f.path === selectedRulePath }"
+                @click="selectRule(f.path)"
+              >
+                {{ f.name }}
+              </div>
+              <div v-if="ruleFiles.length === 0" class="rules-empty">暂无规则文件</div>
+            </div>
+            <div class="rules-editor">
+              <textarea
+                v-model="ruleContent"
+                class="rules-textarea"
+                placeholder="规则内容..."
+                :disabled="!selectedRulePath"
+              />
+              <div class="rules-editor-actions">
+                <button class="btn-save-rule" :disabled="!selectedRulePath || ruleSaving" @click="saveRule">
+                  {{ ruleSaving ? '保存中...' : '保存' }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -250,6 +361,58 @@ function formatToolInput(raw: string): string {
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+/* Chat header */
+.chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+  flex-shrink: 0;
+}
+.header-left { min-width: 0; }
+.header-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.header-workdir {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.header-context {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.btn-rules {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  transition: all var(--transition);
+}
+.btn-rules:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 .messages {
   flex: 1;
@@ -391,4 +554,84 @@ function formatToolInput(raw: string): string {
 .btn-send:disabled { color: var(--text-muted); cursor: not-allowed; }
 .btn-stop { color: var(--danger); }
 .btn-stop:hover { background: rgba(239, 68, 68, 0.1); }
+/* Rules modal */
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000;
+}
+.rules-modal {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  width: 680px; max-width: 90vw;
+  max-height: 80vh;
+  display: flex; flex-direction: column;
+}
+.rules-modal-header {
+  display: flex; align-items: center; gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.rules-modal-title {
+  font-size: 15px; font-weight: 600; color: var(--text-primary);
+}
+.rules-modal-dir {
+  font-size: 12px; color: var(--text-muted); flex: 1;
+}
+.rules-modal-close {
+  width: 28px; height: 28px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  transition: all var(--transition);
+}
+.rules-modal-close:hover {
+  color: var(--text-primary); background: var(--bg-hover);
+}
+.rules-modal-body {
+  display: flex; flex: 1; min-height: 0;
+}
+.rules-file-list {
+  width: 160px; border-right: 1px solid var(--border);
+  overflow-y: auto; padding: 8px;
+}
+.rules-file-item {
+  padding: 6px 10px; border-radius: var(--radius-sm);
+  font-size: 12px; color: var(--text-secondary);
+  cursor: pointer; transition: all var(--transition);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.rules-file-item:hover { background: var(--bg-hover); }
+.rules-file-item.active {
+  background: var(--accent-soft); color: var(--accent);
+}
+.rules-empty {
+  padding: 16px; text-align: center;
+  font-size: 12px; color: var(--text-muted);
+}
+.rules-editor {
+  flex: 1; display: flex; flex-direction: column; min-width: 0;
+}
+.rules-textarea {
+  flex: 1; resize: none; padding: 12px 16px;
+  font-size: 13px; line-height: 1.6;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  background: transparent; color: var(--text-primary);
+  min-height: 300px;
+}
+.rules-textarea::placeholder { color: var(--text-muted); }
+.rules-editor-actions {
+  padding: 8px 16px; border-top: 1px solid var(--border);
+  display: flex; justify-content: flex-end;
+}
+.btn-save-rule {
+  padding: 6px 16px; border-radius: var(--radius);
+  font-size: 13px; font-weight: 500;
+  background: var(--accent); color: #fff;
+  transition: opacity var(--transition);
+}
+.btn-save-rule:hover:not(:disabled) { opacity: 0.9; }
+.btn-save-rule:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
