@@ -86,3 +86,33 @@ export interface TemplateVar {
   value: string
 }
 export const getTemplateVars = () => request<TemplateVar[]>('/files/variables')
+
+// Skills
+export interface SkillItem {
+  name: string
+  description: string
+  source: string
+  path: string
+  enabled: boolean
+}
+export const listSkills = () => request<SkillItem[]>('/skills')
+export const toggleSkill = (name: string, source: string, enable: boolean) =>
+  request<{ ok: boolean }>('/skills/toggle', {
+    method: 'POST',
+    body: JSON.stringify({ name, source, enable }),
+  })
+
+// MCP
+export interface McpServerItem {
+  name: string
+  type: string
+  url: string
+  command: string
+  enabled: boolean
+}
+export const listMcpServers = () => request<McpServerItem[]>('/mcp')
+export const toggleMcpServer = (name: string, enable: boolean) =>
+  request<{ ok: boolean }>('/mcp/toggle', {
+    method: 'POST',
+    body: JSON.stringify({ name, enable }),
+  })

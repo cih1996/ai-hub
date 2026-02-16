@@ -42,6 +42,9 @@ func main() {
 	// Init template system
 	core.InitTemplates(*dataDir)
 
+	// Init API data dir (for skills disable path)
+	api.InitDataDir(*dataDir)
+
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.RedirectTrailingSlash = false
@@ -79,6 +82,14 @@ func main() {
 		// Status & deps
 		v1.GET("/status", api.GetStatus)
 		v1.POST("/status/retry-install", api.RetryInstall)
+
+		// Skills
+		v1.GET("/skills", api.ListSkills)
+		v1.POST("/skills/toggle", api.ToggleSkill)
+
+		// MCP
+		v1.GET("/mcp", api.ListMcp)
+		v1.POST("/mcp/toggle", api.ToggleMcp)
 	}
 
 	// WebSocket

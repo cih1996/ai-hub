@@ -8,6 +8,8 @@ const router = useRouter()
 const route = useRoute()
 
 const isManage = computed(() => route.path.startsWith('/manage'))
+const isSkills = computed(() => route.path.startsWith('/skills'))
+const isMcp = computed(() => route.path.startsWith('/mcp'))
 
 function newChat() {
   store.newChat()
@@ -62,6 +64,22 @@ function formatTime(dateStr: string) {
           <line x1="16" y1="17" x2="8" y2="17"/>
         </svg>
         <span>管理</span>
+      </button>
+      <button class="nav-item" :class="{ active: isSkills }" @click="router.push('/skills')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M22 11.08V12a10 10 0 11-5.93-9.14"/>
+          <polyline points="22 4 12 14.01 9 11.01"/>
+        </svg>
+        <span>技能</span>
+      </button>
+      <button class="nav-item" :class="{ active: isMcp }" @click="router.push('/mcp')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/>
+          <rect x="2" y="14" width="20" height="8" rx="2" ry="2"/>
+          <line x1="6" y1="6" x2="6.01" y2="6"/>
+          <line x1="6" y1="18" x2="6.01" y2="18"/>
+        </svg>
+        <span>MCP</span>
       </button>
     </div>
 
