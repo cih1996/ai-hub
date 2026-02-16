@@ -31,11 +31,12 @@ func (p *Provider) DetectMode() string {
 
 // Session 会话
 type Session struct {
-	ID         int64     `json:"id"`
-	Title      string    `json:"title"`
-	ProviderID string    `json:"provider_id"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID              int64     `json:"id"`
+	Title           string    `json:"title"`
+	ProviderID      string    `json:"provider_id"`
+	ClaudeSessionID string    `json:"claude_session_id"` // UUID for Claude Code CLI --session-id
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 // Message 消息

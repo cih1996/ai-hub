@@ -57,7 +57,12 @@ function formatTime(dateStr: string) {
         @click="selectSession(s.id)"
       >
         <div class="session-info">
-          <div class="session-title">{{ s.title }}</div>
+          <div class="session-title-row">
+            <svg v-if="s.streaming" class="streaming-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 12a9 9 0 11-6.219-8.56"/>
+            </svg>
+            <div class="session-title">{{ s.title }}</div>
+          </div>
           <div class="session-time">{{ formatTime(s.updated_at) }}</div>
         </div>
         <button
@@ -156,7 +161,20 @@ function formatTime(dateStr: string) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
 }
+.session-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.streaming-icon {
+  flex-shrink: 0;
+  color: var(--accent);
+  animation: spin 1s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 .session-time {
   font-size: 11px;
   color: var(--text-muted);

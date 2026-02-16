@@ -33,6 +33,13 @@ export const deleteSession = (id: number) =>
 export const getMessages = (sessionId: number) =>
   request<Message[]>(`/sessions/${sessionId}/messages`)
 
+// Chat
+export const sendChat = (sessionId: number, content: string) =>
+  request<{ session_id: number; status: string }>('/chat/send', {
+    method: 'POST',
+    body: JSON.stringify({ session_id: sessionId, content }),
+  })
+
 // Status
 export interface DepsStatus {
   node_installed: boolean

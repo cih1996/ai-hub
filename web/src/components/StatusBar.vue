@@ -5,9 +5,30 @@ import { getStatus, retryInstall, type DepsStatus } from '../composables/api'
 const status = ref<DepsStatus | null>(null)
 const polling = ref<number>()
 
+function needsPolling(s: DepsStatus): boolean {
+  return !s.node_installed || !s.npm_installed || !s.claude_installed || s.installing || !!s.install_error
+}
+
+function startPolling() {
+  if (polling.value) return
+  polling.value = window.setInterval(fetchStatus, 3000)
+}
+
+function stopPolling() {
+  if (polling.value) {
+    clearInterval(polling.value)
+    polling.value = undefined
+  }
+}
+
 async function fetchStatus() {
   try {
     status.value = await getStatus()
+    if (status.value && !needsPolling(status.value)) {
+      stopPolling()
+    } else if (!polling.value && status.value && needsPolling(status.value)) {
+      startPolling()
+    }
   } catch {
     // server not ready yet
   }
@@ -15,13 +36,13 @@ async function fetchStatus() {
 
 async function handleRetry() {
   await retryInstall()
+  startPolling()
   await fetchStatus()
 }
 
 const visible = computed(() => {
   if (!status.value) return false
-  return !status.value.node_installed || !status.value.npm_installed ||
-    !status.value.claude_installed || status.value.installing || status.value.install_error
+  return needsPolling(status.value)
 })
 
 const message = computed(() => {
@@ -47,11 +68,10 @@ const level = computed(() => {
 
 onMounted(() => {
   fetchStatus()
-  polling.value = window.setInterval(fetchStatus, 3000)
 })
 
 onUnmounted(() => {
-  if (polling.value) clearInterval(polling.value)
+  stopPolling()
 })
 </script>
 
@@ -110,69 +130,26 @@ onUnmounted(() => {
   border-color: rgba(239, 68, 68, 0.15);
 }
 .status-content {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  flex: 1;
+  display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1;
 }
 .status-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
+  display: flex; flex-direction: column; gap: 2px; min-width: 0;
 }
 .status-text > span {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .hint {
-  font-size: 11px;
-  opacity: 0.75;
+  font-size: 11px; opacity: 0.75;
   font-family: 'SF Mono', 'Fira Code', monospace;
 }
-.status-actions {
-  display: flex;
-  gap: 8px;
-  flex-shrink: 0;
-  margin-left: 12px;
+.status-actions { display: flex; gap: 8px; flex-shrink: 0; margin-left: 12px; }
+.retry-btn, .link-btn {
+  padding: 3px 10px; border-radius: 4px; font-size: 11px; font-weight: 600;
+  background: rgba(255,255,255,0.1); color: inherit; transition: background 0.15s;
 }
-.retry-btn {
-  padding: 3px 10px;
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 600;
-  background: rgba(255,255,255,0.1);
-  color: inherit;
-  transition: background 0.15s;
-}
-.retry-btn:hover {
-  background: rgba(255,255,255,0.18);
-}
-.link-btn {
-  padding: 3px 10px;
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 600;
-  background: rgba(255,255,255,0.1);
-  color: inherit;
-  transition: background 0.15s;
-}
-.link-btn:hover {
-  background: rgba(255,255,255,0.18);
-}
-.spin {
-  animation: spin 1s linear infinite;
-}
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-.slide-enter-active, .slide-leave-active {
-  transition: all 0.3s ease;
-}
-.slide-enter-from, .slide-leave-to {
-  opacity: 0;
-  transform: translateY(-100%);
-}
+.retry-btn:hover, .link-btn:hover { background: rgba(255,255,255,0.18); }
+.spin { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.slide-enter-active, .slide-leave-active { transition: all 0.3s ease; }
+.slide-enter-from, .slide-leave-to { opacity: 0; transform: translateY(-100%); }
 </style>

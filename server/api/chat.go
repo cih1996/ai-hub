@@ -6,9 +6,9 @@ import (
 	"ai-hub/server/store"
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/gin-gonic/gin"
@@ -20,14 +20,105 @@ var upgrader = websocket.Upgrader{
 }
 
 type WSMessage struct {
-	Type      string `json:"type"` // "chat" | "stop" | "error" | "chunk" | "done" | "session_created" | "title_update"
+	Type      string `json:"type"` // "chat" | "stop" | "subscribe" | "error" | "chunk" | "thinking" | "tool_start" | "tool_input" | "tool_result" | "done" | "session_created" | "streaming_status" | "session_update"
 	SessionID int64  `json:"session_id"`
 	Content   string `json:"content"`
+	ToolID    string `json:"tool_id,omitempty"`
+	ToolName  string `json:"tool_name,omitempty"`
+}
+
+// ---- WS Client Hub: tracks all connected clients for broadcasting ----
+
+type wsClient struct {
+	mu   sync.Mutex
+	conn *websocket.Conn
+}
+
+func (c *wsClient) Send(msg WSMessage) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.conn.WriteJSON(msg)
 }
 
 var (
-	claudeClient = core.NewClaudeCodeClient()
-	openaiClient = core.NewOpenAIClient()
+	wsClients   = make(map[*wsClient]struct{})
+	wsClientsMu sync.RWMutex
+)
+
+func registerClient(c *wsClient) {
+	wsClientsMu.Lock()
+	wsClients[c] = struct{}{}
+	wsClientsMu.Unlock()
+}
+
+func unregisterClient(c *wsClient) {
+	wsClientsMu.Lock()
+	delete(wsClients, c)
+	wsClientsMu.Unlock()
+}
+
+// Broadcast sends a message to ALL connected WS clients
+func broadcast(msg WSMessage) {
+	wsClientsMu.RLock()
+	defer wsClientsMu.RUnlock()
+	for c := range wsClients {
+		go c.Send(msg)
+	}
+}
+
+// IsSessionStreaming checks if a session is currently active
+func IsSessionStreaming(sessionID int64) bool {
+	activeStreamsMu.RLock()
+	defer activeStreamsMu.RUnlock()
+	_, ok := activeStreams[sessionID]
+	return ok
+}
+
+// GetStreamingSessionIDs returns all currently streaming session IDs
+func GetStreamingSessionIDs() map[int64]bool {
+	activeStreamsMu.RLock()
+	defer activeStreamsMu.RUnlock()
+	result := make(map[int64]bool, len(activeStreams))
+	for id := range activeStreams {
+		result[id] = true
+	}
+	return result
+}
+
+// ActiveStream tracks an in-progress chat stream so new WS connections can reattach
+type ActiveStream struct {
+	mu       sync.Mutex
+	sendFn   func(WSMessage)
+	cancelFn context.CancelFunc
+}
+
+func (s *ActiveStream) Send(msg WSMessage) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sendFn != nil {
+		s.sendFn(msg)
+	}
+}
+
+func (s *ActiveStream) SwapSend(fn func(WSMessage)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sendFn = fn
+}
+
+func (s *ActiveStream) Cancel() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cancelFn != nil {
+		s.cancelFn()
+	}
+}
+
+var (
+	claudeClient    = core.NewClaudeCodeClient()
+	openaiClient    = core.NewOpenAIClient()
+	activeStreams    = make(map[int64]*ActiveStream)
+	activeStreamsMu sync.RWMutex
 )
 
 func HandleChat(c *gin.Context) {
@@ -38,14 +129,15 @@ func HandleChat(c *gin.Context) {
 	}
 	defer conn.Close()
 
-	var mu sync.Mutex
+	client := &wsClient{conn: conn}
+	registerClient(client)
+	defer unregisterClient(client)
+
 	sendJSON := func(msg WSMessage) {
-		mu.Lock()
-		defer mu.Unlock()
-		conn.WriteJSON(msg)
+		client.Send(msg)
 	}
 
-	var cancelFn context.CancelFunc
+	var subscribedSessionID int64
 
 	for {
 		_, raw, err := conn.ReadMessage()
@@ -59,87 +151,140 @@ func HandleChat(c *gin.Context) {
 
 		switch msg.Type {
 		case "stop":
-			if cancelFn != nil {
-				cancelFn()
+			if subscribedSessionID > 0 {
+				activeStreamsMu.RLock()
+				stream, ok := activeStreams[subscribedSessionID]
+				activeStreamsMu.RUnlock()
+				if ok {
+					stream.Cancel()
+				}
 			}
-		case "chat":
-			go func(msg WSMessage) {
-				handleChatMessage(msg, sendJSON, &cancelFn)
-			}(msg)
+		case "subscribe":
+			subscribedSessionID = msg.SessionID
+			activeStreamsMu.RLock()
+			stream, ok := activeStreams[msg.SessionID]
+			activeStreamsMu.RUnlock()
+			if ok {
+				stream.SwapSend(sendJSON)
+				sendJSON(WSMessage{Type: "streaming_status", SessionID: msg.SessionID, Content: "streaming"})
+			}
 		}
 	}
 }
 
-func handleChatMessage(msg WSMessage, send func(WSMessage), cancelFn *context.CancelFunc) {
-	ctx, cancel := context.WithCancel(context.Background())
-	*cancelFn = cancel
-	defer cancel()
+// SendChat handles POST /api/v1/chat/send
+// Validates/creates session, saves user message, kicks off streaming in background, returns immediately.
+func SendChat(c *gin.Context) {
+	var req struct {
+		SessionID int64  `json:"session_id"`
+		Content   string `json:"content"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: " + err.Error()})
+		return
+	}
+	if strings.TrimSpace(req.Content) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "content is required"})
+		return
+	}
 
 	var session *model.Session
+	isNewSession := req.SessionID == 0
 
-	if msg.SessionID == 0 {
-		// Auto-create session on first message
+	if isNewSession {
 		provider, err := store.GetDefaultProvider()
 		if err != nil {
-			send(WSMessage{Type: "error", Content: "No default provider configured. Go to Settings to add one."})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "No default provider configured. Go to Settings to add one."})
 			return
 		}
-		session, err = store.CreateSessionWithMessage(provider.ID, msg.Content)
+		session, err = store.CreateSessionWithMessage(provider.ID, req.Content)
 		if err != nil {
-			send(WSMessage{Type: "error", Content: "create session failed: " + err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "create session failed: " + err.Error()})
 			return
 		}
-		// Notify frontend of the new session
+		// Broadcast new session to all connected clients
 		sessionJSON, _ := json.Marshal(session)
-		send(WSMessage{Type: "session_created", SessionID: session.ID, Content: string(sessionJSON)})
+		broadcast(WSMessage{Type: "session_created", SessionID: session.ID, Content: string(sessionJSON)})
 	} else {
 		var err error
-		session, err = store.GetSession(msg.SessionID)
+		session, err = store.GetSession(req.SessionID)
 		if err != nil {
-			send(WSMessage{Type: "error", Content: "session not found"})
+			c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
 			return
 		}
-		// Save user message
+		// Check if session is already streaming
+		if IsSessionStreaming(session.ID) {
+			c.JSON(http.StatusConflict, gin.H{"error": "session is already processing"})
+			return
+		}
 		userMsg := &model.Message{
 			SessionID: session.ID,
 			Role:      "user",
-			Content:   msg.Content,
+			Content:   req.Content,
 		}
 		if err := store.AddMessage(userMsg); err != nil {
-			send(WSMessage{Type: "error", Content: "save message failed: " + err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "save message failed: " + err.Error()})
 			return
 		}
 	}
 
-	// Get provider
+	// Kick off streaming in background — results are pushed via WS broadcast
+	go runStream(session, req.Content, isNewSession)
+
+	c.JSON(http.StatusOK, gin.H{
+		"session_id": session.ID,
+		"status":     "started",
+	})
+}
+
+// runStream executes the AI streaming in background, pushing events via WS to subscribed clients
+func runStream(session *model.Session, query string, isNewSession bool) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start with a no-op send — a client will attach via "subscribe"
+	stream := &ActiveStream{sendFn: func(WSMessage) {}, cancelFn: cancel}
+
+	// Register active stream so clients can subscribe
+	activeStreamsMu.Lock()
+	activeStreams[session.ID] = stream
+	activeStreamsMu.Unlock()
+	broadcast(WSMessage{Type: "session_update", SessionID: session.ID, Content: "streaming"})
+	defer func() {
+		activeStreamsMu.Lock()
+		delete(activeStreams, session.ID)
+		activeStreamsMu.Unlock()
+		broadcast(WSMessage{Type: "session_update", SessionID: session.ID, Content: "idle"})
+	}()
+
 	provider, err := store.GetProvider(session.ProviderID)
 	if err != nil {
-		send(WSMessage{Type: "error", Content: "provider not found: " + err.Error()})
+		stream.Send(WSMessage{Type: "error", SessionID: session.ID, Content: "provider not found: " + err.Error()})
 		return
 	}
 
 	var fullResponse string
-	sid := fmt.Sprintf("%d", session.ID)
+
+	log.Printf("[chat] session=%d provider=%s mode=%s model=%s base_url=%s",
+		session.ID, provider.Name, provider.Mode, provider.ModelID, provider.BaseURL)
 
 	switch provider.Mode {
 	case "claude-code":
-		err = streamClaudeCode(ctx, provider, msg.Content, sid, func(chunk string) {
-			fullResponse += chunk
-			send(WSMessage{Type: "chunk", SessionID: session.ID, Content: chunk})
-		})
+		isResume := !isNewSession
+		fullResponse, err = streamClaudeCode(ctx, provider, query, session.ClaudeSessionID, isResume, stream.Send, session.ID)
 	default:
 		err = streamOpenAI(ctx, provider, session.ID, func(chunk string) {
 			fullResponse += chunk
-			send(WSMessage{Type: "chunk", SessionID: session.ID, Content: chunk})
+			stream.Send(WSMessage{Type: "chunk", SessionID: session.ID, Content: chunk})
 		})
 	}
 
 	if err != nil {
-		send(WSMessage{Type: "error", SessionID: session.ID, Content: err.Error()})
+		log.Printf("[chat] error: %v", err)
+		stream.Send(WSMessage{Type: "error", SessionID: session.ID, Content: err.Error()})
 		return
 	}
 
-	// Save assistant message
 	if fullResponse != "" {
 		assistantMsg := &model.Message{
 			SessionID: session.ID,
@@ -149,53 +294,105 @@ func handleChatMessage(msg WSMessage, send func(WSMessage), cancelFn *context.Ca
 		store.AddMessage(assistantMsg)
 	}
 
-	send(WSMessage{Type: "done", SessionID: session.ID})
+	stream.Send(WSMessage{Type: "done", SessionID: session.ID})
 }
 
-func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID string, onChunk func(string)) error {
+func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID string, resume bool, send func(WSMessage), sessID int64) (string, error) {
 	req := core.ClaudeCodeRequest{
 		Query:     query,
 		SessionID: sessionID,
+		Resume:    resume,
 		BaseURL:   p.BaseURL,
 		APIKey:    p.APIKey,
 		ModelID:   p.ModelID,
 	}
-	return claudeClient.Stream(ctx, req, func(line string) {
-		var evt struct {
-			Type    string `json:"type"`
-			Content []struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			} `json:"content"`
+	var fullResponse string
+
+	// Track content block index -> tool ID for correlating deltas
+	toolIDs := make(map[int]string)
+
+	err := claudeClient.Stream(ctx, req, func(line string) {
+		// First parse the top-level wrapper
+		var wrapper struct {
+			Type    string          `json:"type"`
+			Subtype string          `json:"subtype"`
+			Result  string          `json:"result"`
+			Event   json.RawMessage `json:"event"`
 		}
-		if err := json.Unmarshal([]byte(line), &evt); err != nil {
+		if err := json.Unmarshal([]byte(line), &wrapper); err != nil {
 			return
 		}
-		switch evt.Type {
-		case "content_block_delta":
-			var delta struct {
+
+		switch wrapper.Type {
+		case "stream_event":
+			// Real-time streaming events from --include-partial-messages
+			var inner struct {
+				Type         string `json:"type"`
+				Index        int    `json:"index"`
+				ContentBlock struct {
+					Type string `json:"type"`
+					Name string `json:"name"`
+					ID   string `json:"id"`
+				} `json:"content_block"`
 				Delta struct {
-					Text string `json:"text"`
+					Type        string `json:"type"`
+					Text        string `json:"text"`
+					Thinking    string `json:"thinking"`
+					PartialJSON string `json:"partial_json"`
 				} `json:"delta"`
 			}
-			if err := json.Unmarshal([]byte(line), &delta); err == nil && delta.Delta.Text != "" {
-				onChunk(delta.Delta.Text)
+			if err := json.Unmarshal(wrapper.Event, &inner); err != nil {
+				return
 			}
-		case "assistant":
-			for _, c := range evt.Content {
-				if c.Type == "text" && c.Text != "" {
-					onChunk(c.Text)
+
+			switch inner.Type {
+			case "content_block_start":
+				if inner.ContentBlock.Type == "tool_use" {
+					toolIDs[inner.Index] = inner.ContentBlock.ID
+					send(WSMessage{
+						Type:      "tool_start",
+						SessionID: sessID,
+						ToolID:    inner.ContentBlock.ID,
+						ToolName:  inner.ContentBlock.Name,
+						Content:   inner.ContentBlock.Name,
+					})
+				}
+			case "content_block_delta":
+				switch inner.Delta.Type {
+				case "text_delta":
+					if inner.Delta.Text != "" {
+						fullResponse += inner.Delta.Text
+						send(WSMessage{Type: "chunk", SessionID: sessID, Content: inner.Delta.Text})
+					}
+				case "thinking_delta":
+					if inner.Delta.Thinking != "" {
+						send(WSMessage{Type: "thinking", SessionID: sessID, Content: inner.Delta.Thinking})
+					}
+				case "input_json_delta":
+					if inner.Delta.PartialJSON != "" {
+						toolID := toolIDs[inner.Index]
+						send(WSMessage{Type: "tool_input", SessionID: sessID, ToolID: toolID, Content: inner.Delta.PartialJSON})
+					}
+				}
+			case "content_block_stop":
+				if toolID, ok := toolIDs[inner.Index]; ok {
+					send(WSMessage{Type: "tool_result", SessionID: sessID, ToolID: toolID})
+					delete(toolIDs, inner.Index)
 				}
 			}
+
 		case "result":
-			var result struct {
-				Result string `json:"result"`
+			if wrapper.Subtype == "success" && wrapper.Result != "" && fullResponse == "" {
+				fullResponse = wrapper.Result
+				send(WSMessage{Type: "chunk", SessionID: sessID, Content: wrapper.Result})
+			} else if wrapper.Subtype == "error" && wrapper.Result != "" {
+				send(WSMessage{Type: "error", SessionID: sessID, Content: wrapper.Result})
 			}
-			if err := json.Unmarshal([]byte(line), &result); err == nil && result.Result != "" {
-				onChunk(result.Result)
-			}
+
+		// Ignore "assistant" and "system" types — they are duplicates of stream_event data
 		}
 	})
+	return fullResponse, err
 }
 
 func streamOpenAI(ctx context.Context, p *model.Provider, sessionID int64, onChunk func(string)) error {

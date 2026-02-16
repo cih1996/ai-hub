@@ -1,15 +1,17 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Session, Message, Provider, WSMessage } from '../types'
+import type { Session, Message, Provider, WSMessage, ToolCall } from '../types'
 import * as api from '../composables/api'
 
 export const useChatStore = defineStore('chat', () => {
   const sessions = ref<Session[]>([])
-  const currentSessionId = ref<number>(0) // 0 = new empty chat
+  const currentSessionId = ref<number>(0)
   const messages = ref<Message[]>([])
   const providers = ref<Provider[]>([])
   const streaming = ref(false)
   const streamingContent = ref('')
+  const thinkingContent = ref('')
+  const toolCalls = ref<ToolCall[]>([])
   const ws = ref<WebSocket | null>(null)
 
   const currentSession = computed(() =>
@@ -20,9 +22,6 @@ export const useChatStore = defineStore('chat', () => {
     providers.value.find((p) => p.is_default) || providers.value[0]
   )
 
-  // Always show chat panel (even when id=0, it's a blank chat)
-  const hasChatPanel = computed(() => true)
-
   function connectWS() {
     if (ws.value && ws.value.readyState === WebSocket.OPEN) return
 
@@ -30,19 +29,78 @@ export const useChatStore = defineStore('chat', () => {
     const wsUrl = `${protocol}//${location.host}/ws/chat`
     ws.value = new WebSocket(wsUrl)
 
+    ws.value.onopen = () => {
+      // Reattach to active stream if viewing a session
+      if (currentSessionId.value > 0) {
+        ws.value?.send(JSON.stringify({ type: 'subscribe', session_id: currentSessionId.value }))
+      }
+    }
+
     ws.value.onmessage = (event) => {
       const msg: WSMessage = JSON.parse(event.data)
-      switch (msg.type) {
-        case 'session_created': {
-          // Backend created a new session for us
-          const newSession: Session = JSON.parse(msg.content)
+
+      // session_created: add to list if not already present
+      if (msg.type === 'session_created') {
+        const newSession: Session = JSON.parse(msg.content)
+        // Deduplicate: broadcast sends to all clients including the originator
+        if (!sessions.value.some((s) => s.id === newSession.id)) {
           sessions.value.unshift(newSession)
+        }
+        // Only take over navigation if we're the one who created it (id was 0)
+        if (currentSessionId.value === 0) {
           currentSessionId.value = newSession.id
-          // Update URL without full navigation
           window.history.replaceState({}, '', `/chat/${newSession.id}`)
+        }
+        return
+      }
+
+      // session_update: broadcast from server about any session's streaming status
+      if (msg.type === 'session_update') {
+        const s = sessions.value.find((s) => s.id === msg.session_id)
+        if (s) {
+          s.streaming = msg.content === 'streaming'
+        }
+        return
+      }
+
+      // All other events: ignore if not for the current session
+      if (msg.session_id !== currentSessionId.value) return
+
+      switch (msg.type) {
+        case 'streaming_status':
+          streaming.value = true
+          break
+        case 'thinking':
+          thinkingContent.value += msg.content
+          break
+        case 'tool_start': {
+          const tc: ToolCall = {
+            id: msg.tool_id || String(Date.now()),
+            name: msg.tool_name || msg.content,
+            input: '',
+            status: 'running',
+          }
+          toolCalls.value.push(tc)
+          break
+        }
+        case 'tool_input': {
+          const tc = toolCalls.value.find((t) => t.id === msg.tool_id)
+          if (tc) {
+            tc.input += msg.content
+          }
+          break
+        }
+        case 'tool_result': {
+          const tc = toolCalls.value.find((t) => t.id === msg.tool_id)
+          if (tc) {
+            tc.status = 'done'
+          }
           break
         }
         case 'chunk':
+          for (const tc of toolCalls.value) {
+            if (tc.status === 'running') tc.status = 'done'
+          }
           streamingContent.value += msg.content
           break
         case 'done':
@@ -56,10 +114,14 @@ export const useChatStore = defineStore('chat', () => {
             })
           }
           streamingContent.value = ''
+          thinkingContent.value = ''
+          toolCalls.value = []
           streaming.value = false
           break
         case 'error':
           streamingContent.value = ''
+          thinkingContent.value = ''
+          toolCalls.value = []
           streaming.value = false
           messages.value.push({
             id: Date.now(),
@@ -87,16 +149,28 @@ export const useChatStore = defineStore('chat', () => {
 
   async function selectSession(id: number) {
     currentSessionId.value = id
+    streaming.value = false
+    streamingContent.value = ''
+    thinkingContent.value = ''
+    toolCalls.value = []
     if (id === 0) {
       messages.value = []
     } else {
       messages.value = await api.getMessages(id)
+      // Subscribe to check if this session is still streaming
+      if (ws.value && ws.value.readyState === WebSocket.OPEN) {
+        ws.value.send(JSON.stringify({ type: 'subscribe', session_id: id }))
+      }
     }
   }
 
   function newChat() {
     currentSessionId.value = 0
     messages.value = []
+    streaming.value = false
+    streamingContent.value = ''
+    thinkingContent.value = ''
+    toolCalls.value = []
   }
 
   async function deleteSessionById(id: number) {
@@ -107,15 +181,9 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function sendMessage(content: string) {
-    if (!ws.value || ws.value.readyState !== WebSocket.OPEN) {
-      connectWS()
-      setTimeout(() => sendMessage(content), 500)
-      return
-    }
+  async function sendMessage(content: string) {
     if (streaming.value) return
 
-    // Add user message to local list immediately
     messages.value.push({
       id: Date.now(),
       session_id: currentSessionId.value,
@@ -126,14 +194,30 @@ export const useChatStore = defineStore('chat', () => {
 
     streaming.value = true
     streamingContent.value = ''
+    thinkingContent.value = ''
+    toolCalls.value = []
 
-    // session_id=0 means "create new session for me"
-    const msg: WSMessage = {
-      type: 'chat',
-      session_id: currentSessionId.value,
-      content,
+    try {
+      const resp = await api.sendChat(currentSessionId.value, content)
+      // If it was a new session (id=0), update to the real session ID
+      if (currentSessionId.value === 0 && resp.session_id) {
+        currentSessionId.value = resp.session_id
+        window.history.replaceState({}, '', `/chat/${resp.session_id}`)
+      }
+      // Subscribe to this session's stream events
+      if (ws.value && ws.value.readyState === WebSocket.OPEN) {
+        ws.value.send(JSON.stringify({ type: 'subscribe', session_id: resp.session_id }))
+      }
+    } catch (e: any) {
+      streaming.value = false
+      messages.value.push({
+        id: Date.now(),
+        session_id: currentSessionId.value,
+        role: 'assistant',
+        content: `Error: ${e.message}`,
+        created_at: new Date().toISOString(),
+      })
     }
-    ws.value.send(JSON.stringify(msg))
   }
 
   function stopStreaming() {
@@ -149,9 +233,10 @@ export const useChatStore = defineStore('chat', () => {
     messages,
     providers,
     defaultProvider,
-    hasChatPanel,
     streaming,
     streamingContent,
+    thinkingContent,
+    toolCalls,
     connectWS,
     loadProviders,
     loadSessions,

@@ -4,18 +4,21 @@ import (
 	"ai-hub/server/model"
 	"fmt"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 func CreateSession(s *model.Session) error {
 	now := time.Now()
 	s.CreatedAt = now
 	s.UpdatedAt = now
+	s.ClaudeSessionID = uuid.New().String()
 	if s.Title == "" {
 		s.Title = "New Chat"
 	}
 	result, err := DB.Exec(
-		`INSERT INTO sessions (title, provider_id, created_at, updated_at) VALUES (?, ?, ?, ?)`,
-		s.Title, s.ProviderID, s.CreatedAt, s.UpdatedAt,
+		`INSERT INTO sessions (title, provider_id, claude_session_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+		s.Title, s.ProviderID, s.ClaudeSessionID, s.CreatedAt, s.UpdatedAt,
 	)
 	if err != nil {
 		return err
@@ -29,7 +32,7 @@ func CreateSession(s *model.Session) error {
 }
 
 func ListSessions() ([]model.Session, error) {
-	rows, err := DB.Query(`SELECT id, title, provider_id, created_at, updated_at FROM sessions ORDER BY updated_at DESC`)
+	rows, err := DB.Query(`SELECT id, title, provider_id, claude_session_id, created_at, updated_at FROM sessions ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -37,7 +40,7 @@ func ListSessions() ([]model.Session, error) {
 	var list []model.Session
 	for rows.Next() {
 		var s model.Session
-		if err := rows.Scan(&s.ID, &s.Title, &s.ProviderID, &s.CreatedAt, &s.UpdatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.Title, &s.ProviderID, &s.ClaudeSessionID, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			return nil, err
 		}
 		list = append(list, s)
@@ -48,8 +51,8 @@ func ListSessions() ([]model.Session, error) {
 func GetSession(id int64) (*model.Session, error) {
 	var s model.Session
 	err := DB.QueryRow(
-		`SELECT id, title, provider_id, created_at, updated_at FROM sessions WHERE id = ?`, id,
-	).Scan(&s.ID, &s.Title, &s.ProviderID, &s.CreatedAt, &s.UpdatedAt)
+		`SELECT id, title, provider_id, claude_session_id, created_at, updated_at FROM sessions WHERE id = ?`, id,
+	).Scan(&s.ID, &s.Title, &s.ProviderID, &s.ClaudeSessionID, &s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +91,6 @@ func AddMessage(m *model.Message) error {
 		return err
 	}
 	m.ID = id
-	// update session updated_at
 	_, err = DB.Exec(`UPDATE sessions SET updated_at = ? WHERE id = ?`, m.CreatedAt, m.SessionID)
 	return err
 }
@@ -113,14 +115,6 @@ func GetMessages(sessionID int64) ([]model.Message, error) {
 	return list, nil
 }
 
-// GetSessionCount returns total number of sessions (for generating titles)
-func GetSessionCount() (int64, error) {
-	var count int64
-	err := DB.QueryRow(`SELECT COUNT(*) FROM sessions`).Scan(&count)
-	return count, err
-}
-
-// CreateSessionWithMessage atomically creates a session and its first message
 func CreateSessionWithMessage(providerID string, content string) (*model.Session, error) {
 	s := &model.Session{
 		Title:      truncateTitle(content),
@@ -141,7 +135,6 @@ func CreateSessionWithMessage(providerID string, content string) (*model.Session
 }
 
 func truncateTitle(s string) string {
-	// Use first line, max 50 chars
 	for i, c := range s {
 		if c == '\n' || c == '\r' {
 			s = s[:i]

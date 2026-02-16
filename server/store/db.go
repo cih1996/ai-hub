@@ -41,6 +41,7 @@ func migrate() error {
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		title TEXT NOT NULL DEFAULT 'New Chat',
 		provider_id TEXT NOT NULL DEFAULT '',
+		claude_session_id TEXT NOT NULL DEFAULT '',
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);

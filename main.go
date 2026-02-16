@@ -62,6 +62,9 @@ func main() {
 		v1.DELETE("/sessions/:id", api.DeleteSession)
 		v1.GET("/sessions/:id/messages", api.GetMessages)
 
+		// Chat
+		v1.POST("/chat/send", api.SendChat)
+
 		// Status & deps
 		v1.GET("/status", api.GetStatus)
 		v1.POST("/status/retry-install", api.RetryInstall)

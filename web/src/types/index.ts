@@ -14,6 +14,7 @@ export interface Session {
   id: number
   title: string
   provider_id: string
+  streaming: boolean
   created_at: string
   updated_at: string
 }
@@ -27,7 +28,16 @@ export interface Message {
 }
 
 export interface WSMessage {
-  type: 'chat' | 'stop' | 'error' | 'chunk' | 'done' | 'session_created' | 'title_update'
+  type: 'chat' | 'stop' | 'subscribe' | 'error' | 'chunk' | 'thinking' | 'tool_start' | 'tool_input' | 'tool_result' | 'done' | 'session_created' | 'streaming_status' | 'session_update'
   session_id: number
   content: string
+  tool_id?: string
+  tool_name?: string
+}
+
+export interface ToolCall {
+  id: string
+  name: string
+  input: string
+  status: 'running' | 'done'
 }

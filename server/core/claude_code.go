@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
+	"strings"
+	"sync"
 )
 
-// ClaudeCodeClient wraps the claude CLI
 type ClaudeCodeClient struct {
 	BinaryPath string
 }
@@ -25,12 +27,12 @@ type StreamEvent struct {
 type ClaudeCodeRequest struct {
 	Query        string
 	SessionID    string
+	Resume       bool // true = continue existing session (--resume), false = new session (--session-id)
 	SystemPrompt string
 	MaxBudget    float64
-	// Provider config - injected as env vars
-	BaseURL string
-	APIKey  string
-	ModelID string
+	BaseURL      string
+	APIKey       string
+	ModelID      string
 }
 
 func NewClaudeCodeClient() *ClaudeCodeClient {
@@ -38,10 +40,22 @@ func NewClaudeCodeClient() *ClaudeCodeClient {
 }
 
 func (c *ClaudeCodeClient) Stream(ctx context.Context, req ClaudeCodeRequest, onData func(string)) error {
-	args := []string{"-p", req.Query, "--output-format", "stream-json", "--verbose"}
+	// Build flags first, query last — matches documented CLI patterns
+	args := []string{
+		"-p",
+		"--verbose",
+		"--output-format", "stream-json",
+		"--include-partial-messages",
+	}
 
 	if req.SessionID != "" {
-		args = append(args, "--session-id", req.SessionID)
+		if req.Resume {
+			// Continue existing CLI session
+			args = append(args, "--resume", req.SessionID)
+		} else {
+			// Create new CLI session with specific UUID
+			args = append(args, "--session-id", req.SessionID)
+		}
 	}
 	if req.SystemPrompt != "" {
 		args = append(args, "--system-prompt", req.SystemPrompt)
@@ -53,17 +67,19 @@ func (c *ClaudeCodeClient) Stream(ctx context.Context, req ClaudeCodeRequest, on
 		args = append(args, "--model", req.ModelID)
 	}
 
-	// System-level, max permissions, no workspace restriction
+	// Max permissions - skip all permission prompts
 	args = append(args, "--dangerously-skip-permissions")
-	args = append(args, "--permission-mode", "full")
+
+	// Query must be the last positional argument
+	args = append(args, req.Query)
 
 	cmd := exec.CommandContext(ctx, c.BinaryPath, args...)
 
-	// Working directory: use home dir (system-level, not tied to any project)
+	// System-level: run from home dir, not tied to any project
 	home, _ := os.UserHomeDir()
 	cmd.Dir = home
 
-	// Inherit current env, then override with provider config
+	// Inject provider config as env vars
 	cmd.Env = os.Environ()
 	if req.APIKey != "" {
 		cmd.Env = append(cmd.Env, "ANTHROPIC_API_KEY="+req.APIKey)
@@ -71,6 +87,9 @@ func (c *ClaudeCodeClient) Stream(ctx context.Context, req ClaudeCodeRequest, on
 	if req.BaseURL != "" {
 		cmd.Env = append(cmd.Env, "ANTHROPIC_BASE_URL="+req.BaseURL)
 	}
+
+	log.Printf("[claude] cmd: %s %s", c.BinaryPath, strings.Join(args, " "))
+	log.Printf("[claude] env: ANTHROPIC_BASE_URL=%s ANTHROPIC_API_KEY=%s...", req.BaseURL, maskKey(req.APIKey))
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -85,22 +104,51 @@ func (c *ClaudeCodeClient) Stream(ctx context.Context, req ClaudeCodeRequest, on
 		return fmt.Errorf("start claude: %w", err)
 	}
 
+	// Collect stderr in background
+	var stderrBuf strings.Builder
+	var stderrMu sync.Mutex
 	go func() {
 		buf, _ := io.ReadAll(stderr)
-		if len(buf) > 0 {
-			onData(fmt.Sprintf("[stderr] %s", string(buf)))
-		}
+		stderrMu.Lock()
+		stderrBuf.Write(buf)
+		stderrMu.Unlock()
 	}()
 
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	gotData := false
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {
 			continue
 		}
+		gotData = true
 		onData(line)
 	}
 
-	return cmd.Wait()
+	waitErr := cmd.Wait()
+	if waitErr != nil {
+		stderrMu.Lock()
+		errOutput := strings.TrimSpace(stderrBuf.String())
+		stderrMu.Unlock()
+		log.Printf("[claude] exit error: %v, stderr: %s", waitErr, errOutput)
+		if errOutput != "" {
+			return fmt.Errorf("claude CLI error: %s", errOutput)
+		}
+		// If we got valid data on stdout but stderr is empty, treat as success
+		// Claude CLI sometimes exits with status 1 even after producing valid output
+		if gotData {
+			log.Printf("[claude] ignoring exit status (got valid output)")
+			return nil
+		}
+		return fmt.Errorf("claude CLI failed: %w", waitErr)
+	}
+	return nil
+}
+
+func maskKey(key string) string {
+	if len(key) < 8 {
+		return "***"
+	}
+	return key[:4] + "***" + key[len(key)-4:]
 }
