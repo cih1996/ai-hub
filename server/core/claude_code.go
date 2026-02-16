@@ -34,6 +34,7 @@ type ClaudeCodeRequest struct {
 	APIKey       string
 	ModelID      string
 	WorkDir      string // 工作目录，空 = home
+	HubSessionID int64  // AI Hub 会话 ID，注入为环境变量
 }
 
 func NewClaudeCodeClient() *ClaudeCodeClient {
@@ -91,6 +92,9 @@ func (c *ClaudeCodeClient) Stream(ctx context.Context, req ClaudeCodeRequest, on
 	}
 	if req.BaseURL != "" {
 		cmd.Env = append(cmd.Env, "ANTHROPIC_BASE_URL="+req.BaseURL)
+	}
+	if req.HubSessionID > 0 {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("AI_HUB_SESSION_ID=%d", req.HubSessionID))
 	}
 
 	log.Printf("[claude] cmd: %s %s", c.BinaryPath, strings.Join(args, " "))

@@ -16,6 +16,7 @@ export interface Session {
   provider_id: string
   work_dir: string
   streaming: boolean
+  has_triggers: boolean
   created_at: string
   updated_at: string
 }
@@ -41,4 +42,19 @@ export interface ToolCall {
   name: string
   input: string
   status: 'running' | 'done'
+}
+
+export interface Trigger {
+  id: number
+  session_id: number
+  content: string
+  trigger_time: string
+  max_fires: number
+  enabled: boolean
+  fired_count: number
+  status: string
+  next_fire_at: string
+  last_fired_at: string
+  created_at: string
+  updated_at: string
 }

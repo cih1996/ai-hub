@@ -22,6 +22,11 @@ var frontendFS embed.FS
 //go:embed skills/*
 var builtinSkillsFS embed.FS
 
+var (
+	Version = "dev"
+	BuildAt = ""
+)
+
 func main() {
 	port := flag.Int("port", 8080, "server port")
 	dataDir := flag.String("data", "", "data directory (default: ~/.ai-hub)")
@@ -101,6 +106,12 @@ func main() {
 		// MCP
 		v1.GET("/mcp", api.ListMcp)
 		v1.POST("/mcp/toggle", api.ToggleMcp)
+
+		// Triggers
+		v1.GET("/triggers", api.ListTriggers)
+		v1.POST("/triggers", api.CreateTrigger)
+		v1.PUT("/triggers/:id", api.UpdateTrigger)
+		v1.DELETE("/triggers/:id", api.DeleteTrigger)
 	}
 
 	// WebSocket
@@ -111,21 +122,27 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to load frontend: %v", err)
 	}
+	// Pre-read index.html for SPA fallback (avoid http.FileServer redirect loop)
+	indexHTML, err := fs.ReadFile(distFS, "index.html")
+	if err != nil {
+		log.Fatalf("Failed to read index.html: %v", err)
+	}
 	r.NoRoute(func(c *gin.Context) {
-		// Try to serve static file first
 		path := c.Request.URL.Path
-		if path == "/" {
-			path = "/index.html"
+		// Try static assets (skip / and /index.html to avoid redirect loop)
+		if path != "/" && path != "/index.html" {
+			if f, err := distFS.Open(path[1:]); err == nil {
+				f.Close()
+				c.FileFromFS(path, http.FS(distFS))
+				return
+			}
 		}
-		f, err := distFS.Open(path[1:]) // strip leading /
-		if err == nil {
-			f.Close()
-			c.FileFromFS(path, http.FS(distFS))
-			return
-		}
-		// SPA fallback: serve index.html for all non-API routes
-		c.FileFromFS("/index.html", http.FS(distFS))
+		// SPA fallback
+		c.Data(200, "text/html; charset=utf-8", indexHTML)
 	})
+
+	// Start trigger scheduler
+	core.StartTriggerLoop(*port)
 
 	addr := fmt.Sprintf(":%d", *port)
 	log.Printf("AI Hub running at http://localhost%s", addr)

@@ -148,6 +148,24 @@ POST /chat/send
 | GET | `/project-rules/content?work_dir=xxx&path=xxx` | 读取规则文件内容 |
 | PUT | `/project-rules/content` | 写入规则文件（body: `work_dir`, `path`, `content`） |
 
+### 定时触发器
+
+系统每分钟检查触发器，到时间自动向指定会话发送指令。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/triggers` | 获取所有触发器（可选 `?session_id=N` 过滤） |
+| POST | `/triggers` | 创建触发器 |
+| PUT | `/triggers/:id` | 更新触发器 |
+| DELETE | `/triggers/:id` | 删除触发器 |
+
+`trigger_time` 支持三种格式：
+- `"2026-02-17 10:30:00"` — 精确日期时间，只触发一次
+- `"10:30:00"` — 每天固定时间
+- `"1h30m"` — 固定间隔
+
+`max_fires: -1` 表示无限触发。会话列表接口返回 `has_triggers` 字段标识该会话是否关联了触发器。
+
 ## WebSocket
 
 连接地址：`ws://localhost:8080/ws/chat`

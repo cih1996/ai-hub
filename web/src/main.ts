@@ -16,6 +16,7 @@ const router = createRouter({
         { path: 'manage', name: 'manage', component: () => import('./views/ManageView.vue') },
         { path: 'skills', name: 'skills', component: () => import('./views/SkillsView.vue') },
         { path: 'mcp', name: 'mcp', component: () => import('./views/McpView.vue') },
+        { path: 'triggers', name: 'triggers', component: () => import('./views/TriggersView.vue') },
       ],
     },
     { path: '/settings', name: 'settings', component: () => import('./views/SettingsView.vue') },

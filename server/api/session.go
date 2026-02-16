@@ -12,7 +12,8 @@ import (
 // SessionResponse wraps Session with runtime streaming status
 type SessionResponse struct {
 	model.Session
-	Streaming bool `json:"streaming"`
+	Streaming   bool `json:"streaming"`
+	HasTriggers bool `json:"has_triggers"`
 }
 
 func ListSessions(c *gin.Context) {
@@ -22,11 +23,13 @@ func ListSessions(c *gin.Context) {
 		return
 	}
 	streamingIDs := GetStreamingSessionIDs()
+	triggerSessions, _ := store.SessionsWithTriggers()
 	resp := make([]SessionResponse, 0, len(list))
 	for _, s := range list {
 		resp = append(resp, SessionResponse{
-			Session:   s,
-			Streaming: streamingIDs[s.ID],
+			Session:     s,
+			Streaming:   streamingIDs[s.ID],
+			HasTriggers: triggerSessions[s.ID],
 		})
 	}
 	c.JSON(http.StatusOK, resp)

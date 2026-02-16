@@ -202,6 +202,79 @@ curl -X DELETE http://localhost:8080/api/v1/sessions/42
 
 ---
 
+## 操作六：定时触发器
+
+你可以为任意会话创建定时触发器，到时间后系统自动向该会话发送指令。
+
+### 获取自己的会话 ID
+
+你的会话 ID 通过环境变量注入：`AI_HUB_SESSION_ID`
+
+```bash
+echo $AI_HUB_SESSION_ID
+```
+
+### 查看所有触发器
+
+```bash
+curl http://localhost:8080/api/v1/triggers
+```
+
+按指定会话查看：
+```bash
+curl http://localhost:8080/api/v1/triggers?session_id=42
+```
+
+### 创建触发器
+
+```bash
+curl -X POST http://localhost:8080/api/v1/triggers \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": 42,
+    "content": "生成今日工作日报",
+    "trigger_time": "18:00:00",
+    "max_fires": -1
+  }'
+```
+
+`trigger_time` 支持三种格式：
+- `"2026-02-17 10:30:00"` — 精确日期时间，只触发一次
+- `"10:30:00"` — 每天固定时间
+- `"1h30m"` — 固定间隔（Go duration 格式）
+
+`max_fires`：最大触发次数，`-1` 表示无限。
+
+### 更新触发器
+
+```bash
+curl -X PUT http://localhost:8080/api/v1/triggers/1 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "content": "新的指令内容",
+    "trigger_time": "09:00:00",
+    "enabled": true
+  }'
+```
+
+### 删除触发器
+
+```bash
+curl -X DELETE http://localhost:8080/api/v1/triggers/1
+```
+
+### 触发器状态说明
+
+| status | 含义 |
+|--------|------|
+| active | 等待触发 |
+| fired | 刚触发完成 |
+| failed | 触发失败（会话不存在或忙） |
+| completed | 已达最大触发次数 |
+| disabled | 已禁用 |
+
+---
+
 ## 注意事项
 
 1. 每个会话是独立的 CLI 进程，有独立上下文，会话之间不共享记忆
@@ -210,3 +283,4 @@ curl -X DELETE http://localhost:8080/api/v1/sessions/42
 4. 会话标题由 AI 自动生成，你也可以通过 PUT /sessions/:id 修改
 5. 创建会话时不需要指定 provider，系统自动使用默认 provider
 6. 你自己也运行在一个会话中，不要向自己的 session_id 发送消息
+7. 你的会话 ID 可通过 `$AI_HUB_SESSION_ID` 环境变量获取，用于查询和管理自己的触发器

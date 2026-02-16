@@ -303,13 +303,14 @@ func runStream(session *model.Session, query string, isNewSession bool) {
 
 func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID string, resume bool, send func(WSMessage), sessID int64, workDir string) (string, error) {
 	req := core.ClaudeCodeRequest{
-		Query:     query,
-		SessionID: sessionID,
-		Resume:    resume,
-		BaseURL:   p.BaseURL,
-		APIKey:    p.APIKey,
-		ModelID:   p.ModelID,
-		WorkDir:   workDir,
+		Query:        query,
+		SessionID:    sessionID,
+		Resume:       resume,
+		BaseURL:      p.BaseURL,
+		APIKey:       p.APIKey,
+		ModelID:      p.ModelID,
+		WorkDir:      workDir,
+		HubSessionID: sessID,
 	}
 	var fullResponse string
 

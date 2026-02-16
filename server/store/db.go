@@ -63,6 +63,25 @@ func migrate() error {
 	}
 	// Safe column migration: add work_dir to sessions (SQLite ignores duplicate ALTER)
 	DB.Exec(`ALTER TABLE sessions ADD COLUMN work_dir TEXT NOT NULL DEFAULT ''`)
+
+	// Triggers table
+	DB.Exec(`CREATE TABLE IF NOT EXISTS triggers (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		session_id INTEGER NOT NULL,
+		content TEXT NOT NULL DEFAULT '',
+		trigger_time TEXT NOT NULL DEFAULT '',
+		max_fires INTEGER NOT NULL DEFAULT 1,
+		enabled INTEGER NOT NULL DEFAULT 1,
+		fired_count INTEGER NOT NULL DEFAULT 0,
+		status TEXT NOT NULL DEFAULT 'active',
+		next_fire_at TEXT NOT NULL DEFAULT '',
+		last_fired_at TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL DEFAULT '',
+		updated_at TEXT NOT NULL DEFAULT '',
+		FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+	)`)
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_triggers_session ON triggers(session_id)`)
+
 	return nil
 }
 

@@ -1,4 +1,4 @@
-import type { Provider, Session, Message } from '../types'
+import type { Provider, Session, Message, Trigger } from '../types'
 
 const BASE = '/api/v1'
 
@@ -127,3 +127,13 @@ export const writeProjectRule = (workDir: string, path: string, content: string)
     method: 'PUT',
     body: JSON.stringify({ work_dir: workDir, path, content }),
   })
+
+// Triggers
+export const listTriggers = (sessionId?: number) =>
+  request<Trigger[]>(sessionId ? `/triggers?session_id=${sessionId}` : '/triggers')
+export const createTrigger = (t: Partial<Trigger>) =>
+  request<Trigger>('/triggers', { method: 'POST', body: JSON.stringify(t) })
+export const updateTrigger = (id: number, t: Partial<Trigger>) =>
+  request<Trigger>(`/triggers/${id}`, { method: 'PUT', body: JSON.stringify(t) })
+export const deleteTrigger = (id: number) =>
+  request<{ ok: boolean }>(`/triggers/${id}`, { method: 'DELETE' })

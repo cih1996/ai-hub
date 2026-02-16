@@ -48,3 +48,19 @@ type Message struct {
 	Content   string    `json:"content"`
 	CreatedAt time.Time `json:"created_at"`
 }
+
+// Trigger 定时触发器
+type Trigger struct {
+	ID          int64  `json:"id"`
+	SessionID   int64  `json:"session_id"`
+	Content     string `json:"content"`      // 自然语言指令
+	TriggerTime string `json:"trigger_time"` // "2006-01-02 15:04:05" | "15:04:05" | "1h30m"
+	MaxFires    int    `json:"max_fires"`    // -1=无限
+	Enabled     bool   `json:"enabled"`
+	FiredCount  int    `json:"fired_count"`
+	Status      string `json:"status"`       // active/fired/failed/completed/disabled
+	NextFireAt  string `json:"next_fire_at"` // 下次触发时间
+	LastFiredAt string `json:"last_fired_at"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
+}

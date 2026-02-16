@@ -20,6 +20,7 @@ function confirmDelete() {
 const isManage = computed(() => route.path.startsWith('/manage'))
 const isSkills = computed(() => route.path.startsWith('/skills'))
 const isMcp = computed(() => route.path.startsWith('/mcp'))
+const isTriggers = computed(() => route.path.startsWith('/triggers'))
 
 interface SessionGroup {
   dir: string
@@ -120,6 +121,13 @@ function formatTime(dateStr: string) {
         </svg>
         <span>MCP</span>
       </button>
+      <button class="nav-item" :class="{ active: isTriggers }" @click="router.push('/triggers')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/>
+          <polyline points="12 6 12 12 16 14"/>
+        </svg>
+        <span>定时</span>
+      </button>
     </div>
 
     <div class="session-list">
@@ -136,6 +144,9 @@ function formatTime(dateStr: string) {
             <div class="session-title-row">
               <svg v-if="s.streaming" class="streaming-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M21 12a9 9 0 11-6.219-8.56"/>
+              </svg>
+              <svg v-if="s.has_triggers" class="trigger-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
               </svg>
               <div class="session-title">{{ s.title }}</div>
             </div>
@@ -275,6 +286,10 @@ function formatTime(dateStr: string) {
   flex-shrink: 0;
   color: var(--accent);
   animation: spin 1s linear infinite;
+}
+.trigger-icon {
+  flex-shrink: 0;
+  color: var(--text-muted);
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 .session-time {
