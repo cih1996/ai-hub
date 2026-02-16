@@ -23,6 +23,9 @@ var frontendFS embed.FS
 //go:embed skills/*
 var builtinSkillsFS embed.FS
 
+//go:embed claude/*
+var claudeRulesFS embed.FS
+
 var (
 	Version = "dev"
 	BuildAt = ""
@@ -56,6 +59,9 @@ func main() {
 
 	// Install built-in skills to ~/.claude/skills/
 	installBuiltinSkills()
+
+	// Install default CLAUDE.md rules (skip if already exists)
+	installClaudeRules()
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
@@ -185,4 +191,34 @@ func installBuiltinSkills() {
 		return nil
 	})
 	log.Printf("[skills] built-in skills installed to %s", targetBase)
+}
+
+// installClaudeRules copies embedded claude/* to the templates directory (~/.ai-hub/templates/)
+// only if the target template does not exist. The template system (RenderAllTemplates) will
+// render these to ~/.claude/ with fresh variables on every chat message.
+func installClaudeRules() {
+	home, _ := os.UserHomeDir()
+	targetBase := filepath.Join(home, ".ai-hub", "templates")
+
+	fs.WalkDir(claudeRulesFS, "claude", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		rel, _ := filepath.Rel("claude", p)
+		target := filepath.Join(targetBase, rel)
+
+		// Skip if template source already exists
+		if _, err := os.Stat(target); err == nil {
+			return nil
+		}
+
+		data, err := claudeRulesFS.ReadFile(p)
+		if err != nil {
+			return nil
+		}
+		os.MkdirAll(filepath.Dir(target), 0755)
+		os.WriteFile(target, data, 0644)
+		log.Printf("[rules] installed template %s", target)
+		return nil
+	})
 }
