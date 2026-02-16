@@ -1,0 +1,103 @@
+:root {
+  --bg-primary: #0a0a0a;
+  --bg-secondary: #141414;
+  --bg-tertiary: #1e1e1e;
+  --bg-hover: #262626;
+  --bg-active: #303030;
+  --border: #262626;
+  --border-light: #333;
+  --text-primary: #ececec;
+  --text-secondary: #a0a0a0;
+  --text-muted: #5a5a5a;
+  --accent: #7c6aef;
+  --accent-hover: #6b5ce7;
+  --accent-soft: rgba(124, 106, 239, 0.1);
+  --danger: #ef4444;
+  --success: #22c55e;
+  --radius: 10px;
+  --radius-sm: 6px;
+  --radius-lg: 16px;
+  --shadow: 0 1px 3px rgba(0,0,0,0.4);
+  --transition: 0.15s ease;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body, #app {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', system-ui, sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  font-size: 14px;
+}
+
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  outline: none;
+  background: none;
+  color: inherit;
+}
+
+input, textarea {
+  font-family: inherit;
+  outline: none;
+  border: none;
+  background: none;
+  color: inherit;
+}
+
+a { color: var(--accent); text-decoration: none; }
+
+/* Markdown */
+.md-content { line-height: 1.7; font-size: 14px; }
+.md-content p { margin-bottom: 0.6em; }
+.md-content p:last-child { margin-bottom: 0; }
+.md-content pre {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  overflow-x: auto;
+  margin: 0.6em 0;
+}
+.md-content code {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 13px;
+}
+.md-content :not(pre) > code {
+  background: var(--bg-tertiary);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+.md-content ul, .md-content ol { padding-left: 1.5em; margin: 0.4em 0; }
+.md-content blockquote {
+  border-left: 3px solid var(--accent);
+  padding-left: 12px;
+  color: var(--text-secondary);
+  margin: 0.6em 0;
+}
+.md-content h1, .md-content h2, .md-content h3 {
+  margin: 0.8em 0 0.4em;
+  font-weight: 600;
+}
+.md-content table { border-collapse: collapse; width: 100%; margin: 0.6em 0; }
+.md-content th, .md-content td {
+  border: 1px solid var(--border);
+  padding: 6px 12px;
+  text-align: left;
+}
+.md-content th { background: var(--bg-tertiary); font-weight: 600; }

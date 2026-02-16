@@ -1,0 +1,33 @@
+# Binary
+ai-hub
+
+# Go
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Data
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Frontend build (embedded in binary, rebuild with build.sh)
+web/dist/
+web/node_modules/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local

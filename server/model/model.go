@@ -1,0 +1,48 @@
+package model
+
+import (
+	"strings"
+	"time"
+)
+
+// Provider 供应商配置
+// Mode 由后端自动判断: "claude-code" 走 CLI, "direct" 走 OpenAI 兼容 API
+type Provider struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Mode      string    `json:"mode"` // "claude-code" | "direct" (auto-detected, not set by user)
+	BaseURL   string    `json:"base_url"`
+	APIKey    string    `json:"api_key"`
+	ModelID   string    `json:"model_id"`
+	IsDefault bool      `json:"is_default"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// DetectMode 根据 model_id 自动判断走 Claude Code CLI 还是直连 API
+func (p *Provider) DetectMode() string {
+	// 包含 claude 关键字的走 Claude Code CLI
+	lower := strings.ToLower(p.ModelID)
+	if strings.Contains(lower, "claude") {
+		return "claude-code"
+	}
+	return "direct"
+}
+
+// Session 会话
+type Session struct {
+	ID         int64     `json:"id"`
+	Title      string    `json:"title"`
+	ProviderID string    `json:"provider_id"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+// Message 消息
+type Message struct {
+	ID        int64     `json:"id"`
+	SessionID int64     `json:"session_id"`
+	Role      string    `json:"role"` // "user" | "assistant"
+	Content   string    `json:"content"`
+	CreatedAt time.Time `json:"created_at"`
+}
