@@ -8,7 +8,14 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', redirect: '/chat' },
-    { path: '/chat/:id?', name: 'chat', component: () => import('./views/ChatView.vue') },
+    {
+      path: '/',
+      component: () => import('./views/MainLayout.vue'),
+      children: [
+        { path: 'chat/:id?', name: 'chat', component: () => import('./views/ChatView.vue') },
+        { path: 'manage', name: 'manage', component: () => import('./views/ManageView.vue') },
+      ],
+    },
     { path: '/settings', name: 'settings', component: () => import('./views/SettingsView.vue') },
   ],
 })

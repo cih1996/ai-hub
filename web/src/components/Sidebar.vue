@@ -1,9 +1,13 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useChatStore } from '../stores/chat'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 
 const store = useChatStore()
 const router = useRouter()
+const route = useRoute()
+
+const isManage = computed(() => route.path.startsWith('/manage'))
 
 function newChat() {
   store.newChat()
@@ -41,10 +45,23 @@ function formatTime(dateStr: string) {
         </svg>
         <span>AI Hub</span>
       </div>
-      <button class="btn-icon" @click="newChat" title="New Chat">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    </div>
+
+    <div class="sidebar-nav">
+      <button class="nav-item" @click="newChat">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M12 5v14M5 12h14"/>
         </svg>
+        <span>新会话</span>
+      </button>
+      <button class="nav-item" :class="{ active: isManage }" @click="router.push('/manage')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+          <line x1="16" y1="13" x2="8" y2="13"/>
+          <line x1="16" y1="17" x2="8" y2="17"/>
+        </svg>
+        <span>管理</span>
       </button>
     </div>
 
@@ -65,11 +82,7 @@ function formatTime(dateStr: string) {
           </div>
           <div class="session-time">{{ formatTime(s.updated_at) }}</div>
         </div>
-        <button
-          class="btn-delete"
-          @click.stop="store.deleteSessionById(s.id)"
-          title="Delete"
-        >
+        <button class="btn-delete" @click.stop="store.deleteSessionById(s.id)" title="Delete">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M18 6L6 18M6 6l12 12"/>
           </svg>
@@ -117,18 +130,30 @@ function formatTime(dateStr: string) {
   font-size: 15px;
   color: var(--text-primary);
 }
-.btn-icon {
-  width: 32px;
-  height: 32px;
+.sidebar-nav {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-bottom: 1px solid var(--border);
+}
+.nav-item {
   display: flex;
   align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-sm);
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  font-size: 13px;
   color: var(--text-secondary);
   transition: all var(--transition);
+  width: 100%;
 }
-.btn-icon:hover {
+.nav-item:hover {
   background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.nav-item.active {
+  background: var(--bg-active);
   color: var(--text-primary);
 }
 .session-list {
@@ -145,16 +170,9 @@ function formatTime(dateStr: string) {
   transition: background var(--transition);
   margin-bottom: 2px;
 }
-.session-item:hover {
-  background: var(--bg-hover);
-}
-.session-item.active {
-  background: var(--bg-active);
-}
-.session-info {
-  flex: 1;
-  min-width: 0;
-}
+.session-item:hover { background: var(--bg-hover); }
+.session-item.active { background: var(--bg-active); }
+.session-info { flex: 1; min-width: 0; }
 .session-title {
   font-size: 13px;
   font-weight: 500;
@@ -192,9 +210,7 @@ function formatTime(dateStr: string) {
   transition: all var(--transition);
   flex-shrink: 0;
 }
-.session-item:hover .btn-delete {
-  opacity: 1;
-}
+.session-item:hover .btn-delete { opacity: 1; }
 .btn-delete:hover {
   color: var(--danger);
   background: rgba(239, 68, 68, 0.1);

@@ -55,3 +55,34 @@ export interface DepsStatus {
 export const getStatus = () => request<DepsStatus>('/status')
 export const retryInstall = () =>
   request<{ ok: boolean }>('/status/retry-install', { method: 'POST' })
+
+// Files (manage page)
+export interface FileItem {
+  name: string
+  path: string
+  exists: boolean
+}
+export const listFiles = (scope: string) =>
+  request<FileItem[]>(`/files?scope=${scope}`)
+export const readFileContent = (scope: string, path: string) =>
+  request<{ content: string }>(`/files/content?scope=${encodeURIComponent(scope)}&path=${encodeURIComponent(path)}`)
+export const writeFileContent = (scope: string, path: string, content: string) =>
+  request<{ ok: boolean }>('/files/content', {
+    method: 'PUT',
+    body: JSON.stringify({ scope, path, content }),
+  })
+export const createFileApi = (scope: string, path: string, content: string) =>
+  request<{ ok: boolean }>('/files', {
+    method: 'POST',
+    body: JSON.stringify({ scope, path, content }),
+  })
+export const deleteFileApi = (scope: string, path: string) =>
+  request<{ ok: boolean }>(`/files?scope=${encodeURIComponent(scope)}&path=${encodeURIComponent(path)}`, {
+    method: 'DELETE',
+  })
+export interface TemplateVar {
+  name: string
+  desc: string
+  value: string
+}
+export const getTemplateVars = () => request<TemplateVar[]>('/files/variables')

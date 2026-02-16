@@ -228,6 +228,9 @@ func SendChat(c *gin.Context) {
 		}
 	}
 
+	// Render templates before starting chat (refresh dynamic variables like time)
+	core.RenderAllTemplates()
+
 	// Kick off streaming in background — results are pushed via WS broadcast
 	go runStream(session, req.Content, isNewSession)
 

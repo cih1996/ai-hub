@@ -39,6 +39,9 @@ func main() {
 	core.Deps.CheckAll()
 	core.Deps.AutoInstallClaude()
 
+	// Init template system
+	core.InitTemplates(*dataDir)
+
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.RedirectTrailingSlash = false
@@ -64,6 +67,14 @@ func main() {
 
 		// Chat
 		v1.POST("/chat/send", api.SendChat)
+
+		// Files (manage page)
+		v1.GET("/files", api.ListFiles)
+		v1.GET("/files/content", api.ReadFile)
+		v1.PUT("/files/content", api.WriteFile)
+		v1.POST("/files", api.CreateFile)
+		v1.DELETE("/files", api.DeleteFile)
+		v1.GET("/files/variables", api.GetTemplateVars)
 
 		// Status & deps
 		v1.GET("/status", api.GetStatus)
