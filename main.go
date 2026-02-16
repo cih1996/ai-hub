@@ -9,14 +9,15 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
-	"net/http"
+	"mime"
 	"os"
+	"path"
 	"path/filepath"
 
 	"github.com/gin-gonic/gin"
 )
 
-//go:embed web/dist/*
+//go:embed all:web/dist
 var frontendFS embed.FS
 
 //go:embed skills/*
@@ -128,12 +129,16 @@ func main() {
 		log.Fatalf("Failed to read index.html: %v", err)
 	}
 	r.NoRoute(func(c *gin.Context) {
-		path := c.Request.URL.Path
-		// Try static assets (skip / and /index.html to avoid redirect loop)
-		if path != "/" && path != "/index.html" {
-			if f, err := distFS.Open(path[1:]); err == nil {
-				f.Close()
-				c.FileFromFS(path, http.FS(distFS))
+		urlPath := c.Request.URL.Path
+		// Try serving static file directly
+		if urlPath != "/" && urlPath != "/index.html" {
+			name := urlPath[1:] // strip leading /
+			if data, err := fs.ReadFile(distFS, name); err == nil {
+				ctype := mime.TypeByExtension(path.Ext(name))
+				if ctype == "" {
+					ctype = "application/octet-stream"
+				}
+				c.Data(200, ctype, data)
 				return
 			}
 		}

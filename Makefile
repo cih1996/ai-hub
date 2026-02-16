@@ -12,11 +12,10 @@ LDFLAGS  := -s -w -X 'main.Version=$(VERSION)' -X 'main.BuildAt=$(BUILD_AT)'
 # CGO is required for SQLite
 export CGO_ENABLED := 1
 
-# Cross-compile C compilers (install via: brew install FiloSottile/musl-cross/musl-cross)
-CC_linux_amd64  := x86_64-linux-musl-gcc
-CC_linux_arm64  := aarch64-linux-musl-gcc
-CC_darwin_amd64 := cc
-CC_darwin_arm64 := cc
+# Cross-compile C compilers
+CC_darwin_arm64   := cc
+CC_linux_amd64    := x86_64-linux-musl-gcc
+CC_windows_amd64  := x86_64-w64-mingw32-gcc
 
 # Pick the right CC for target
 export CC := $(or $(CC_$(GOOS)_$(GOARCH)),cc)
@@ -35,20 +34,18 @@ frontend:
 ## Build Go binary (assumes frontend already built)
 build:
 	@echo "==> Building $(OUTPUT) ($(GOOS)/$(GOARCH))..."
-	@GOOS=$(GOOS) GOARCH=$(GOARCH) go build -ldflags "$(LDFLAGS)" -o dist/$(OUTPUT) .
-	@echo "==> dist/$(OUTPUT)"
+	@GOOS=$(GOOS) GOARCH=$(GOARCH) go build -ldflags "$(LDFLAGS)" -o dist/$(OUTPUT)$(if $(filter windows,$(GOOS)),.exe) .
+	@echo "==> dist/$(OUTPUT)$(if $(filter windows,$(GOOS)),.exe)"
 
 ## Cross-compile for all platforms
 release: frontend
 	@mkdir -p dist
 	@echo "==> Building darwin/arm64..."
 	@GOOS=darwin GOARCH=arm64 CC=$(CC_darwin_arm64) go build -ldflags "$(LDFLAGS)" -o dist/$(APP)-darwin-arm64 .
-	@echo "==> Building darwin/amd64..."
-	@GOOS=darwin GOARCH=amd64 CC=$(CC_darwin_amd64) go build -ldflags "$(LDFLAGS)" -o dist/$(APP)-darwin-amd64 .
 	@echo "==> Building linux/amd64..."
 	@GOOS=linux GOARCH=amd64 CC=$(CC_linux_amd64) go build -ldflags "$(LDFLAGS)" -o dist/$(APP)-linux-amd64 .
-	@echo "==> Building linux/arm64..."
-	@GOOS=linux GOARCH=arm64 CC=$(CC_linux_arm64) go build -ldflags "$(LDFLAGS)" -o dist/$(APP)-linux-arm64 .
+	@echo "==> Building windows/amd64..."
+	@GOOS=windows GOARCH=amd64 CC=$(CC_windows_amd64) go build -ldflags "$(LDFLAGS)" -o dist/$(APP)-windows-amd64.exe .
 	@echo ""
 	@echo "==> Release binaries:"
 	@ls -lh dist/
@@ -65,11 +62,12 @@ help:
 	@echo "  all       Build frontend + binary for current platform (default)"
 	@echo "  frontend  Build frontend only"
 	@echo "  build     Build Go binary only (frontend must exist)"
-	@echo "  release   Build frontend + all platform binaries"
+	@echo "  release   Build frontend + all platform binaries (macOS/Linux/Windows)"
 	@echo "  clean     Remove build artifacts"
 	@echo ""
 	@echo "Cross-compile single target:"
 	@echo "  make build GOOS=linux GOARCH=amd64"
 	@echo ""
-	@echo "Linux cross-compile requires musl-cross:"
-	@echo "  brew install FiloSottile/musl-cross/musl-cross"
+	@echo "Cross-compile dependencies:"
+	@echo "  Linux:   brew install FiloSottile/musl-cross/musl-cross"
+	@echo "  Windows: brew install mingw-w64"
