@@ -1,11 +1,21 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import type { Session } from '../types'
 import { useChatStore } from '../stores/chat'
 import { useRouter, useRoute } from 'vue-router'
 
 const store = useChatStore()
 const router = useRouter()
 const route = useRoute()
+
+const deleteTarget = ref<Session | null>(null)
+
+function confirmDelete() {
+  if (deleteTarget.value) {
+    store.deleteSessionById(deleteTarget.value.id)
+    deleteTarget.value = null
+  }
+}
 
 const isManage = computed(() => route.path.startsWith('/manage'))
 const isSkills = computed(() => route.path.startsWith('/skills'))
@@ -100,7 +110,7 @@ function formatTime(dateStr: string) {
           </div>
           <div class="session-time">{{ formatTime(s.updated_at) }}</div>
         </div>
-        <button class="btn-delete" @click.stop="store.deleteSessionById(s.id)" title="Delete">
+        <button class="btn-delete" @click.stop="deleteTarget = s" title="Delete">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M18 6L6 18M6 6l12 12"/>
           </svg>
@@ -120,6 +130,20 @@ function formatTime(dateStr: string) {
         <span>Settings</span>
       </button>
     </div>
+
+    <!-- Delete confirmation modal -->
+    <Teleport to="body">
+      <div v-if="deleteTarget" class="modal-overlay" @click="deleteTarget = null">
+        <div class="modal-box" @click.stop>
+          <p class="modal-title">确认删除</p>
+          <p class="modal-desc">删除会话「{{ deleteTarget.title }}」？此操作不可撤销。</p>
+          <div class="modal-actions">
+            <button class="modal-btn cancel" @click="deleteTarget = null">取消</button>
+            <button class="modal-btn confirm" @click="confirmDelete">删除</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </aside>
 </template>
 
@@ -257,5 +281,62 @@ function formatTime(dateStr: string) {
 .footer-btn:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
+}
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.modal-box {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  width: 340px;
+  max-width: 90vw;
+}
+.modal-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+.modal-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 20px;
+  line-height: 1.5;
+  word-break: break-all;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.modal-btn {
+  padding: 6px 16px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.modal-btn.cancel {
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+}
+.modal-btn.cancel:hover {
+  color: var(--text-primary);
+}
+.modal-btn.confirm {
+  color: #fff;
+  background: var(--danger, #ef4444);
+}
+.modal-btn.confirm:hover {
+  opacity: 0.9;
 }
 </style>

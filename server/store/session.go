@@ -134,6 +134,11 @@ func CreateSessionWithMessage(providerID string, content string) (*model.Session
 	return s, nil
 }
 
+func UpdateSessionTitle(id int64, title string) error {
+	_, err := DB.Exec(`UPDATE sessions SET title=?, updated_at=? WHERE id=?`, title, time.Now(), id)
+	return err
+}
+
 func truncateTitle(s string) string {
 	for i, c := range s {
 		if c == '\n' || c == '\r' {

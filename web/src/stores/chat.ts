@@ -54,6 +54,13 @@ export const useChatStore = defineStore('chat', () => {
         return
       }
 
+      // session_title_update: AI-generated title from CLI
+      if (msg.type === 'session_title_update') {
+        const s = sessions.value.find((s) => s.id === msg.session_id)
+        if (s) s.title = msg.content
+        return
+      }
+
       // session_update: broadcast from server about any session's streaming status
       if (msg.type === 'session_update') {
         const s = sessions.value.find((s) => s.id === msg.session_id)

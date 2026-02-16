@@ -317,10 +317,11 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 	err := claudeClient.Stream(ctx, req, func(line string) {
 		// First parse the top-level wrapper
 		var wrapper struct {
-			Type    string          `json:"type"`
-			Subtype string          `json:"subtype"`
-			Result  string          `json:"result"`
-			Event   json.RawMessage `json:"event"`
+			Type             string          `json:"type"`
+			Subtype          string          `json:"subtype"`
+			Result           string          `json:"result"`
+			Event            json.RawMessage `json:"event"`
+			ConversationName string          `json:"conversation_name"`
 		}
 		if err := json.Unmarshal([]byte(line), &wrapper); err != nil {
 			return
@@ -385,6 +386,11 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 			}
 
 		case "result":
+			if wrapper.ConversationName != "" {
+				if err := store.UpdateSessionTitle(sessID, wrapper.ConversationName); err == nil {
+					broadcast(WSMessage{Type: "session_title_update", SessionID: sessID, Content: wrapper.ConversationName})
+				}
+			}
 			if wrapper.Subtype == "success" && wrapper.Result != "" && fullResponse == "" {
 				fullResponse = wrapper.Result
 				send(WSMessage{Type: "chunk", SessionID: sessID, Content: wrapper.Result})
