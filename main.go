@@ -202,26 +202,39 @@ func installBuiltinSkills() {
 func installClaudeRules() {
 	home, _ := os.UserHomeDir()
 	targetBase := filepath.Join(home, ".ai-hub", "templates")
+	log.Printf("[rules] template dir: %s", targetBase)
 
+	count := 0
 	fs.WalkDir(claudeRulesFS, "claude", func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return nil
 		}
 		rel, _ := filepath.Rel("claude", p)
 		target := filepath.Join(targetBase, rel)
+		log.Printf("[rules] embed path=%s rel=%s target=%s", p, rel, target)
 
 		// Skip if template source already exists
 		if _, err := os.Stat(target); err == nil {
+			log.Printf("[rules] skip (exists): %s", target)
 			return nil
 		}
 
 		data, err := claudeRulesFS.ReadFile(p)
 		if err != nil {
+			log.Printf("[rules] read embed error: %v", err)
 			return nil
 		}
-		os.MkdirAll(filepath.Dir(target), 0755)
-		os.WriteFile(target, data, 0644)
-		log.Printf("[rules] installed template %s", target)
+		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			log.Printf("[rules] mkdir error: %v", err)
+			return nil
+		}
+		if err := os.WriteFile(target, data, 0644); err != nil {
+			log.Printf("[rules] write error: %v", err)
+			return nil
+		}
+		log.Printf("[rules] installed template %s (%d bytes)", target, len(data))
+		count++
 		return nil
 	})
+	log.Printf("[rules] done, installed %d template(s)", count)
 }

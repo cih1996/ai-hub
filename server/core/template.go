@@ -59,7 +59,7 @@ func RenderAllTemplates() error {
 		if err != nil || info.IsDir() {
 			return nil
 		}
-		if !strings.HasSuffix(info.Name(), ".md") {
+		if !strings.HasSuffix(strings.ToLower(info.Name()), ".md") {
 			return nil
 		}
 		rel, _ := filepath.Rel(templateDir, path)
