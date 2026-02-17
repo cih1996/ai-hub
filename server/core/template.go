@@ -12,7 +12,7 @@ import (
 func TemplateVars() map[string]string {
 	home, _ := os.UserHomeDir()
 	claudeBase := filepath.Join(home, ".claude")
-	loc, _ := time.LoadLocation("Asia/Shanghai")
+	bjLoc := time.FixedZone("CST", 8*3600)
 	now := time.Now()
 
 	return map[string]string{
@@ -24,7 +24,7 @@ func TemplateVars() map[string]string {
 		"OS":            runtime.GOOS,
 		"DATE":          now.Format("2006-01-02"),
 		"DATETIME":      now.Format("2006-01-02 15:04:05"),
-		"TIME_BEIJING":  now.In(loc).Format("2006-01-02 15:04:05"),
+		"TIME_BEIJING":  now.In(bjLoc).Format("2006-01-02 15:04:05"),
 	}
 }
 
