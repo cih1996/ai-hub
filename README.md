@@ -22,28 +22,44 @@ Vue3 前端 <── WebSocket/REST ──> Go 后端 <── 子进程 ──> C
 
 ### 环境要求
 
-- Go 1.21+（编译）
-- Node.js 18+（编译前端 + Claude Code CLI 运行时依赖）
-- npm（安装 Claude Code CLI）
+- Node.js 18+（Claude Code CLI 运行时依赖）
+- npm
 
-### 编译运行
+### 直接部署（推荐）
+
+从 [Releases](https://github.com/cih1996/ai-hub/releases) 下载对应平台的二进制文件：
+
+| 平台 | 文件 |
+|------|------|
+| macOS (Apple Silicon) | `ai-hub-darwin-arm64` |
+| Linux (x86_64) | `ai-hub-linux-amd64` |
+| Windows (x86_64) | `ai-hub-windows-amd64.exe` |
 
 ```bash
-# 克隆仓库
-git clone https://github.com/cih1996/ai-hub.git
-cd ai-hub
+# macOS / Linux
+chmod +x ai-hub-*
+./ai-hub-darwin-arm64   # macOS
+./ai-hub-linux-amd64    # Linux
 
-# 安装前端依赖并编译
-cd web && npm install && cd ..
-
-# 一键编译（前端 + Go 二进制）
-./build.sh
-
-# 运行
-./ai-hub
+# Windows
+ai-hub-windows-amd64.exe
 ```
 
 打开 `http://localhost:8080`
+
+### 从源码编译
+
+需要额外安装：Go 1.21+、Node.js 18+
+
+```bash
+git clone https://github.com/cih1996/ai-hub.git
+cd ai-hub
+cd web && npm install && cd ..
+make          # 编译当前平台
+make release  # 交叉编译所有平台（macOS/Linux/Windows）
+```
+
+编译产物在 `dist/` 目录下。
 
 ### 启动参数
 
