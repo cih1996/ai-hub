@@ -58,6 +58,9 @@ func main() {
 	// Init API data dir (for skills disable path)
 	api.InitDataDir(*dataDir)
 
+	// Pass embedded default templates to API for "restore default" feature
+	api.SetDefaultTemplatesFS(claudeRulesFS)
+
 	// Install built-in skills to ~/.claude/skills/
 	installBuiltinSkills()
 
@@ -101,6 +104,7 @@ func main() {
 		v1.POST("/files", api.CreateFile)
 		v1.DELETE("/files", api.DeleteFile)
 		v1.GET("/files/variables", api.GetTemplateVars)
+		v1.GET("/files/default", api.GetDefaultFile)
 
 		// Project-level rules
 		v1.GET("/project-rules", api.ListProjectRules)

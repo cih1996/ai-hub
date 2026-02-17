@@ -2,6 +2,7 @@ package api
 
 import (
 	"ai-hub/server/core"
+	"embed"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -9,6 +10,28 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+var defaultTemplatesFS embed.FS
+
+func SetDefaultTemplatesFS(fs embed.FS) {
+	defaultTemplatesFS = fs
+}
+
+// GetDefaultFile returns the built-in default template content.
+// GET /api/v1/files/default?path=CLAUDE.md
+func GetDefaultFile(c *gin.Context) {
+	p := c.Query("path")
+	if p == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "path is required"})
+		return
+	}
+	data, err := defaultTemplatesFS.ReadFile("claude/" + p)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "default template not found"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"content": string(data)})
+}
 
 type FileInfo struct {
 	Name   string `json:"name"`

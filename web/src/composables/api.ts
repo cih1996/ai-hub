@@ -90,6 +90,8 @@ export interface TemplateVar {
   value: string
 }
 export const getTemplateVars = () => request<TemplateVar[]>('/files/variables')
+export const getDefaultFile = (path: string) =>
+  request<{ content: string }>(`/files/default?path=${encodeURIComponent(path)}`)
 
 // Skills
 export interface SkillItem {

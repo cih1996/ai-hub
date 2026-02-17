@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, onMounted } from 'vue'
-import { listFiles, readFileContent, writeFileContent, createFileApi, deleteFileApi, getTemplateVars } from '../composables/api'
+import { listFiles, readFileContent, writeFileContent, createFileApi, deleteFileApi, getTemplateVars, getDefaultFile } from '../composables/api'
 import type { TemplateVar } from '../composables/api'
 
 interface FileItem {
@@ -36,6 +36,20 @@ const showNewDialog = ref(false)
 const newFileName = ref('')
 const templateVars = ref<TemplateVar[]>([])
 const showVars = ref(false)
+const restoringDefault = ref(false)
+
+async function restoreDefault() {
+  if (!selectedFile.value) return
+  if (!confirm('确定恢复为内置默认模板？当前编辑内容将被替换（需点"保存"才生效）')) return
+  restoringDefault.value = true
+  try {
+    const res = await getDefaultFile(selectedFile.value.path)
+    content.value = res.content
+  } catch (e: any) {
+    alert('获取默认模板失败: ' + e.message)
+  }
+  restoringDefault.value = false
+}
 
 async function loadFiles() {
   loading.value = true
@@ -174,6 +188,12 @@ onMounted(async () => {
           <div class="editor-toolbar">
             <span class="editor-filename">{{ selectedFile.path }}</span>
             <div class="editor-actions">
+              <button
+                v-if="activeTab === 'rules'"
+                class="btn-default"
+                :disabled="restoringDefault"
+                @click="restoreDefault"
+              >{{ restoringDefault ? '获取中...' : '默认' }}</button>
               <button class="btn-vars" @click="showVars = !showVars">
                 {{ showVars ? '隐藏变量' : '插入变量' }}
               </button>
@@ -255,6 +275,12 @@ onMounted(async () => {
   color: var(--text-secondary); transition: all var(--transition);
 }
 .btn-vars:hover { background: var(--bg-hover); color: var(--text-primary); }
+.btn-default {
+  padding: 4px 12px; font-size: 12px; border-radius: var(--radius-sm);
+  color: var(--text-secondary); transition: all var(--transition);
+}
+.btn-default:hover { background: var(--bg-hover); color: var(--text-primary); }
+.btn-default:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-save {
   padding: 6px 16px; font-size: 12px; border-radius: var(--radius-sm);
   background: var(--accent); color: white; transition: all var(--transition);
