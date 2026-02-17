@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -22,6 +23,7 @@ func TemplateVars() map[string]string {
 		"KNOWLEDGE_DIR": filepath.Join(claudeBase, "knowledge"),
 		"RULES_DIR":     filepath.Join(claudeBase, "rules"),
 		"OS":            runtime.GOOS,
+		"PORT":          hubPort,
 		"DATE":          now.Format("2006-01-02"),
 		"DATETIME":      now.Format("2006-01-02 15:04:05"),
 		"TIME_BEIJING":  now.In(bjLoc).Format("2006-01-02 15:04:05"),
@@ -38,11 +40,22 @@ func RenderTemplate(content string) string {
 }
 
 var templateDir string
+var hubPort string
 
 // InitTemplates sets the template storage directory.
 func InitTemplates(dataDir string) {
 	templateDir = filepath.Join(dataDir, "templates")
 	os.MkdirAll(templateDir, 0755)
+}
+
+// SetPort stores the server port for template rendering and env injection.
+func SetPort(port int) {
+	hubPort = fmt.Sprintf("%d", port)
+}
+
+// GetPort returns the stored server port string.
+func GetPort() string {
+	return hubPort
 }
 
 // TemplateDir returns the base template directory.

@@ -19,8 +19,10 @@ description: "AI Hub 多会话调度系统。当用户提到团队协作、虚�
 
 ## API 基础
 
-所有接口地址：`http://localhost:8080/api/v1`
+所有接口地址：`http://localhost:$AI_HUB_PORT/api/v1`（端口通过环境变量 `AI_HUB_PORT` 获取）
 请求头：`Content-Type: application/json`
+
+**严禁直接运行 ai-hub 二进制文件启动新实例。所有子任务、子角色必须通过 HTTP API 在当前服务内创建新会话。**
 
 ---
 
@@ -29,7 +31,7 @@ description: "AI Hub 多会话调度系统。当用户提到团队协作、虚�
 向 session_id=0 发送消息，系统自动创建新会话并开始执行
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/chat/send \
+curl -X POST http://localhost:$AI_HUB_PORT/api/v1/chat/send \
   -H "Content-Type: application/json" \
   -d '{
     "session_id": 0,
@@ -57,7 +59,7 @@ curl -X POST http://localhost:8080/api/v1/chat/send \
 对一个已存在且空闲的会话发送后续指令：
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/chat/send \
+curl -X POST http://localhost:$AI_HUB_PORT/api/v1/chat/send \
   -H "Content-Type: application/json" \
   -d '{
     "session_id": 42,
@@ -76,7 +78,7 @@ curl -X POST http://localhost:8080/api/v1/chat/send \
 获取所有会话列表，查看哪些在运行、哪些已空闲：
 
 ```bash
-curl http://localhost:8080/api/v1/sessions
+curl http://localhost:$AI_HUB_PORT/api/v1/sessions
 ```
 
 响应（数组，按更新时间降序）：
@@ -98,7 +100,7 @@ curl http://localhost:8080/api/v1/sessions
 
 查看单个会话：
 ```bash
-curl http://localhost:8080/api/v1/sessions/42
+curl http://localhost:$AI_HUB_PORT/api/v1/sessions/42
 ```
 
 ---
@@ -108,7 +110,7 @@ curl http://localhost:8080/api/v1/sessions/42
 获取指定会话的完整消息历史：
 
 ```bash
-curl http://localhost:8080/api/v1/sessions/42/messages
+curl http://localhost:$AI_HUB_PORT/api/v1/sessions/42/messages
 ```
 
 响应（数组，按时间升序）：
@@ -128,7 +130,7 @@ curl http://localhost:8080/api/v1/sessions/42/messages
 任务完成后删除不再需要的会话：
 
 ```bash
-curl -X DELETE http://localhost:8080/api/v1/sessions/42
+curl -X DELETE http://localhost:$AI_HUB_PORT/api/v1/sessions/42
 ```
 
 会同时删除该会话的所有消息记录。
@@ -217,18 +219,18 @@ echo $AI_HUB_SESSION_ID
 ### 查看所有触发器
 
 ```bash
-curl http://localhost:8080/api/v1/triggers
+curl http://localhost:$AI_HUB_PORT/api/v1/triggers
 ```
 
 按指定会话查看：
 ```bash
-curl http://localhost:8080/api/v1/triggers?session_id=42
+curl http://localhost:$AI_HUB_PORT/api/v1/triggers?session_id=42
 ```
 
 ### 创建触发器
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/triggers \
+curl -X POST http://localhost:$AI_HUB_PORT/api/v1/triggers \
   -H "Content-Type: application/json" \
   -d '{
     "session_id": 42,
@@ -248,7 +250,7 @@ curl -X POST http://localhost:8080/api/v1/triggers \
 ### 更新触发器
 
 ```bash
-curl -X PUT http://localhost:8080/api/v1/triggers/1 \
+curl -X PUT http://localhost:$AI_HUB_PORT/api/v1/triggers/1 \
   -H "Content-Type: application/json" \
   -d '{
     "content": "新的指令内容",
@@ -260,7 +262,7 @@ curl -X PUT http://localhost:8080/api/v1/triggers/1 \
 ### 删除触发器
 
 ```bash
-curl -X DELETE http://localhost:8080/api/v1/triggers/1
+curl -X DELETE http://localhost:$AI_HUB_PORT/api/v1/triggers/1
 ```
 
 ### 触发器状态说明

@@ -96,6 +96,9 @@ func (c *ClaudeCodeClient) Stream(ctx context.Context, req ClaudeCodeRequest, on
 	if req.HubSessionID > 0 {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("AI_HUB_SESSION_ID=%d", req.HubSessionID))
 	}
+	if p := GetPort(); p != "" {
+		cmd.Env = append(cmd.Env, "AI_HUB_PORT="+p)
+	}
 
 	log.Printf("[claude] cmd: %s %s", c.BinaryPath, strings.Join(args, " "))
 	log.Printf("[claude] env: ANTHROPIC_BASE_URL=%s ANTHROPIC_API_KEY=%s...", req.BaseURL, maskKey(req.APIKey))

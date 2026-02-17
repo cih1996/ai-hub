@@ -53,6 +53,7 @@ func main() {
 
 	// Init template system
 	core.InitTemplates(*dataDir)
+	core.SetPort(*port)
 
 	// Init API data dir (for skills disable path)
 	api.InitDataDir(*dataDir)

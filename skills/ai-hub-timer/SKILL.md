@@ -27,7 +27,7 @@ echo $AI_HUB_SESSION_ID
 
 ## API 基础
 
-所有接口地址：`http://localhost:8080/api/v1`
+所有接口地址：`http://localhost:$AI_HUB_PORT/api/v1`（端口通过环境变量 `AI_HUB_PORT` 获取）
 请求头：`Content-Type: application/json`
 
 ---
@@ -35,7 +35,7 @@ echo $AI_HUB_SESSION_ID
 ## 创建触发器
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/triggers \
+curl -X POST http://localhost:$AI_HUB_PORT/api/v1/triggers \
   -H "Content-Type: application/json" \
   -d '{
     "session_id": '$AI_HUB_SESSION_ID',
@@ -105,13 +105,13 @@ content 是触发器的灵魂。时间到了，系统会把 content 原封不动
 查看当前会话的所有触发器：
 
 ```bash
-curl http://localhost:8080/api/v1/triggers?session_id=$AI_HUB_SESSION_ID
+curl http://localhost:$AI_HUB_PORT/api/v1/triggers?session_id=$AI_HUB_SESSION_ID
 ```
 
 查看所有触发器：
 
 ```bash
-curl http://localhost:8080/api/v1/triggers
+curl http://localhost:$AI_HUB_PORT/api/v1/triggers
 ```
 
 响应字段说明：
@@ -131,7 +131,7 @@ curl http://localhost:8080/api/v1/triggers
 PUT 接口支持 **partial update**（部分更新），只传需要修改的字段，未传的字段保持原值不变。
 
 ```bash
-curl -X PUT http://localhost:8080/api/v1/triggers/{id} \
+curl -X PUT http://localhost:$AI_HUB_PORT/api/v1/triggers/{id} \
   -H "Content-Type: application/json" \
   -d '{
     "content": "新的指令内容"
@@ -152,7 +152,7 @@ curl -X PUT http://localhost:8080/api/v1/triggers/{id} \
 ## 删除触发器
 
 ```bash
-curl -X DELETE http://localhost:8080/api/v1/triggers/{id}
+curl -X DELETE http://localhost:$AI_HUB_PORT/api/v1/triggers/{id}
 ```
 
 ---
