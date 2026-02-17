@@ -148,35 +148,34 @@ func checkTriggers(port int) {
 			dirty = true
 		}
 
-		// 刷新 next_fire_at
+		// 先用当前 next_fire_at 判断是否该触发（不要提前刷新）
+		if shouldFire(t, now) {
+			log.Printf("[trigger] firing: id=%d session=%d", t.ID, t.SessionID)
+			if err := fireTrigger(t, port); err != nil {
+				log.Printf("[trigger] failed: id=%d err=%v", t.ID, err)
+				t.Status = "failed"
+				store.UpdateTrigger(t)
+				continue
+			}
+
+			t.FiredCount++
+			t.LastFiredAt = now.Format(timeLayout)
+			t.Status = "fired"
+			if t.MaxFires > 0 && t.FiredCount >= t.MaxFires {
+				t.Status = "completed"
+			}
+			dirty = true
+		}
+
+		// 触发后（或未触发）再刷新 next_fire_at，为下一轮做准备
 		newNext := CalcNextFireAt(t, now)
 		if newNext != t.NextFireAt {
 			t.NextFireAt = newNext
 			dirty = true
 		}
 
-		if !shouldFire(t, now) {
-			if dirty {
-				store.UpdateTrigger(t)
-			}
-			continue
-		}
-
-		log.Printf("[trigger] firing: id=%d session=%d", t.ID, t.SessionID)
-		if err := fireTrigger(t, port); err != nil {
-			log.Printf("[trigger] failed: id=%d err=%v", t.ID, err)
-			t.Status = "failed"
+		if dirty {
 			store.UpdateTrigger(t)
-			continue
 		}
-
-		t.FiredCount++
-		t.LastFiredAt = now.Format(timeLayout)
-		t.Status = "fired"
-		if t.MaxFires > 0 && t.FiredCount >= t.MaxFires {
-			t.Status = "completed"
-		}
-		t.NextFireAt = CalcNextFireAt(t, now)
-		store.UpdateTrigger(t)
 	}
 }

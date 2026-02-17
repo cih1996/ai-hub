@@ -155,8 +155,8 @@ POST /chat/send
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/triggers` | 获取所有触发器（可选 `?session_id=N` 过滤） |
-| POST | `/triggers` | 创建触发器 |
-| PUT | `/triggers/:id` | 更新触发器 |
+| POST | `/triggers` | 创建触发器（必填：`session_id`、`content`、`trigger_time`） |
+| PUT | `/triggers/:id` | 部分更新触发器（只传需要改的字段，不会清空未传字段） |
 | DELETE | `/triggers/:id` | 删除触发器 |
 
 `trigger_time` 支持三种格式：
@@ -164,7 +164,11 @@ POST /chat/send
 - `"10:30:00"` — 每天固定时间
 - `"1h30m"` — 固定间隔
 
-`max_fires: -1` 表示无限触发。会话列表接口返回 `has_triggers` 字段标识该会话是否关联了触发器。
+`max_fires`: `-1` 表示无限触发，`0` 或不传时默认为 `1`。
+
+PUT 接口支持 partial update，可更新的字段：`content`、`trigger_time`、`max_fires`、`enabled`。未传的字段保持原值不变。
+
+会话列表接口返回 `has_triggers` 字段标识该会话是否关联了触发器。
 
 ## WebSocket
 

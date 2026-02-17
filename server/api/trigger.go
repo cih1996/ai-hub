@@ -73,6 +73,7 @@ func CreateTrigger(c *gin.Context) {
 }
 
 // UpdateTrigger PUT /api/v1/triggers/:id
+// 使用指针类型做 partial update，只更新请求中实际传了的字段
 func UpdateTrigger(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
@@ -84,15 +85,28 @@ func UpdateTrigger(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "trigger not found"})
 		return
 	}
-	var req model.Trigger
+	var req struct {
+		Content     *string `json:"content"`
+		TriggerTime *string `json:"trigger_time"`
+		MaxFires    *int    `json:"max_fires"`
+		Enabled     *bool   `json:"enabled"`
+	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	existing.Content = req.Content
-	existing.TriggerTime = req.TriggerTime
-	existing.MaxFires = req.MaxFires
-	existing.Enabled = req.Enabled
+	if req.Content != nil {
+		existing.Content = *req.Content
+	}
+	if req.TriggerTime != nil {
+		existing.TriggerTime = *req.TriggerTime
+	}
+	if req.MaxFires != nil {
+		existing.MaxFires = *req.MaxFires
+	}
+	if req.Enabled != nil {
+		existing.Enabled = *req.Enabled
+	}
 	if !existing.Enabled {
 		existing.Status = "disabled"
 	} else if existing.Status == "disabled" || existing.Status == "failed" {

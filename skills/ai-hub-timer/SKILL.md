@@ -59,7 +59,7 @@ curl -X POST http://localhost:8080/api/v1/triggers \
 | 每日固定时间 | `"09:00:00"` | 每天这个时间触发 |
 | 固定间隔 | `"1h30m"` / `"30m"` / `"2h"` | 每隔一段时间触发 |
 
-**max_fires** — 最大触发次数。`-1` = 无限，`1` = 只触发一次，`5` = 最多触发 5 次。
+**max_fires** — 最大触发次数。`-1` = 无限，`1` = 只触发一次，`5` = 最多触发 5 次。创建时不传或传 `0` 默认为 `1`。
 
 ---
 
@@ -128,21 +128,24 @@ curl http://localhost:8080/api/v1/triggers
 
 ## 修改触发器
 
+PUT 接口支持 **partial update**（部分更新），只传需要修改的字段，未传的字段保持原值不变。
+
 ```bash
 curl -X PUT http://localhost:8080/api/v1/triggers/{id} \
   -H "Content-Type: application/json" \
   -d '{
-    "content": "新的指令内容",
-    "trigger_time": "10:00:00",
-    "enabled": true
+    "content": "新的指令内容"
   }'
 ```
 
-可以只传需要修改的字段。常见场景：
-- 修改触发时间：改 `trigger_time`
-- 修改执行内容：改 `content`
-- 暂停触发器：`"enabled": false`
-- 恢复触发器：`"enabled": true`
+可更新的字段：`content`、`trigger_time`、`max_fires`、`enabled`。
+
+常见场景：
+- 只改执行内容：`{"content": "新指令"}`
+- 只改触发时间：`{"trigger_time": "10:00:00"}`
+- 暂停触发器：`{"enabled": false}`
+- 恢复触发器：`{"enabled": true}`
+- 同时改多个字段：`{"content": "新指令", "trigger_time": "2h", "max_fires": -1}`
 
 ---
 
