@@ -63,6 +63,9 @@ func main() {
 	// Install default CLAUDE.md rules (skip if already exists)
 	installClaudeRules()
 
+	// Render templates to ~/.claude/ on startup
+	core.RenderAllTemplates()
+
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.RedirectTrailingSlash = false
