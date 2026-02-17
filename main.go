@@ -89,6 +89,7 @@ func main() {
 		v1.PUT("/sessions/:id", api.UpdateSession)
 		v1.DELETE("/sessions/:id", api.DeleteSession)
 		v1.GET("/sessions/:id/messages", api.GetMessages)
+		v1.POST("/sessions/:id/compress", api.CompressSession)
 
 		// Chat
 		v1.POST("/chat/send", api.SendChat)

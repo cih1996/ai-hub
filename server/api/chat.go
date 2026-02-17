@@ -117,7 +117,7 @@ func (s *ActiveStream) Cancel() {
 var (
 	claudeClient    = core.NewClaudeCodeClient()
 	openaiClient    = core.NewOpenAIClient()
-	activeStreams    = make(map[int64]*ActiveStream)
+	activeStreams   = make(map[int64]*ActiveStream)
 	activeStreamsMu sync.RWMutex
 )
 
@@ -325,12 +325,26 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 			Result           string          `json:"result"`
 			Event            json.RawMessage `json:"event"`
 			ConversationName string          `json:"conversation_name"`
+			Error            *struct {
+				Message string `json:"message"`
+				Type    string `json:"type"`
+			} `json:"error"`
 		}
 		if err := json.Unmarshal([]byte(line), &wrapper); err != nil {
+			log.Printf("[claude] json parse error: %v, line: %.200s", err, line)
 			return
 		}
 
 		switch wrapper.Type {
+		case "error":
+			// API-level error
+			errMsg := "unknown error"
+			if wrapper.Error != nil && wrapper.Error.Message != "" {
+				errMsg = wrapper.Error.Message
+			}
+			log.Printf("[claude] API error: %s", errMsg)
+			send(WSMessage{Type: "error", SessionID: sessID, Content: errMsg})
+
 		case "stream_event":
 			// Real-time streaming events from --include-partial-messages
 			var inner struct {
@@ -402,6 +416,7 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 			}
 
 		// Ignore "assistant" and "system" types — they are duplicates of stream_event data
+		default:
 		}
 	})
 	return fullResponse, err

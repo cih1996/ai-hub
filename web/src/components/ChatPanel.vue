@@ -147,6 +147,20 @@ function formatToolInput(raw: string): string {
       <div class="header-right">
         <span class="header-context">{{ contextCount }} 条上下文</span>
         <button
+          class="btn-compress"
+          @click="store.compressContext()"
+          :disabled="store.streaming"
+          title="压缩上下文（重置 CLI 会话，保留最近对话摘要）"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="4 14 10 14 10 20"/>
+            <polyline points="20 10 14 10 14 4"/>
+            <line x1="14" y1="10" x2="21" y2="3"/>
+            <line x1="3" y1="21" x2="10" y2="14"/>
+          </svg>
+          压缩
+        </button>
+        <button
           v-if="store.currentSession.work_dir"
           class="btn-rules"
           @click="openRulesModal"
@@ -413,6 +427,25 @@ function formatToolInput(raw: string): string {
 .btn-rules:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
+}
+.btn-compress {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  transition: all var(--transition);
+}
+.btn-compress:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.btn-compress:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .messages {
   flex: 1;

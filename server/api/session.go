@@ -3,10 +3,13 @@ package api
 import (
 	"ai-hub/server/model"
 	"ai-hub/server/store"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 // SessionResponse wraps Session with runtime streaming status
@@ -109,4 +112,85 @@ func GetMessages(c *gin.Context) {
 		msgs = []model.Message{}
 	}
 	c.JSON(http.StatusOK, msgs)
+}
+
+// CompressSession handles POST /api/v1/sessions/:id/compress
+// Generates a new claude_session_id, builds a condensed summary from recent messages,
+// and starts a new CLI stream with the summary as the first message.
+func CompressSession(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid session id"})
+		return
+	}
+
+	if IsSessionStreaming(id) {
+		c.JSON(http.StatusConflict, gin.H{"error": "session is currently streaming"})
+		return
+	}
+
+	session, err := store.GetSession(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return
+	}
+
+	msgs, err := store.GetMessages(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get messages"})
+		return
+	}
+
+	condensedQuery := buildCondensedQuery(msgs)
+
+	newUUID := uuid.New().String()
+	if err := store.UpdateClaudeSessionID(id, newUUID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update session id"})
+		return
+	}
+	session.ClaudeSessionID = newUUID
+
+	// Save a system message indicating compression
+	sysMsg := &model.Message{
+		SessionID: session.ID,
+		Role:      "user",
+		Content:   "【系统】上下文已压缩，会话已重置。",
+	}
+	store.AddMessage(sysMsg)
+
+	// Kick off new stream with condensed query (not resume)
+	go runStream(session, condensedQuery, false)
+
+	c.JSON(http.StatusOK, gin.H{"ok": true, "message": "context compressed, new session started"})
+}
+
+// buildCondensedQuery takes recent messages and builds a condensed prompt for context recovery.
+func buildCondensedQuery(msgs []model.Message) string {
+	const maxMsgs = 10
+	const maxContentLen = 500
+
+	start := 0
+	if len(msgs) > maxMsgs {
+		start = len(msgs) - maxMsgs
+	}
+	recent := msgs[start:]
+
+	var sb strings.Builder
+	sb.WriteString("【上下文恢复】之前的对话因上下文过长被手动压缩。以下是最近的对话记录，请基于这些信息继续工作：\n\n")
+
+	for _, m := range recent {
+		role := "用户"
+		if m.Role == "assistant" {
+			role = "助手"
+		}
+		content := m.Content
+		runes := []rune(content)
+		if len(runes) > maxContentLen {
+			content = string(runes[:maxContentLen]) + "...(已截断)"
+		}
+		sb.WriteString(fmt.Sprintf("[%s]: %s\n\n", role, content))
+	}
+
+	sb.WriteString("---\n请继续处理上面最后一条用户消息的请求。如果之前有未完成的任务，请继续完成。")
+	return sb.String()
 }

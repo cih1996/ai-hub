@@ -140,6 +140,12 @@ func UpdateSessionTitle(id int64, title string) error {
 	return err
 }
 
+// UpdateClaudeSessionID replaces the Claude CLI session UUID (used for context overflow recovery).
+func UpdateClaudeSessionID(id int64, newUUID string) error {
+	_, err := DB.Exec(`UPDATE sessions SET claude_session_id=?, updated_at=? WHERE id=?`, newUUID, time.Now(), id)
+	return err
+}
+
 func truncateTitle(s string) string {
 	for i, c := range s {
 		if c == '\n' || c == '\r' {

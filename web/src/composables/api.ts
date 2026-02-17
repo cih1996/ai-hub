@@ -33,6 +33,10 @@ export const deleteSession = (id: number) =>
 export const getMessages = (sessionId: number) =>
   request<Message[]>(`/sessions/${sessionId}/messages`)
 
+// Compress session context
+export const compressSession = (id: number) =>
+  request<{ ok: boolean }>(`/sessions/${id}/compress`, { method: 'POST' })
+
 // Chat
 export const sendChat = (sessionId: number, content: string, workDir?: string) =>
   request<{ session_id: number; status: string }>('/chat/send', {

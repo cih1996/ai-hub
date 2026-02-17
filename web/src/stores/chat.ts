@@ -239,6 +239,30 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  async function compressContext() {
+    if (!currentSessionId.value || streaming.value) return
+    streaming.value = true
+    streamingContent.value = ''
+    thinkingContent.value = ''
+    toolCalls.value = []
+    try {
+      await api.compressSession(currentSessionId.value)
+      // Subscribe to receive the compressed stream response
+      if (ws.value && ws.value.readyState === WebSocket.OPEN) {
+        ws.value.send(JSON.stringify({ type: 'subscribe', session_id: currentSessionId.value }))
+      }
+    } catch (e: any) {
+      streaming.value = false
+      messages.value.push({
+        id: Date.now(),
+        session_id: currentSessionId.value,
+        role: 'assistant',
+        content: `压缩失败: ${e.message}`,
+        created_at: new Date().toISOString(),
+      })
+    }
+  }
+
   return {
     sessions,
     currentSessionId,
@@ -259,5 +283,6 @@ export const useChatStore = defineStore('chat', () => {
     deleteSessionById,
     sendMessage,
     stopStreaming,
+    compressContext,
   }
 })
