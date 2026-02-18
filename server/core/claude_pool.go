@@ -288,6 +288,22 @@ func (proc *PersistentProcess) SendAndStream(ctx context.Context, query string, 
 
 	// Write NDJSON message to stdin
 	// Claude CLI stream-json expects: {"type":"user","message":{"role":"user","content":"..."}}
+
+	// Drain stale events from previous interaction (e.g. assistant/system events after result)
+	drainCount := 0
+	for {
+		select {
+		case <-proc.eventCh:
+			drainCount++
+		default:
+			goto drained
+		}
+	}
+drained:
+	if drainCount > 0 {
+		log.Printf("[pool] session %d: drained %d stale events", proc.hubSessionID, drainCount)
+	}
+
 	msg := map[string]interface{}{
 		"type": "user",
 		"message": map[string]string{
