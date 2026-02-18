@@ -317,7 +317,7 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 	// Track content block index -> tool ID for correlating deltas
 	toolIDs := make(map[int]string)
 
-	err := claudeClient.Stream(ctx, req, func(line string) {
+	err := claudeClient.StreamPersistent(ctx, req, func(line string) {
 		// First parse the top-level wrapper
 		var wrapper struct {
 			Type             string          `json:"type"`

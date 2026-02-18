@@ -55,6 +55,10 @@ func main() {
 	core.InitTemplates(*dataDir)
 	core.SetPort(*port)
 
+	// Init persistent process pool
+	core.InitPool(core.NewClaudeCodeClient())
+	defer core.Pool.ShutdownPool()
+
 	// Init API data dir (for skills disable path)
 	api.InitDataDir(*dataDir)
 

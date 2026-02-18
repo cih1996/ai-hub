@@ -1,6 +1,7 @@
 package api
 
 import (
+	"ai-hub/server/core"
 	"ai-hub/server/model"
 	"ai-hub/server/store"
 	"fmt"
@@ -15,8 +16,13 @@ import (
 // SessionResponse wraps Session with runtime streaming status
 type SessionResponse struct {
 	model.Session
-	Streaming   bool `json:"streaming"`
-	HasTriggers bool `json:"has_triggers"`
+	Streaming    bool   `json:"streaming"`
+	HasTriggers  bool   `json:"has_triggers"`
+	ProcessAlive bool   `json:"process_alive"`
+	ProcessPid   int    `json:"process_pid,omitempty"`
+	ProcessState string `json:"process_state,omitempty"`
+	UptimeSec    int64  `json:"uptime_sec,omitempty"`
+	IdleSec      int64  `json:"idle_sec,omitempty"`
 }
 
 func ListSessions(c *gin.Context) {
@@ -27,13 +33,22 @@ func ListSessions(c *gin.Context) {
 	}
 	streamingIDs := GetStreamingSessionIDs()
 	triggerSessions, _ := store.SessionsWithTriggers()
+	poolStatus := core.Pool.Status()
 	resp := make([]SessionResponse, 0, len(list))
 	for _, s := range list {
-		resp = append(resp, SessionResponse{
+		sr := SessionResponse{
 			Session:     s,
 			Streaming:   streamingIDs[s.ID],
 			HasTriggers: triggerSessions[s.ID],
-		})
+		}
+		if info, ok := poolStatus[s.ID]; ok {
+			sr.ProcessAlive = true
+			sr.ProcessPid = info.Pid
+			sr.ProcessState = info.State
+			sr.UptimeSec = info.UptimeSec
+			sr.IdleSec = info.IdleSec
+		}
+		resp = append(resp, sr)
 	}
 	c.JSON(http.StatusOK, resp)
 }
@@ -90,6 +105,7 @@ func DeleteSession(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid session id"})
 		return
 	}
+	core.Pool.Kill(id)
 	if err := store.DeleteSession(id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -144,6 +160,7 @@ func CompressSession(c *gin.Context) {
 	condensedQuery := buildCondensedQuery(msgs)
 
 	newUUID := uuid.New().String()
+	core.Pool.Kill(id)
 	if err := store.UpdateClaudeSessionID(id, newUUID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update session id"})
 		return

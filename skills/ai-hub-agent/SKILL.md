@@ -90,13 +90,24 @@ curl http://localhost:$AI_HUB_PORT/api/v1/sessions
     "provider_id": "uuid",
     "work_dir": "/path/to/project",
     "streaming": true,
+    "process_alive": true,
+    "process_pid": 12345,
+    "process_state": "busy",
+    "uptime_sec": 3600,
+    "idle_sec": 0,
     "created_at": "...",
     "updated_at": "..."
   }
 ]
 ```
 
-`streaming: true` 表示正在处理中，`false` 表示空闲可接收新指令。
+字段说明：
+- `streaming: true` 表示正在处理消息，`false` 表示空闲可接收新指令
+- `process_alive: true` 表示有持久 CLI 进程在运行（MCP 连接保持中）
+- `process_pid` — 进程 PID，可用于调试
+- `process_state` — `idle`（等待指令）或 `busy`（正在处理）
+- `uptime_sec` — 进程已运行时长（秒）
+- `idle_sec` — 距上次活跃的空闲时长（秒），超过 30 分钟会被自动回收
 
 查看单个会话：
 ```bash
@@ -279,10 +290,12 @@ curl -X DELETE http://localhost:$AI_HUB_PORT/api/v1/triggers/1
 
 ## 注意事项
 
-1. 每个会话是独立的 CLI 进程，有独立上下文，会话之间不共享记忆
-2. 同一会话不能并发发送消息，必须等上一条处理完
-3. `work_dir` 决定了 CLI 的工作目录，影响文件读写和项目上下文
-4. 会话标题由 AI 自动生成，你也可以通过 PUT /sessions/:id 修改
-5. 创建会话时不需要指定 provider，系统自动使用默认 provider
-6. 你自己也运行在一个会话中，不要向自己的 session_id 发送消息
-7. 你的会话 ID 可通过 `$AI_HUB_SESSION_ID` 环境变量获取，用于查询和管理自己的触发器
+1. 每个会话对应一个持久 CLI 进程，首次发消息时自动创建，空闲 30 分钟后自动回收
+2. 持久进程保持 MCP Server 连接，多轮对话间不会断开
+3. 同一会话不能并发发送消息，必须等上一条处理完
+4. `work_dir` 决定了 CLI 的工作目录，影响文件读写和项目上下文
+5. 会话标题由 AI 自动生成，你也可以通过 PUT /sessions/:id 修改
+6. 创建会话时不需要指定 provider，系统自动使用默认 provider
+7. 你自己也运行在一个会话中，不要向自己的 session_id 发送消息
+8. 你的会话 ID 可通过 `$AI_HUB_SESSION_ID` 环境变量获取，用于查询和管理自己的触发器
+9. 通过 `process_alive` 字段可判断会话是否有活跃进程，`idle_sec` 可判断进程空闲时长

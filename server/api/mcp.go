@@ -22,29 +22,55 @@ type ToggleMcpRequest struct {
 	Enable bool   `json:"enable"`
 }
 
-func claudeJsonPath() string {
+// mcpConfigPaths returns candidate paths for MCP config, ordered by priority.
+func mcpConfigPaths() []string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".claude.json")
+	return []string{
+		filepath.Join(home, ".claude.json"),
+		filepath.Join(home, ".claude", "settings.json"),
+	}
 }
 
-func readClaudeJson() (map[string]interface{}, error) {
-	data, err := os.ReadFile(claudeJsonPath())
+// detectMcpConfigPath finds which file actually contains mcpServers.
+// Falls back to the first candidate if none contains it.
+func detectMcpConfigPath() string {
+	for _, p := range mcpConfigPaths() {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		var obj map[string]interface{}
+		if json.Unmarshal(data, &obj) != nil {
+			continue
+		}
+		if _, ok := obj["mcpServers"]; ok {
+			return p
+		}
+		if _, ok := obj["disabledMcpServers"]; ok {
+			return p
+		}
+	}
+	return mcpConfigPaths()[0]
+}
+
+func readMcpConfig() (string, map[string]interface{}, error) {
+	path := detectMcpConfigPath()
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return map[string]interface{}{}, nil
+		return path, map[string]interface{}{}, nil
 	}
 	var obj map[string]interface{}
 	if err := json.Unmarshal(data, &obj); err != nil {
-		return nil, err
+		return path, nil, err
 	}
-	return obj, nil
+	return path, obj, nil
 }
 
-func writeClaudeJson(obj map[string]interface{}) error {
+func writeMcpConfig(path string, obj map[string]interface{}) error {
 	data, err := json.MarshalIndent(obj, "", "  ")
 	if err != nil {
 		return err
 	}
-	path := claudeJsonPath()
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0644); err != nil {
 		return err
@@ -80,7 +106,7 @@ func parseMcpServer(name string, raw interface{}) McpServerInfo {
 }
 
 func ListMcp(c *gin.Context) {
-	obj, err := readClaudeJson()
+	_, obj, err := readMcpConfig()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -114,7 +140,7 @@ func ToggleMcp(c *gin.Context) {
 		return
 	}
 
-	obj, err := readClaudeJson()
+	path, obj, err := readMcpConfig()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -146,7 +172,7 @@ func ToggleMcp(c *gin.Context) {
 	obj["mcpServers"] = enabled
 	obj["disabledMcpServers"] = disabled
 
-	if err := writeClaudeJson(obj); err != nil {
+	if err := writeMcpConfig(path, obj); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

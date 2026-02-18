@@ -127,7 +127,7 @@ func (c *ClaudeCodeClient) Stream(ctx context.Context, req ClaudeCodeRequest, on
 	}()
 
 	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	scanner.Buffer(make([]byte, 1024*1024), 10*1024*1024)
 	gotData := false
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -156,6 +156,39 @@ func (c *ClaudeCodeClient) Stream(ctx context.Context, req ClaudeCodeRequest, on
 		return fmt.Errorf("claude CLI failed: %w", waitErr)
 	}
 	return nil
+}
+
+// StreamPersistent uses the process pool for persistent CLI processes.
+// Falls back to one-shot Stream() if pool is unavailable or process fails.
+func (c *ClaudeCodeClient) StreamPersistent(ctx context.Context, req ClaudeCodeRequest, onData func(string)) error {
+	if Pool == nil {
+		return c.Stream(ctx, req, onData)
+	}
+
+	proc, err := Pool.GetOrCreate(req, req.Resume)
+	if err != nil {
+		log.Printf("[pool] GetOrCreate failed, falling back: %v", err)
+		return c.Stream(ctx, req, onData)
+	}
+
+	err = proc.SendAndStream(ctx, req.Query, onData)
+	if err == nil || ctx.Err() != nil {
+		return err
+	}
+
+	// Process died unexpectedly — retry once with resume
+	if proc.IsDead() {
+		log.Printf("[pool] process died, retrying for session %d", req.HubSessionID)
+		Pool.Kill(req.HubSessionID)
+		req.Resume = true
+		proc, err = Pool.GetOrCreate(req, true)
+		if err != nil {
+			log.Printf("[pool] retry failed, falling back: %v", err)
+			return c.Stream(ctx, req, onData)
+		}
+		return proc.SendAndStream(ctx, req.Query, onData)
+	}
+	return err
 }
 
 func maskKey(key string) string {

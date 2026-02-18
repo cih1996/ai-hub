@@ -7,15 +7,16 @@
 ## 架构
 
 ```
-Vue3 前端 <── WebSocket/REST ──> Go 后端 <── 子进程 ──> Claude Code CLI
-                                    │
-                                    └──> SQLite (~/.ai-hub/ai-hub.db)
+Vue3 前端 <── WebSocket/REST ──> Go 后端 <── 持久子进程池 ──> Claude Code CLI
+                                    │                              │
+                                    └──> SQLite (~/.ai-hub/ai-hub.db)  └──> MCP Servers
 ```
 
 - 发送消息通过 HTTP API，立即返回
 - AI 处理结果通过 WebSocket 实时推送
 - 多标签页/多客户端通过 WS 广播同步状态
-- Claude Code CLI 模式内置会话管理和上下文压缩，无需传递历史消息
+- Claude Code CLI 以持久进程模式运行（`--input-format stream-json`），同一会话复用进程，MCP Server 在多轮对话间保持连接
+- 进程按需创建（懒加载），空闲 30 分钟自动回收
 - OpenAI 兼容模式自动携带完整历史上下文
 
 ## 部署
@@ -140,12 +141,24 @@ POST /chat/send
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/sessions` | 获取会话列表（含 `streaming` 状态、`work_dir` 字段） |
+| GET | `/sessions` | 获取会话列表（含 `streaming`、`process_alive`、`process_pid` 等运行时状态） |
 | POST | `/sessions` | 创建会话 |
 | GET | `/sessions/:id` | 获取单个会话 |
 | PUT | `/sessions/:id` | 更新会话 |
 | DELETE | `/sessions/:id` | 删除会话及其消息 |
 | GET | `/sessions/:id/messages` | 获取会话的所有消息 |
+
+会话列表返回的运行时字段：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `streaming` | bool | 是否正在处理消息 |
+| `has_triggers` | bool | 是否关联了定时触发器 |
+| `process_alive` | bool | 是否有持久 CLI 进程在运行 |
+| `process_pid` | int | 进程 PID（仅 process_alive=true 时有值） |
+| `process_state` | string | 进程状态：`idle`（空闲）/ `busy`（处理中） |
+| `uptime_sec` | int | 进程已运行时长（秒） |
+| `idle_sec` | int | 距上次活跃的空闲时长（秒） |
 
 ### 系统状态
 
