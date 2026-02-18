@@ -21,9 +21,10 @@ const tabs: { key: string; label: string; desc: string }[] = [
   { key: 'rules', label: '全局', desc: '~/.claude/CLAUDE.md + ~/.claude/rules/' },
   { key: 'knowledge', label: '知识库', desc: '~/.claude/knowledge/' },
   { key: 'memory', label: '记忆', desc: '~/.claude/memory/' },
+  { key: 'notes', label: '笔记', desc: '~/.claude/notes/' },
 ]
 
-type Scope = 'rules' | 'knowledge' | 'memory'
+type Scope = 'rules' | 'knowledge' | 'memory' | 'notes'
 
 const activeTab = ref<Scope>('rules')
 const activeTabDesc = ref('~/.claude/CLAUDE.md + ~/.claude/rules/')

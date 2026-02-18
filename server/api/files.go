@@ -58,6 +58,8 @@ func scopeDir(base, scope string) string {
 		return filepath.Join(base, "memory")
 	case "rules":
 		return filepath.Join(base, "rules")
+	case "notes":
+		return filepath.Join(base, "notes")
 	default:
 		return ""
 	}
