@@ -11,8 +11,10 @@ import (
 	"log"
 	"mime"
 	"os"
+	"os/signal"
 	"path"
 	"path/filepath"
+	"syscall"
 
 	"github.com/gin-gonic/gin"
 )
@@ -149,7 +151,7 @@ func main() {
 		v1.PUT("/triggers/:id", api.UpdateTrigger)
 		v1.DELETE("/triggers/:id", api.DeleteTrigger)
 
-		// Vector engine (MCP tools)
+		// Vector engine (Skill tools)
 		v1.POST("/vector/search_knowledge", api.SearchKnowledge)
 		v1.POST("/vector/search_memory", api.SearchMemory)
 		v1.POST("/vector/read_knowledge", api.ReadKnowledge)
@@ -195,6 +197,21 @@ func main() {
 
 	// Start trigger scheduler
 	core.StartTriggerLoop(*port)
+
+	// Signal handling: ensure cleanup on SIGINT/SIGTERM
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-quit
+		log.Println("[main] shutting down...")
+		if core.Vector != nil {
+			core.Vector.Stop()
+		}
+		vectorWatcher.Stop()
+		core.Pool.ShutdownPool()
+		store.Close()
+		os.Exit(0)
+	}()
 
 	addr := fmt.Sprintf(":%d", *port)
 	log.Printf("AI Hub running at http://localhost%s", addr)

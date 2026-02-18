@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -180,6 +181,7 @@ func (v *VectorEngine) startProcess() error {
 		"VECTOR_DB_PATH="+filepath.Join(v.baseDir, "data"),
 		"EMBEDDING_MODEL_PATH="+filepath.Join(v.baseDir, "models"),
 	)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
@@ -224,15 +226,39 @@ func (v *VectorEngine) waitHealthy(timeout time.Duration) error {
 	return fmt.Errorf("timeout after %s", timeout)
 }
 
-// Stop shuts down the vector engine subprocess
+// Stop shuts down the vector engine subprocess gracefully
 func (v *VectorEngine) Stop() {
 	v.mu.Lock()
 	defer v.mu.Unlock()
+	v.ready = false
+
+	if v.cmd != nil && v.cmd.Process != nil {
+		pid := v.cmd.Process.Pid
+		// Send SIGTERM to process group
+		syscall.Kill(-pid, syscall.SIGTERM)
+		log.Printf("[vector] sent SIGTERM to pgid %d", pid)
+
+		// Wait up to 5 seconds for graceful exit
+		done := make(chan struct{})
+		go func() {
+			v.cmd.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+			log.Println("[vector] process exited gracefully")
+		case <-time.After(5 * time.Second):
+			// Force kill process group
+			syscall.Kill(-pid, syscall.SIGKILL)
+			log.Printf("[vector] sent SIGKILL to pgid %d", pid)
+			<-done
+		}
+	}
+
 	if v.cancel != nil {
 		v.cancel()
 		v.cancel = nil
 	}
-	v.ready = false
 	log.Println("[vector] stopped")
 }
 
