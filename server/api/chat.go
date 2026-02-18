@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -37,6 +38,7 @@ type wsClient struct {
 func (c *wsClient) Send(msg WSMessage) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 	c.conn.WriteJSON(msg)
 }
 
@@ -129,9 +131,34 @@ func HandleChat(c *gin.Context) {
 	}
 	defer conn.Close()
 
+	// Heartbeat: ping every 30s, expect pong within 60s
+	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		return nil
+	})
+
+	pingDone := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+					return
+				}
+			case <-pingDone:
+				return
+			}
+		}
+	}()
+
 	client := &wsClient{conn: conn}
 	registerClient(client)
 	defer unregisterClient(client)
+	defer close(pingDone)
 
 	sendJSON := func(msg WSMessage) {
 		client.Send(msg)

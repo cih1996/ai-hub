@@ -37,6 +37,15 @@ func parseTriggerKind(s string) triggerKind {
 	return kindInvalid
 }
 
+// ValidateTriggerTime checks if the trigger_time format is supported.
+// Returns an error message if invalid, empty string if valid.
+func ValidateTriggerTime(s string) string {
+	if parseTriggerKind(s) == kindInvalid {
+		return "不支持的 trigger_time 格式，支持: \"2006-01-02 15:04:05\"(精确时间), \"15:04:05\"(每日), \"1h30m\"(间隔)"
+	}
+	return ""
+}
+
 func CalcNextFireAt(t *model.Trigger, now time.Time) string {
 	switch parseTriggerKind(t.TriggerTime) {
 	case kindExact:

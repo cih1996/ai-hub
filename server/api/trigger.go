@@ -53,6 +53,10 @@ func CreateTrigger(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "session_id, content, trigger_time required"})
 		return
 	}
+	if errMsg := core.ValidateTriggerTime(t.TriggerTime); errMsg != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": errMsg})
+		return
+	}
 	// 验证会话存在
 	if _, err := store.GetSession(t.SessionID); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "session not found"})
@@ -99,6 +103,10 @@ func UpdateTrigger(c *gin.Context) {
 		existing.Content = *req.Content
 	}
 	if req.TriggerTime != nil {
+		if errMsg := core.ValidateTriggerTime(*req.TriggerTime); errMsg != "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": errMsg})
+			return
+		}
 		existing.TriggerTime = *req.TriggerTime
 	}
 	if req.MaxFires != nil {
