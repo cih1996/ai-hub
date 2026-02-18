@@ -64,6 +64,9 @@ func main() {
 	core.InitPool(core.NewClaudeCodeClient())
 	defer core.Pool.ShutdownPool()
 
+	// Pass version to API layer
+	api.SetVersion(Version)
+
 	// Init API data dir (for skills disable path)
 	api.InitDataDir(*dataDir)
 
@@ -136,6 +139,7 @@ func main() {
 		// Status & deps
 		v1.GET("/status", api.GetStatus)
 		v1.POST("/status/retry-install", api.RetryInstall)
+		v1.GET("/version", api.GetVersion)
 
 		// Skills
 		v1.GET("/skills", api.ListSkills)

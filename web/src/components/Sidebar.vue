@@ -1,14 +1,23 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import type { Session } from '../types'
 import { useChatStore } from '../stores/chat'
 import { useRouter, useRoute } from 'vue-router'
+import * as api from '../composables/api'
 
 const store = useChatStore()
 const router = useRouter()
 const route = useRoute()
 
 const deleteTarget = ref<Session | null>(null)
+const version = ref('')
+
+onMounted(async () => {
+  try {
+    const res = await api.getVersion()
+    version.value = res.version
+  } catch {}
+})
 
 function confirmDelete() {
   if (deleteTarget.value) {
@@ -173,6 +182,7 @@ function formatTime(dateStr: string) {
         </svg>
         <span>Settings</span>
       </button>
+      <div v-if="version" class="version-text">{{ version }}</div>
     </div>
 
     <!-- Delete confirmation modal -->
@@ -348,6 +358,12 @@ function formatTime(dateStr: string) {
 .footer-btn:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
+}
+.version-text {
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 4px 0 2px;
 }
 .modal-overlay {
   position: fixed;

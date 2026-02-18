@@ -57,6 +57,7 @@ export interface DepsStatus {
   install_hint: string
 }
 export const getStatus = () => request<DepsStatus>('/status')
+export const getVersion = () => request<{ version: string }>('/version')
 export const retryInstall = () =>
   request<{ ok: boolean }>('/status/retry-install', { method: 'POST' })
 
