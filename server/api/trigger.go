@@ -57,9 +57,14 @@ func CreateTrigger(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": errMsg})
 		return
 	}
-	// 验证会话存在
-	if _, err := store.GetSession(t.SessionID); err != nil {
+	// 验证会话存在且已配置 provider
+	sess, err := store.GetSession(t.SessionID)
+	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "session not found"})
+		return
+	}
+	if sess.ProviderID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "session has no provider configured"})
 		return
 	}
 	if t.MaxFires == 0 {

@@ -67,7 +67,19 @@ export const useChatStore = defineStore('chat', () => {
       if (msg.type === 'session_update') {
         const s = sessions.value.find((s) => s.id === msg.session_id)
         if (s) {
+          const wasStreaming = s.streaming
           s.streaming = msg.content === 'streaming'
+          // When current session transitions to idle, reload messages to catch results
+          // (e.g. trigger-fired sessions where no subscribe was active during streaming)
+          if (wasStreaming && !s.streaming && msg.session_id === currentSessionId.value) {
+            streaming.value = false
+            streamingContent.value = ''
+            thinkingContent.value = ''
+            toolCalls.value = []
+            api.getMessages(msg.session_id).then((msgs) => {
+              messages.value = msgs
+            })
+          }
         }
         return
       }

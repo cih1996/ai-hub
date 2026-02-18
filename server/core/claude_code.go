@@ -176,17 +176,34 @@ func (c *ClaudeCodeClient) StreamPersistent(ctx context.Context, req ClaudeCodeR
 		return err
 	}
 
-	// Process died unexpectedly — retry once with resume
+	// Process died unexpectedly — retry with resume, then fallback to new session
 	if proc.IsDead() {
-		log.Printf("[pool] process died, retrying for session %d", req.HubSessionID)
 		Pool.Kill(req.HubSessionID)
+
+		// First retry: resume existing session
+		log.Printf("[pool] process died, retrying with --resume for session %d", req.HubSessionID)
 		req.Resume = true
 		proc, err = Pool.GetOrCreate(req, true)
-		if err != nil {
-			log.Printf("[pool] retry failed, falling back: %v", err)
-			return c.Stream(ctx, req, onData)
+		if err == nil {
+			err = proc.SendAndStream(ctx, req.Query, onData)
+			if err == nil {
+				return nil
+			}
 		}
-		return proc.SendAndStream(ctx, req.Query, onData)
+
+		// Second retry: start fresh (--session-id) if resume also failed
+		if proc == nil || proc.IsDead() {
+			Pool.Kill(req.HubSessionID)
+			log.Printf("[pool] resume failed, retrying with new session for session %d", req.HubSessionID)
+			req.Resume = false
+			proc, err = Pool.GetOrCreate(req, false)
+			if err != nil {
+				log.Printf("[pool] new session failed, falling back: %v", err)
+				return c.Stream(ctx, req, onData)
+			}
+			return proc.SendAndStream(ctx, req.Query, onData)
+		}
+		return err
 	}
 	return err
 }
