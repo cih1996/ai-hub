@@ -14,7 +14,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -181,7 +180,7 @@ func (v *VectorEngine) startProcess() error {
 		"VECTOR_DB_PATH="+filepath.Join(v.baseDir, "data"),
 		"EMBEDDING_MODEL_PATH="+filepath.Join(v.baseDir, "models"),
 	)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = newProcessGroupAttr()
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
@@ -234,9 +233,9 @@ func (v *VectorEngine) Stop() {
 
 	if v.cmd != nil && v.cmd.Process != nil {
 		pid := v.cmd.Process.Pid
-		// Send SIGTERM to process group
-		syscall.Kill(-pid, syscall.SIGTERM)
-		log.Printf("[vector] sent SIGTERM to pgid %d", pid)
+		// Send SIGTERM to process group (Unix) or kill process (Windows)
+		killProcessGroup(pid, false)
+		log.Printf("[vector] sent terminate signal to pid %d", pid)
 
 		// Wait up to 5 seconds for graceful exit
 		done := make(chan struct{})
@@ -248,9 +247,9 @@ func (v *VectorEngine) Stop() {
 		case <-done:
 			log.Println("[vector] process exited gracefully")
 		case <-time.After(5 * time.Second):
-			// Force kill process group
-			syscall.Kill(-pid, syscall.SIGKILL)
-			log.Printf("[vector] sent SIGKILL to pgid %d", pid)
+			// Force kill
+			killProcessGroup(pid, true)
+			log.Printf("[vector] force killed pid %d", pid)
 			<-done
 		}
 	}
