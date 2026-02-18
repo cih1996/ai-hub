@@ -1,0 +1,333 @@
+package core
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+)
+
+// VectorEngine manages the Python vector engine subprocess
+type VectorEngine struct {
+	mu       sync.RWMutex
+	cmd      *exec.Cmd
+	cancel   context.CancelFunc
+	port     int
+	baseURL  string
+	ready    bool
+	disabled bool
+	err      string
+
+	// paths
+	baseDir    string // ~/.ai-hub/vector-engine
+	venvDir    string
+	pythonPath string // venv python
+	scriptDir  string // ai-hub/vector-engine/
+}
+
+var Vector *VectorEngine
+
+// InitVectorEngine initializes and starts the vector engine in background.
+// Never blocks main startup — failures degrade gracefully.
+func InitVectorEngine(scriptDir string) {
+	home, _ := os.UserHomeDir()
+	baseDir := filepath.Join(home, ".ai-hub", "vector-engine")
+	port := 8090
+
+	Vector = &VectorEngine{
+		port:      port,
+		baseURL:   fmt.Sprintf("http://127.0.0.1:%d", port),
+		baseDir:   baseDir,
+		venvDir:   filepath.Join(baseDir, "venv"),
+		scriptDir: scriptDir,
+	}
+
+	go Vector.bootstrap()
+}
+
+func (v *VectorEngine) bootstrap() {
+	log.Println("[vector] starting bootstrap...")
+
+	// Step 1: check python3 >= 3.10
+	pyPath, err := v.detectPython()
+	if err != nil {
+		v.setDisabled("python not found: " + err.Error())
+		return
+	}
+	log.Printf("[vector] python: %s", pyPath)
+
+	// Step 2: create/check venv
+	if err := v.ensureVenv(pyPath); err != nil {
+		v.setDisabled("venv setup failed: " + err.Error())
+		return
+	}
+	log.Printf("[vector] venv ready: %s", v.venvDir)
+
+	// Step 3: install pip dependencies
+	if err := v.installDeps(); err != nil {
+		v.setDisabled("pip install failed: " + err.Error())
+		return
+	}
+	log.Println("[vector] pip dependencies ready")
+
+	// Step 4: start FastAPI service
+	if err := v.startProcess(); err != nil {
+		v.setDisabled("process start failed: " + err.Error())
+		return
+	}
+
+	// Step 5: wait for health check
+	if err := v.waitHealthy(60 * time.Second); err != nil {
+		v.setDisabled("health check failed: " + err.Error())
+		v.Stop()
+		return
+	}
+
+	v.mu.Lock()
+	v.ready = true
+	v.mu.Unlock()
+	log.Println("[vector] engine ready")
+}
+
+func (v *VectorEngine) detectPython() (string, error) {
+	for _, name := range []string{"python3", "python"} {
+		out, err := runCmd(name, "--version")
+		if err != nil {
+			continue
+		}
+		// parse "Python 3.x.y"
+		ver := strings.TrimSpace(out)
+		ver = strings.TrimPrefix(ver, "Python ")
+		parts := strings.Split(ver, ".")
+		if len(parts) < 2 {
+			continue
+		}
+		major, _ := strconv.Atoi(parts[0])
+		minor, _ := strconv.Atoi(parts[1])
+		if major == 3 && minor >= 10 {
+			path, _ := exec.LookPath(name)
+			return path, nil
+		}
+	}
+	return "", fmt.Errorf("python >= 3.10 required")
+}
+
+func (v *VectorEngine) ensureVenv(pyPath string) error {
+	venvPython := filepath.Join(v.venvDir, "bin", "python")
+	if _, err := os.Stat(venvPython); err == nil {
+		v.pythonPath = venvPython
+		return nil
+	}
+	os.MkdirAll(v.baseDir, 0755)
+	cmd := exec.Command(pyPath, "-m", "venv", v.venvDir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("%s: %s", err, strings.TrimSpace(string(out)))
+	}
+	v.pythonPath = venvPython
+	return nil
+}
+
+func (v *VectorEngine) installDeps() error {
+	reqFile := filepath.Join(v.scriptDir, "requirements.txt")
+	pip := filepath.Join(v.venvDir, "bin", "pip")
+	cmd := exec.Command(pip, "install", "-q", "-r", reqFile)
+	cmd.Env = append(os.Environ(), "VIRTUAL_ENV="+v.venvDir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("%s: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func (v *VectorEngine) startProcess() error {
+	ctx, cancel := context.WithCancel(context.Background())
+	mainPy := filepath.Join(v.scriptDir, "main.py")
+	cmd := exec.CommandContext(ctx, v.pythonPath, mainPy)
+	cmd.Env = append(os.Environ(),
+		"VIRTUAL_ENV="+v.venvDir,
+		fmt.Sprintf("VECTOR_ENGINE_PORT=%d", v.port),
+		"VECTOR_DB_PATH="+filepath.Join(v.baseDir, "data"),
+		"EMBEDDING_MODEL_PATH="+filepath.Join(v.baseDir, "models"),
+	)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Start(); err != nil {
+		cancel()
+		return err
+	}
+
+	v.mu.Lock()
+	v.cmd = cmd
+	v.cancel = cancel
+	v.mu.Unlock()
+
+	// monitor process exit
+	go func() {
+		err := cmd.Wait()
+		v.mu.Lock()
+		v.ready = false
+		if err != nil {
+			v.err = "process exited: " + err.Error()
+		}
+		v.mu.Unlock()
+		log.Printf("[vector] process exited: %v", err)
+	}()
+
+	return nil
+}
+
+func (v *VectorEngine) waitHealthy(timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	url := v.baseURL + "/health"
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(url)
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == 200 {
+				return nil
+			}
+		}
+		time.Sleep(2 * time.Second)
+	}
+	return fmt.Errorf("timeout after %s", timeout)
+}
+
+// Stop shuts down the vector engine subprocess
+func (v *VectorEngine) Stop() {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.cancel != nil {
+		v.cancel()
+		v.cancel = nil
+	}
+	v.ready = false
+	log.Println("[vector] stopped")
+}
+
+// IsReady returns whether the vector engine is available
+func (v *VectorEngine) IsReady() bool {
+	if v == nil {
+		return false
+	}
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	return v.ready
+}
+
+// Status returns current engine status for API
+func (v *VectorEngine) Status() map[string]interface{} {
+	if v == nil {
+		return map[string]interface{}{"ready": false, "disabled": true, "error": "not initialized"}
+	}
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	return map[string]interface{}{
+		"ready":    v.ready,
+		"disabled": v.disabled,
+		"error":    v.err,
+		"port":     v.port,
+	}
+}
+
+func (v *VectorEngine) setDisabled(reason string) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.disabled = true
+	v.err = reason
+	log.Printf("[vector] disabled: %s", reason)
+}
+
+// Embed sends text to the vector engine for embedding
+func (v *VectorEngine) Embed(scope, docID, text string, metadata map[string]interface{}) error {
+	if !v.IsReady() {
+		return fmt.Errorf("vector engine not ready")
+	}
+	body := map[string]interface{}{
+		"scope":  scope,
+		"doc_id": docID,
+		"text":   text,
+	}
+	if metadata != nil {
+		body["metadata"] = metadata
+	}
+	_, err := v.post("/embed", body)
+	return err
+}
+
+// Search performs semantic search
+func (v *VectorEngine) Search(scope, query string, topK int) ([]map[string]interface{}, error) {
+	if !v.IsReady() {
+		return nil, fmt.Errorf("vector engine not ready")
+	}
+	body := map[string]interface{}{
+		"scope": scope,
+		"query": query,
+		"top_k": topK,
+	}
+	resp, err := v.post("/search", body)
+	if err != nil {
+		return nil, err
+	}
+	results, _ := resp["results"].([]interface{})
+	items := make([]map[string]interface{}, 0, len(results))
+	for _, r := range results {
+		if m, ok := r.(map[string]interface{}); ok {
+			items = append(items, m)
+		}
+	}
+	return items, nil
+}
+
+// Delete removes a vector record
+func (v *VectorEngine) Delete(scope, docID string) error {
+	if !v.IsReady() {
+		return fmt.Errorf("vector engine not ready")
+	}
+	body := map[string]interface{}{
+		"scope":  scope,
+		"doc_id": docID,
+	}
+	_, err := v.post("/delete", body)
+	return err
+}
+
+// Stats returns hit statistics
+func (v *VectorEngine) Stats(scope string) (map[string]interface{}, error) {
+	if !v.IsReady() {
+		return nil, fmt.Errorf("vector engine not ready")
+	}
+	resp, err := http.Get(fmt.Sprintf("%s/stats?scope=%s", v.baseURL, scope))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var result map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&result)
+	return result, nil
+}
+
+func (v *VectorEngine) post(path string, body map[string]interface{}) (map[string]interface{}, error) {
+	data, _ := json.Marshal(body)
+	resp, err := http.Post(v.baseURL+path, "application/json", bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("vector engine %s returned %d: %s", path, resp.StatusCode, string(respBody))
+	}
+	var result map[string]interface{}
+	json.Unmarshal(respBody, &result)
+	return result, nil
+}

@@ -26,6 +26,9 @@ var builtinSkillsFS embed.FS
 //go:embed claude/*
 var claudeRulesFS embed.FS
 
+//go:embed vector-engine/*
+var vectorEngineFS embed.FS
+
 var (
 	Version = "dev"
 	BuildAt = ""
@@ -73,6 +76,19 @@ func main() {
 
 	// Render templates to ~/.claude/ on startup
 	core.RenderAllTemplates()
+
+	// Install vector engine scripts and start engine
+	vectorScriptDir := installVectorEngine()
+	core.InitVectorEngine(vectorScriptDir)
+	defer func() {
+		if core.Vector != nil {
+			core.Vector.Stop()
+		}
+	}()
+
+	// Start vector file watcher
+	vectorWatcher := core.StartVectorWatcher()
+	defer vectorWatcher.Stop()
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
@@ -132,6 +148,18 @@ func main() {
 		v1.POST("/triggers", api.CreateTrigger)
 		v1.PUT("/triggers/:id", api.UpdateTrigger)
 		v1.DELETE("/triggers/:id", api.DeleteTrigger)
+
+		// Vector engine (MCP tools)
+		v1.POST("/vector/search_knowledge", api.SearchKnowledge)
+		v1.POST("/vector/search_memory", api.SearchMemory)
+		v1.POST("/vector/read_knowledge", api.ReadKnowledge)
+		v1.POST("/vector/read_memory", api.ReadMemory)
+		v1.POST("/vector/write_knowledge", api.WriteKnowledge)
+		v1.POST("/vector/write_memory", api.WriteMemory)
+		v1.POST("/vector/delete_knowledge", api.DeleteKnowledge)
+		v1.POST("/vector/delete_memory", api.DeleteMemory)
+		v1.GET("/vector/stats", api.StatsVector)
+		v1.GET("/vector/status", api.VectorStatus)
 	}
 
 	// WebSocket
@@ -204,6 +232,37 @@ func installBuiltinSkills() {
 		return nil
 	})
 	log.Printf("[skills] built-in skills installed to %s", targetBase)
+}
+
+// installVectorEngine extracts embedded vector-engine/* to ~/.ai-hub/vector-engine/scripts/
+// and returns the script directory path.
+func installVectorEngine() string {
+	home, _ := os.UserHomeDir()
+	targetBase := filepath.Join(home, ".ai-hub", "vector-engine", "scripts")
+
+	fs.WalkDir(vectorEngineFS, "vector-engine", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		rel, _ := filepath.Rel("vector-engine", p)
+		if rel == "." {
+			return nil
+		}
+		target := filepath.Join(targetBase, rel)
+		if d.IsDir() {
+			os.MkdirAll(target, 0755)
+			return nil
+		}
+		data, err := vectorEngineFS.ReadFile(p)
+		if err != nil {
+			return nil
+		}
+		os.MkdirAll(filepath.Dir(target), 0755)
+		os.WriteFile(target, data, 0644)
+		return nil
+	})
+	log.Printf("[vector] scripts installed to %s", targetBase)
+	return targetBase
 }
 
 // installClaudeRules copies embedded claude/* to the templates directory (~/.ai-hub/templates/)

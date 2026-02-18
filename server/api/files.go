@@ -195,6 +195,11 @@ func WriteFile(c *gin.Context) {
 	os.MkdirAll(filepath.Dir(clPath), 0755)
 	os.WriteFile(clPath, []byte(rendered), 0644)
 
+	// Trigger vector sync for knowledge/memory
+	if req.Scope == "knowledge" || req.Scope == "memory" {
+		core.SyncFileToVector(req.Scope, clPath)
+	}
+
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
@@ -227,6 +232,11 @@ func CreateFile(c *gin.Context) {
 	os.MkdirAll(filepath.Dir(clPath), 0755)
 	os.WriteFile(clPath, []byte(rendered), 0644)
 
+	// Trigger vector sync for knowledge/memory
+	if req.Scope == "knowledge" || req.Scope == "memory" {
+		core.SyncFileToVector(req.Scope, clPath)
+	}
+
 	c.JSON(http.StatusCreated, gin.H{"ok": true})
 }
 
@@ -244,6 +254,13 @@ func DeleteFile(c *gin.Context) {
 	}
 	os.Remove(tplPath)
 	os.Remove(clPath)
+
+	// Clean vector record for knowledge/memory
+	if scope == "knowledge" || scope == "memory" {
+		docID := filepath.Base(clPath)
+		core.Vector.Delete(scope, docID)
+	}
+
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
