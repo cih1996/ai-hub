@@ -80,14 +80,21 @@ func (v *VectorEngine) bootstrap() {
 	}
 	log.Println("[vector] pip dependencies ready")
 
-	// Step 4: start FastAPI service
+	// Step 4: download embedding model (may take minutes on first run)
+	if err := v.downloadModel(); err != nil {
+		v.setDisabled("model download failed: " + err.Error())
+		return
+	}
+	log.Println("[vector] embedding model ready")
+
+	// Step 5: start FastAPI service
 	if err := v.startProcess(); err != nil {
 		v.setDisabled("process start failed: " + err.Error())
 		return
 	}
 
-	// Step 5: wait for health check
-	if err := v.waitHealthy(60 * time.Second); err != nil {
+	// Step 6: wait for health check (model already downloaded, only wait for server startup)
+	if err := v.waitHealthy(30 * time.Second); err != nil {
 		v.setDisabled("health check failed: " + err.Error())
 		v.Stop()
 		return
@@ -144,6 +151,21 @@ func (v *VectorEngine) installDeps() error {
 	cmd.Env = append(os.Environ(), "VIRTUAL_ENV="+v.venvDir)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("%s: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func (v *VectorEngine) downloadModel() error {
+	script := filepath.Join(v.scriptDir, "download_model.py")
+	cmd := exec.Command(v.pythonPath, script)
+	cmd.Env = append(os.Environ(),
+		"VIRTUAL_ENV="+v.venvDir,
+		"EMBEDDING_MODEL_PATH="+filepath.Join(v.baseDir, "models"),
+	)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("download_model.py failed: %s", err)
 	}
 	return nil
 }
