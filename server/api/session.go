@@ -86,17 +86,22 @@ func UpdateSession(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid session id"})
 		return
 	}
-	var s model.Session
-	if err := c.ShouldBindJSON(&s); err != nil {
+	// Read existing session first so missing fields keep their original values
+	existing, err := store.GetSession(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return
+	}
+	if err := c.ShouldBindJSON(existing); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	s.ID = id
-	if err := store.UpdateSession(&s); err != nil {
+	existing.ID = id // ensure ID is not changed
+	if err := store.UpdateSession(existing); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, s)
+	c.JSON(http.StatusOK, existing)
 }
 
 func DeleteSession(c *gin.Context) {
