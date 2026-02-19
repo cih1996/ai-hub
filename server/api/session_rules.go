@@ -1,6 +1,7 @@
 package api
 
 import (
+	"ai-hub/server/core"
 	"fmt"
 	"net/http"
 	"os"
@@ -70,6 +71,10 @@ func PutSessionRules(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "write failed: " + err.Error()})
 		return
 	}
+	// Kill existing process so next message rebuilds with new --system-prompt
+	if core.Pool != nil {
+		core.Pool.Kill(id)
+	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
@@ -84,6 +89,10 @@ func DeleteSessionRules(c *gin.Context) {
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+	// Kill existing process so next message rebuilds without --system-prompt
+	if core.Pool != nil {
+		core.Pool.Kill(id)
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
