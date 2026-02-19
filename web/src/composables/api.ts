@@ -135,6 +135,17 @@ export const writeProjectRule = (workDir: string, path: string, content: string)
     body: JSON.stringify({ work_dir: workDir, path, content }),
   })
 
+// Session rules
+export const getSessionRules = (id: number) =>
+  request<{ session_id: number; content: string }>(`/session-rules/${id}`)
+export const putSessionRules = (id: number, content: string) =>
+  request<{ ok: boolean }>(`/session-rules/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ content }),
+  })
+export const deleteSessionRules = (id: number) =>
+  request<{ ok: boolean }>(`/session-rules/${id}`, { method: 'DELETE' })
+
 // Triggers
 export const listTriggers = (sessionId?: number) =>
   request<Trigger[]>(sessionId ? `/triggers?session_id=${sessionId}` : '/triggers')

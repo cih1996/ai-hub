@@ -19,6 +19,12 @@ const selectedRulePath = ref('')
 const ruleContent = ref('')
 const ruleSaving = ref(false)
 
+// Session rules modal state
+const showSessionRulesModal = ref(false)
+const sessionRulesContent = ref('')
+const sessionRulesSaving = ref(false)
+const sessionRulesLoading = ref(false)
+
 marked.setOptions({ breaks: true, gfm: true })
 
 function renderMd(text: string): string {
@@ -113,6 +119,40 @@ async function saveRule() {
   }
 }
 
+// Session rules functions
+async function openSessionRulesModal() {
+  const sid = store.currentSession?.id
+  if (!sid) return
+  showSessionRulesModal.value = true
+  sessionRulesLoading.value = true
+  try {
+    const res = await api.getSessionRules(sid)
+    sessionRulesContent.value = res.content || ''
+  } catch {
+    sessionRulesContent.value = ''
+  } finally {
+    sessionRulesLoading.value = false
+  }
+}
+
+async function saveSessionRules() {
+  const sid = store.currentSession?.id
+  if (!sid) return
+  sessionRulesSaving.value = true
+  try {
+    await api.putSessionRules(sid, sessionRulesContent.value)
+  } finally {
+    sessionRulesSaving.value = false
+  }
+}
+
+async function deleteSessionRules() {
+  const sid = store.currentSession?.id
+  if (!sid) return
+  await api.deleteSessionRules(sid)
+  sessionRulesContent.value = ''
+}
+
 function formatToolInput(raw: string): string {
   if (!raw) return ''
   try {
@@ -171,6 +211,17 @@ function formatToolInput(raw: string): string {
             <polyline points="14 2 14 8 20 8"/>
           </svg>
           规则
+        </button>
+        <button
+          class="btn-rules"
+          @click="openSessionRulesModal"
+          title="会话规则（角色设定）"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/>
+            <circle cx="12" cy="7" r="4"/>
+          </svg>
+          角色
         </button>
       </div>
     </div>
@@ -362,6 +413,49 @@ function formatToolInput(raw: string): string {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Session rules modal -->
+    <Teleport to="body">
+      <div v-if="showSessionRulesModal" class="modal-overlay" @click="showSessionRulesModal = false">
+        <div class="rules-modal" @click.stop>
+          <div class="rules-modal-header">
+            <span class="rules-modal-title">会话规则</span>
+            <span class="rules-modal-dir">会话 #{{ store.currentSession?.id }}</span>
+            <button class="rules-modal-close" @click="showSessionRulesModal = false">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 6L6 18M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+          <div class="session-rules-body">
+            <div v-if="sessionRulesLoading" class="rules-empty">加载中...</div>
+            <template v-else>
+              <textarea
+                v-model="sessionRulesContent"
+                class="rules-textarea session-rules-textarea"
+                placeholder="输入会话角色规则（Markdown 格式）...&#10;&#10;例如：&#10;你是一名测试工程师，负责..."
+              />
+              <div class="rules-editor-actions session-rules-actions">
+                <button
+                  class="btn-delete-rule"
+                  @click="deleteSessionRules"
+                  :disabled="!sessionRulesContent"
+                >
+                  清除
+                </button>
+                <button
+                  class="btn-save-rule"
+                  :disabled="sessionRulesSaving"
+                  @click="saveSessionRules"
+                >
+                  {{ sessionRulesSaving ? '保存中...' : '保存' }}
+                </button>
+              </div>
+            </template>
           </div>
         </div>
       </div>
@@ -667,4 +761,22 @@ function formatToolInput(raw: string): string {
 }
 .btn-save-rule:hover:not(:disabled) { opacity: 0.9; }
 .btn-save-rule:disabled { opacity: 0.5; cursor: not-allowed; }
+/* Session rules */
+.session-rules-body {
+  display: flex; flex-direction: column; flex: 1; min-height: 0;
+}
+.session-rules-textarea {
+  min-height: 300px;
+}
+.session-rules-actions {
+  gap: 8px;
+}
+.btn-delete-rule {
+  padding: 6px 16px; border-radius: var(--radius);
+  font-size: 13px; font-weight: 500;
+  background: var(--bg-tertiary); color: var(--danger);
+  transition: opacity var(--transition);
+}
+.btn-delete-rule:hover:not(:disabled) { opacity: 0.8; }
+.btn-delete-rule:disabled { opacity: 0.4; cursor: not-allowed; }
 </style>
