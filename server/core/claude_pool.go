@@ -32,10 +32,11 @@ type PersistentProcess struct {
 
 // ProcessPool manages persistent Claude CLI processes keyed by hub session ID
 type ProcessPool struct {
-	mu        sync.RWMutex
-	processes map[int64]*PersistentProcess
-	client    *ClaudeCodeClient
-	stopCh    chan struct{}
+	mu            sync.RWMutex
+	processes     map[int64]*PersistentProcess
+	client        *ClaudeCodeClient
+	stopCh        chan struct{}
+	OnStateChange func(hubSessionID int64, alive bool, state string)
 }
 
 // Pool is the global process pool instance
@@ -83,6 +84,9 @@ func (p *ProcessPool) GetOrCreate(req ClaudeCodeRequest, isResume bool) (*Persis
 		return nil, err
 	}
 	p.processes[req.HubSessionID] = proc
+	if p.OnStateChange != nil {
+		go p.OnStateChange(req.HubSessionID, true, "idle")
+	}
 	return proc, nil
 }
 
@@ -97,6 +101,9 @@ func (p *ProcessPool) Kill(hubSessionID int64) {
 		proc.kill()
 		delete(p.processes, hubSessionID)
 		log.Printf("[pool] killed process for session %d", hubSessionID)
+		if p.OnStateChange != nil {
+			go p.OnStateChange(hubSessionID, false, "")
+		}
 	}
 }
 
@@ -120,6 +127,9 @@ func (p *ProcessPool) idleReaper() {
 					proc.kill()
 					delete(p.processes, id)
 					log.Printf("[pool] reaped process for session %d (idle=%v dead=%v)", id, idle, isDead)
+					if p.OnStateChange != nil {
+						go p.OnStateChange(id, false, "")
+					}
 				}
 			}
 			p.mu.Unlock()

@@ -69,6 +69,14 @@ export const useChatStore = defineStore('chat', () => {
         if (s) {
           const wasStreaming = s.streaming
           s.streaming = msg.content === 'streaming'
+          // Sync process state from streaming status
+          if (s.streaming) {
+            s.process_alive = true
+            s.process_state = 'busy'
+          } else {
+            s.process_alive = true
+            s.process_state = 'idle'
+          }
           // When current session transitions to idle, reload messages to catch results
           // (e.g. trigger-fired sessions where no subscribe was active during streaming)
           if (wasStreaming && !s.streaming && msg.session_id === currentSessionId.value) {
@@ -79,6 +87,21 @@ export const useChatStore = defineStore('chat', () => {
             api.getMessages(msg.session_id).then((msgs) => {
               messages.value = msgs
             })
+          }
+        }
+        return
+      }
+
+      // process_update: process state change from pool
+      if (msg.type === 'process_update') {
+        const s = sessions.value.find((s) => s.id === msg.session_id)
+        if (s) {
+          if (msg.content === 'process_exit') {
+            s.process_alive = false
+            s.process_state = ''
+          } else if (msg.content.startsWith('process_alive:')) {
+            s.process_alive = true
+            s.process_state = msg.content.split(':')[1] || 'idle'
           }
         }
         return

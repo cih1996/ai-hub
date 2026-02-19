@@ -12,6 +12,20 @@ const textareaEl = ref<HTMLTextAreaElement>()
 const stepsExpanded = ref(false)
 const isComposing = ref(false)
 
+// Toast state
+const toastMsg = ref('')
+const toastType = ref<'success' | 'error'>('success')
+const toastVisible = ref(false)
+let toastTimer: ReturnType<typeof setTimeout>
+
+function showToast(msg: string, type: 'success' | 'error' = 'success') {
+  toastMsg.value = msg
+  toastType.value = type
+  toastVisible.value = true
+  clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => { toastVisible.value = false }, 2500)
+}
+
 // Rules modal state
 const showRulesModal = ref(false)
 const ruleFiles = ref<FileItem[]>([])
@@ -144,6 +158,9 @@ async function saveRule() {
   ruleSaving.value = true
   try {
     await api.writeProjectRule(wd, selectedRulePath.value, ruleContent.value)
+    showToast('保存成功')
+  } catch (e: any) {
+    showToast('保存失败: ' + (e.message || '未知错误'), 'error')
   } finally {
     ruleSaving.value = false
   }
@@ -171,6 +188,9 @@ async function saveSessionRules() {
   sessionRulesSaving.value = true
   try {
     await api.putSessionRules(sid, sessionRulesContent.value)
+    showToast('保存成功')
+  } catch (e: any) {
+    showToast('保存失败: ' + (e.message || '未知错误'), 'error')
   } finally {
     sessionRulesSaving.value = false
   }
@@ -498,6 +518,11 @@ function formatToolInput(raw: string): string {
           </div>
         </div>
       </div>
+    </Teleport>
+
+    <!-- Toast -->
+    <Teleport to="body">
+      <div v-if="toastVisible" class="toast" :class="toastType">{{ toastMsg }}</div>
     </Teleport>
   </div>
 </template>
@@ -837,4 +862,29 @@ function formatToolInput(raw: string): string {
 }
 .btn-delete-rule:hover:not(:disabled) { opacity: 0.8; }
 .btn-delete-rule:disabled { opacity: 0.4; cursor: not-allowed; }
+/* Toast */
+.toast {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 20px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  z-index: 2000;
+  animation: toast-in 0.2s ease;
+}
+.toast.success {
+  background: #22c55e;
+  color: #fff;
+}
+.toast.error {
+  background: #ef4444;
+  color: #fff;
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
 </style>

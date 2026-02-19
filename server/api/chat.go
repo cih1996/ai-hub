@@ -68,6 +68,15 @@ func broadcast(msg WSMessage) {
 	}
 }
 
+// BroadcastProcessState sends process state change to all WS clients
+func BroadcastProcessState(hubSessionID int64, alive bool, state string) {
+	content := "process_exit"
+	if alive {
+		content = "process_alive:" + state
+	}
+	broadcast(WSMessage{Type: "process_update", SessionID: hubSessionID, Content: content})
+}
+
 // IsSessionStreaming checks if a session is currently active
 func IsSessionStreaming(sessionID int64) bool {
 	activeStreamsMu.RLock()
