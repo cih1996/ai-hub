@@ -76,7 +76,7 @@ func isSkillDisabled(name, source string) bool {
 
 func scanUserSkills() []SkillInfo {
 	home, _ := os.UserHomeDir()
-	dir := filepath.Join(home, ".claude", "skills")
+	dir := filepath.Join(home, ".ai-hub", "skills")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
@@ -221,7 +221,7 @@ func ToggleSkill(c *gin.Context) {
 		home, _ := os.UserHomeDir()
 		var origDir string
 		if req.Source == "user" {
-			origDir = filepath.Join(home, ".claude", "skills", req.Name)
+			origDir = filepath.Join(home, ".ai-hub", "skills", req.Name)
 		} else {
 			origDir = findPluginSkillDir(req.Name)
 		}

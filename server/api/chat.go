@@ -265,9 +265,6 @@ func SendChat(c *gin.Context) {
 		}
 	}
 
-	// Render templates before starting chat (refresh dynamic variables like time)
-	core.RenderAllTemplates()
-
 	// Kick off streaming in background — results are pushed via WS broadcast
 	go runStream(session, req.Content, isNewSession)
 
@@ -349,9 +346,16 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 		HubSessionID: sessID,
 	}
 
-	// Inject session rules as system prompt if available
+	// Build system prompt: global rules + session rules
+	var promptParts []string
+	if globalPrompt := core.BuildSystemPrompt(); globalPrompt != "" {
+		promptParts = append(promptParts, globalPrompt)
+	}
 	if rules, err := ReadSessionRules(sessID); err == nil && rules != "" {
-		req.SystemPrompt = rules
+		promptParts = append(promptParts, rules)
+	}
+	if len(promptParts) > 0 {
+		req.SystemPrompt = strings.Join(promptParts, "\n\n---\n\n")
 	}
 	var fullResponse string
 

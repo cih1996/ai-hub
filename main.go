@@ -88,14 +88,13 @@ func main() {
 	// Pass embedded default templates to API for "restore default" feature
 	api.SetDefaultTemplatesFS(claudeRulesFS)
 
-	// Install built-in skills to ~/.claude/skills/
-	installBuiltinSkills()
+	// Install built-in skills to ~/.ai-hub/skills/
+	installBuiltinSkills(*dataDir)
 
-	// Install default CLAUDE.md rules (skip if already exists)
-	installClaudeRules()
+	// Install default rules (skip if already exists)
+	installClaudeRules(*dataDir)
 
-	// Render templates to ~/.claude/ on startup
-	core.RenderAllTemplates()
+	// No longer render templates to ~/.claude/ — system prompt is built on-the-fly
 
 	// Install vector engine scripts and start engine
 	vectorScriptDir := installVectorEngine()
@@ -244,10 +243,9 @@ func main() {
 	}
 }
 
-// installBuiltinSkills copies embedded skills/* to ~/.claude/skills/ on every startup.
-func installBuiltinSkills() {
-	home, _ := os.UserHomeDir()
-	targetBase := filepath.Join(home, ".claude", "skills")
+// installBuiltinSkills copies embedded skills/* to ~/.ai-hub/skills/ on every startup.
+func installBuiltinSkills(dataDir string) {
+	targetBase := filepath.Join(dataDir, "skills")
 
 	fs.WalkDir(builtinSkillsFS, "skills", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -306,12 +304,10 @@ func installVectorEngine() string {
 	return targetBase
 }
 
-// installClaudeRules copies embedded claude/* to the templates directory (~/.ai-hub/templates/)
-// only if the target template does not exist. The template system (RenderAllTemplates) will
-// render these to ~/.claude/ with fresh variables on every chat message.
-func installClaudeRules() {
-	home, _ := os.UserHomeDir()
-	targetBase := filepath.Join(home, ".ai-hub", "templates")
+// installClaudeRules copies embedded claude/* to the rules directory (~/.ai-hub/rules/)
+// only if the target rule does not exist. System prompt is built on-the-fly via BuildSystemPrompt().
+func installClaudeRules(dataDir string) {
+	targetBase := filepath.Join(dataDir, "rules")
 	log.Printf("[rules] template dir: %s", targetBase)
 
 	count := 0

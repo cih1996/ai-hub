@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 )
@@ -12,16 +13,16 @@ import (
 // TemplateVars returns all available template variables with current values.
 func TemplateVars() map[string]string {
 	home, _ := os.UserHomeDir()
-	claudeBase := filepath.Join(home, ".claude")
+	aiHubBase := filepath.Join(home, ".ai-hub")
 	bjLoc := time.FixedZone("CST", 8*3600)
 	now := time.Now()
 
 	return map[string]string{
 		"HOME_DIR":      home,
-		"CLAUDE_DIR":    claudeBase,
-		"MEMORY_DIR":    filepath.Join(claudeBase, "memory"),
-		"KNOWLEDGE_DIR": filepath.Join(claudeBase, "knowledge"),
-		"RULES_DIR":     filepath.Join(claudeBase, "rules"),
+		"CLAUDE_DIR":    aiHubBase,
+		"MEMORY_DIR":    filepath.Join(aiHubBase, "memory"),
+		"KNOWLEDGE_DIR": filepath.Join(aiHubBase, "knowledge"),
+		"RULES_DIR":     filepath.Join(aiHubBase, "rules"),
 		"OS":            runtime.GOOS,
 		"PORT":          hubPort,
 		"DATE":          now.Format("2006-01-02"),
@@ -42,9 +43,9 @@ func RenderTemplate(content string) string {
 var templateDir string
 var hubPort string
 
-// InitTemplates sets the template storage directory.
+// InitTemplates sets the rules storage directory (was templates/).
 func InitTemplates(dataDir string) {
-	templateDir = filepath.Join(dataDir, "templates")
+	templateDir = filepath.Join(dataDir, "rules")
 	os.MkdirAll(templateDir, 0755)
 }
 
@@ -58,31 +59,48 @@ func GetPort() string {
 	return hubPort
 }
 
-// TemplateDir returns the base template directory.
+// TemplateDir returns the base rules directory.
 func TemplateDir() string {
 	return templateDir
 }
 
-// RenderAllTemplates renders all template files to ~/.claude/.
-func RenderAllTemplates() error {
-	home, _ := os.UserHomeDir()
-	claudeBase := filepath.Join(home, ".claude")
+// BuildSystemPrompt reads all rule files from ~/.ai-hub/rules/,
+// concatenates and renders them, returning the full system prompt.
+func BuildSystemPrompt() string {
+	var parts []string
 
-	return filepath.Walk(templateDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
-			return nil
+	// 1. Main rule: CLAUDE.md
+	mainRule := filepath.Join(templateDir, "CLAUDE.md")
+	if data, err := os.ReadFile(mainRule); err == nil {
+		parts = append(parts, string(data))
+	}
+
+	// 2. Sub-rules: rules/*.md (sorted by name)
+	rulesDir := filepath.Join(templateDir, "rules")
+	if entries, err := os.ReadDir(rulesDir); err == nil {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
+				names = append(names, e.Name())
+			}
 		}
-		if !strings.HasSuffix(strings.ToLower(info.Name()), ".md") {
-			return nil
+		sort.Strings(names)
+		for _, name := range names {
+			if data, err := os.ReadFile(filepath.Join(rulesDir, name)); err == nil {
+				parts = append(parts, string(data))
+			}
 		}
-		rel, _ := filepath.Rel(templateDir, path)
-		target := filepath.Join(claudeBase, rel)
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil
-		}
-		rendered := RenderTemplate(string(data))
-		os.MkdirAll(filepath.Dir(target), 0755)
-		return os.WriteFile(target, []byte(rendered), 0644)
-	})
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+	combined := strings.Join(parts, "\n\n---\n\n")
+	return RenderTemplate(combined)
+}
+
+// RenderAllTemplates is kept for backward compatibility but now is a no-op.
+// System prompt is built on-the-fly via BuildSystemPrompt().
+func RenderAllTemplates() error {
+	return nil
 }

@@ -10,12 +10,12 @@
 - GitHub MCP 可用于操作 Issue 和 Release
 
 ## 内嵌资源维护规范
-AI Hub 通过 go:embed 将以下资源嵌入二进制，启动时自动安装到 ~/.claude/：
-- `skills/` → 内置 Skills，启动时覆盖安装到 ~/.claude/skills/
-- `claude/CLAUDE.md` → 全局规则模板，首次安装到 ~/.ai-hub/templates/CLAUDE.md
+AI Hub 通过 go:embed 将以下资源嵌入二进制，启动时自动安装到 ~/.ai-hub/：
+- `skills/` → 内置 Skills，启动时覆盖安装到 ~/.ai-hub/skills/
+- `claude/CLAUDE.md` → 全局规则模板，首次安装到 ~/.ai-hub/rules/CLAUDE.md
 - `vector-engine/` → Python 向量引擎
 
-**修改 Skill 或全局规则模板时，必须修改项目代码中的源文件，禁止直接改 ~/.claude/ 下的文件：**
+**修改 Skill 或全局规则模板时，必须修改项目代码中的源文件，禁止直接改 ~/.ai-hub/ 下的文件：**
 - 修改/新增 Skill → 编辑 `skills/<skill名>/SKILL.md`
 - 修改全局规则模板 → 编辑 `claude/CLAUDE.md`（支持 {{VAR}} 占位符）
 - 编译后重启即可生效（启动时自动覆盖安装）

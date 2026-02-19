@@ -30,8 +30,8 @@ func StartVectorWatcher() *VectorWatcher {
 		stopCh:    make(chan struct{}),
 		snapshots: make(map[string]fileSnapshot),
 		dirs: map[string]string{
-			filepath.Join(home, ".claude", "knowledge"): "knowledge",
-			filepath.Join(home, ".claude", "memory"):    "memory",
+			filepath.Join(home, ".ai-hub", "knowledge"): "knowledge",
+			filepath.Join(home, ".ai-hub", "memory"):    "memory",
 		},
 	}
 	go w.loop()

@@ -78,7 +78,7 @@ func vectorRead(c *gin.Context, scope string) {
 		return
 	}
 	home, _ := os.UserHomeDir()
-	dir := filepath.Join(home, ".claude", scope)
+	dir := filepath.Join(home, ".ai-hub", scope)
 	path := filepath.Join(dir, req.FileName)
 	if !strings.HasPrefix(path, dir) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
@@ -118,7 +118,7 @@ func vectorWrite(c *gin.Context, scope string) {
 		return
 	}
 	home, _ := os.UserHomeDir()
-	dir := filepath.Join(home, ".claude", scope)
+	dir := filepath.Join(home, ".ai-hub", scope)
 	path := filepath.Join(dir, req.FileName)
 	if !strings.HasPrefix(path, dir) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
@@ -159,7 +159,7 @@ func vectorDelete(c *gin.Context, scope string) {
 		return
 	}
 	home, _ := os.UserHomeDir()
-	dir := filepath.Join(home, ".claude", scope)
+	dir := filepath.Join(home, ".ai-hub", scope)
 	path := filepath.Join(dir, req.FileName)
 	if !strings.HasPrefix(path, dir) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})

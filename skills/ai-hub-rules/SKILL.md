@@ -73,7 +73,7 @@ curl "http://localhost:$AI_HUB_PORT/api/v1/session-rules/23"
 
 所有会话都会加载的规则，包括主规则 CLAUDE.md 和子规则 rules/*.md。
 
-**重要：全局规则使用模板机制，支持 `{{VAR}}` 占位符，渲染后才写入 ~/.claude/。必须通过 API 操作，禁止直接编辑 ~/.claude/ 下的文件。**
+**重要：全局规则使用模板机制，支持 `{{VAR}}` 占位符，通过 --system-prompt 注入。必须通过 API 操作，禁止直接编辑 ~/.ai-hub/rules/ 下的文件。**
 
 ### 读取全局主规则（模板源文件）
 

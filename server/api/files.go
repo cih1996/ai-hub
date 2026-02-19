@@ -45,9 +45,9 @@ type FileContentRequest struct {
 	Content string `json:"content"`
 }
 
-func claudeDir() string {
+func aiHubDir() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".claude")
+	return filepath.Join(home, ".ai-hub")
 }
 
 func scopeDir(base, scope string) string {
@@ -69,23 +69,25 @@ func validatePath(p string) bool {
 	return !strings.Contains(p, "..") && !strings.Contains(p, "~")
 }
 
-// resolvePaths returns (templatePath, claudePath, ok).
+// resolvePaths returns (templatePath, dataPath, ok).
+// Both now point into ~/.ai-hub/ hierarchy.
 func resolvePaths(scope, p string) (string, string, bool) {
 	if !validatePath(p) {
 		return "", "", false
 	}
 	tplBase := core.TemplateDir()
-	clBase := claudeDir()
+	dataBase := aiHubDir()
 
 	if scope == "rules" && p == "CLAUDE.md" {
-		return filepath.Join(tplBase, "CLAUDE.md"), filepath.Join(clBase, "CLAUDE.md"), true
+		path := filepath.Join(tplBase, "CLAUDE.md")
+		return path, path, true
 	}
 	tplFull := filepath.Join(tplBase, p)
-	clFull := filepath.Join(clBase, p)
-	if !strings.HasPrefix(tplFull, tplBase) || !strings.HasPrefix(clFull, clBase) {
+	dataFull := filepath.Join(dataBase, p)
+	if !strings.HasPrefix(tplFull, tplBase) || !strings.HasPrefix(dataFull, dataBase) {
 		return "", "", false
 	}
-	return tplFull, clFull, true
+	return tplFull, dataFull, true
 }
 
 func fileExists(path string) bool {
@@ -101,44 +103,40 @@ func ListFiles(c *gin.Context) {
 	}
 
 	tplBase := core.TemplateDir()
-	clBase := claudeDir()
+	dataBase := aiHubDir()
 	var files []FileInfo
 	seen := map[string]bool{}
 
 	if scope == "rules" {
 		// Always include CLAUDE.md (built-in)
-		exists := fileExists(filepath.Join(clBase, "CLAUDE.md")) || fileExists(filepath.Join(tplBase, "CLAUDE.md"))
+		exists := fileExists(filepath.Join(tplBase, "CLAUDE.md"))
 		files = append(files, FileInfo{Name: "CLAUDE.md", Path: "CLAUDE.md", Exists: exists})
 		seen["CLAUDE.md"] = true
 
-		// Scan templates/rules/ and claude/rules/
-		for _, base := range []string{filepath.Join(tplBase, "rules"), filepath.Join(clBase, "rules")} {
-			os.MkdirAll(base, 0755)
-			entries, _ := os.ReadDir(base)
-			for _, e := range entries {
-				p := "rules/" + e.Name()
-				if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") && !seen[p] {
-					seen[p] = true
-					files = append(files, FileInfo{Name: e.Name(), Path: p, Exists: true})
-				}
+		// Scan rules/ under the rules directory
+		rulesDir := filepath.Join(tplBase, "rules")
+		os.MkdirAll(rulesDir, 0755)
+		entries, _ := os.ReadDir(rulesDir)
+		for _, e := range entries {
+			p := "rules/" + e.Name()
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") && !seen[p] {
+				seen[p] = true
+				files = append(files, FileInfo{Name: e.Name(), Path: p, Exists: true})
 			}
 		}
 	} else {
-		dir := scopeDir(tplBase, scope)
-		clDir := scopeDir(clBase, scope)
+		dir := scopeDir(dataBase, scope)
 		if dir == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid scope"})
 			return
 		}
-		for _, base := range []string{dir, clDir} {
-			os.MkdirAll(base, 0755)
-			entries, _ := os.ReadDir(base)
-			for _, e := range entries {
-				p := scope + "/" + e.Name()
-				if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") && !seen[p] {
-					seen[p] = true
-					files = append(files, FileInfo{Name: e.Name(), Path: p, Exists: true})
-				}
+		os.MkdirAll(dir, 0755)
+		entries, _ := os.ReadDir(dir)
+		for _, e := range entries {
+			p := scope + "/" + e.Name()
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") && !seen[p] {
+				seen[p] = true
+				files = append(files, FileInfo{Name: e.Name(), Path: p, Exists: true})
 			}
 		}
 	}
@@ -156,15 +154,15 @@ func ReadFile(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "scope and path are required"})
 		return
 	}
-	tplPath, clPath, ok := resolvePaths(scope, p)
+	tplPath, dataPath, ok := resolvePaths(scope, p)
 	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
 		return
 	}
-	// Prefer template source; fall back to claude dir
+	// Try primary path first, then fallback
 	data, err := os.ReadFile(tplPath)
-	if err != nil {
-		data, err = os.ReadFile(clPath)
+	if err != nil && dataPath != tplPath {
+		data, err = os.ReadFile(dataPath)
 	}
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"content": ""})
@@ -179,25 +177,21 @@ func WriteFile(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	tplPath, clPath, ok := resolvePaths(req.Scope, req.Path)
+	tplPath, _, ok := resolvePaths(req.Scope, req.Path)
 	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
 		return
 	}
-	// Save template source
+	// Save to rules/data directory
 	os.MkdirAll(filepath.Dir(tplPath), 0755)
 	if err := os.WriteFile(tplPath, []byte(req.Content), 0644); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	// Render to claude dir
-	rendered := core.RenderTemplate(req.Content)
-	os.MkdirAll(filepath.Dir(clPath), 0755)
-	os.WriteFile(clPath, []byte(rendered), 0644)
 
 	// Trigger vector sync for knowledge/memory
 	if req.Scope == "knowledge" || req.Scope == "memory" {
-		core.SyncFileToVector(req.Scope, clPath)
+		core.SyncFileToVector(req.Scope, tplPath)
 	}
 
 	c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -213,12 +207,12 @@ func CreateFile(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "scope and path are required"})
 		return
 	}
-	tplPath, clPath, ok := resolvePaths(req.Scope, req.Path)
+	tplPath, _, ok := resolvePaths(req.Scope, req.Path)
 	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
 		return
 	}
-	if fileExists(tplPath) || fileExists(clPath) {
+	if fileExists(tplPath) {
 		c.JSON(http.StatusConflict, gin.H{"error": "file already exists"})
 		return
 	}
@@ -227,14 +221,10 @@ func CreateFile(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	// Render to claude dir
-	rendered := core.RenderTemplate(req.Content)
-	os.MkdirAll(filepath.Dir(clPath), 0755)
-	os.WriteFile(clPath, []byte(rendered), 0644)
 
 	// Trigger vector sync for knowledge/memory
 	if req.Scope == "knowledge" || req.Scope == "memory" {
-		core.SyncFileToVector(req.Scope, clPath)
+		core.SyncFileToVector(req.Scope, tplPath)
 	}
 
 	c.JSON(http.StatusCreated, gin.H{"ok": true})
@@ -247,17 +237,19 @@ func DeleteFile(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "scope and path are required"})
 		return
 	}
-	tplPath, clPath, ok := resolvePaths(scope, p)
+	tplPath, dataPath, ok := resolvePaths(scope, p)
 	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
 		return
 	}
 	os.Remove(tplPath)
-	os.Remove(clPath)
+	if dataPath != tplPath {
+		os.Remove(dataPath)
+	}
 
 	// Clean vector record for knowledge/memory
 	if scope == "knowledge" || scope == "memory" {
-		docID := filepath.Base(clPath)
+		docID := filepath.Base(tplPath)
 		core.Vector.Delete(scope, docID)
 	}
 
@@ -274,7 +266,7 @@ func GetTemplateVars(c *gin.Context) {
 	vars := core.TemplateVars()
 	descs := map[string]string{
 		"HOME_DIR":      "用户主目录",
-		"CLAUDE_DIR":    "Claude 配置目录",
+		"CLAUDE_DIR":    "AI Hub 数据目录",
 		"MEMORY_DIR":    "记忆文件目录",
 		"KNOWLEDGE_DIR": "知识库文件目录",
 		"RULES_DIR":     "规则文件目录",
