@@ -151,6 +151,12 @@ function formatTime(dateStr: string) {
         >
           <div class="session-info">
             <div class="session-title-row">
+              <span
+                v-if="s.process_alive"
+                class="process-dot"
+                :class="s.process_state === 'busy' ? 'busy' : 'idle'"
+                :title="s.process_state === 'busy' ? '运行中' : '空闲'"
+              ></span>
               <svg v-if="s.streaming" class="streaming-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M21 12a9 9 0 11-6.219-8.56"/>
               </svg>
@@ -310,6 +316,19 @@ function formatTime(dateStr: string) {
 .trigger-icon {
   flex-shrink: 0;
   color: var(--text-muted);
+}
+.process-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+.process-dot.busy {
+  background: #22c55e;
+}
+.process-dot.idle {
+  background: #eab308;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 .session-time {

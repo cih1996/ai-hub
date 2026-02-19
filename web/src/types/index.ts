@@ -17,6 +17,8 @@ export interface Session {
   work_dir: string
   streaming: boolean
   has_triggers: boolean
+  process_alive: boolean
+  process_state: string
   created_at: string
   updated_at: string
 }
