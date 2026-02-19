@@ -2,7 +2,6 @@ package api
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -55,9 +54,11 @@ func PutSessionRules(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid session id"})
 		return
 	}
-	body, err := io.ReadAll(c.Request.Body)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "read body failed"})
+	var req struct {
+		Content string `json:"content"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json: " + err.Error()})
 		return
 	}
 	dir := sessionRulesDir()
@@ -65,7 +66,7 @@ func PutSessionRules(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "create dir failed: " + err.Error()})
 		return
 	}
-	if err := os.WriteFile(sessionRulesPath(id), body, 0644); err != nil {
+	if err := os.WriteFile(sessionRulesPath(id), []byte(req.Content), 0644); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "write failed: " + err.Error()})
 		return
 	}
