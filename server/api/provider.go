@@ -37,17 +37,21 @@ func CreateProvider(c *gin.Context) {
 
 func UpdateProvider(c *gin.Context) {
 	id := c.Param("id")
-	var p model.Provider
-	if err := c.ShouldBindJSON(&p); err != nil {
+	existing, err := store.GetProvider(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "provider not found"})
+		return
+	}
+	if err := c.ShouldBindJSON(existing); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	p.ID = id
-	if err := store.UpdateProvider(&p); err != nil {
+	existing.ID = id
+	if err := store.UpdateProvider(existing); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, p)
+	c.JSON(http.StatusOK, existing)
 }
 
 func DeleteProvider(c *gin.Context) {
