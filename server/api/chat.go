@@ -339,6 +339,11 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 		WorkDir:      workDir,
 		HubSessionID: sessID,
 	}
+
+	// Inject session rules as system prompt if available
+	if rules, err := ReadSessionRules(sessID); err == nil && rules != "" {
+		req.SystemPrompt = rules
+	}
 	var fullResponse string
 
 	// Track content block index -> tool ID for correlating deltas

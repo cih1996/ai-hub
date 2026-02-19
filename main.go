@@ -119,6 +119,11 @@ func main() {
 		v1.GET("/sessions/:id/messages", api.GetMessages)
 		v1.POST("/sessions/:id/compress", api.CompressSession)
 
+		// Session rules
+		v1.GET("/session-rules/:id", api.GetSessionRules)
+		v1.PUT("/session-rules/:id", api.PutSessionRules)
+		v1.DELETE("/session-rules/:id", api.DeleteSessionRules)
+
 		// Chat
 		v1.POST("/chat/send", api.SendChat)
 
