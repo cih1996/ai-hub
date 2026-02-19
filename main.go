@@ -46,6 +46,16 @@ func main() {
 		*dataDir = filepath.Join(home, ".ai-hub")
 	}
 
+	// Setup log file: ~/.ai-hub/logs/ai-hub.log (truncate on startup)
+	logDir := filepath.Join(*dataDir, "logs")
+	os.MkdirAll(logDir, 0755)
+	logFile, err := os.OpenFile(filepath.Join(logDir, "ai-hub.log"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		log.Fatalf("Failed to open log file: %v", err)
+	}
+	log.SetOutput(logFile)
+	log.SetFlags(log.LstdFlags)
+
 	// Init database
 	if err := store.Init(*dataDir); err != nil {
 		log.Fatalf("Failed to init database: %v", err)

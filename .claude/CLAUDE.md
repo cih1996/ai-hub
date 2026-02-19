@@ -6,6 +6,7 @@
 - 技术栈：Go (Gin) + Vue 前端 + SQLite + WebSocket
 - 生产端口：8080（当前运行实例，禁止停止）
 - 测试端口：8081（测试实例，用于验证修复）
+- 日志路径：~/.ai-hub/logs/ai-hub.log（启动时自动清空，无需手动重定向）
 - GitHub MCP 可用于操作 Issue 和 Release
 
 ## 内嵌资源维护规范
@@ -42,7 +43,7 @@ AI Hub 通过 go:embed 将以下资源嵌入二进制，启动时自动安装到
 2. 编译产物在 dist/ 目录
 3. 停止 8081 测试实例（如有）：`lsof -ti:8081 | xargs kill -9 2>/dev/null`
 4. 等待确认退出：`sleep 2`
-5. 启动测试实例：`nohup dist/ai-hub-darwin-arm64 -port 8081 > /tmp/ai-hub-8081.log 2>&1 &`
+5. 启动测试实例：`nohup dist/ai-hub-darwin-arm64 -port 8081 > /dev/null 2>&1 &`
 6. 等待启动完成：`sleep 5 && curl -s http://localhost:8081/api/v1/version`
 7. 通过 Chrome MCP 访问 http://localhost:8081 验证前端功能
 8. 严禁操作 8080 端口的生产实例，任何情况下都不能在 8080 上测试
@@ -73,7 +74,7 @@ AI Hub 通过 go:embed 将以下资源嵌入二进制，启动时自动安装到
 3. 验证二进制版本：`strings dist/ai-hub-darwin-arm64 | grep "v版本号"` 确认版本正确
 4. 强制杀掉旧进程：`kill -9 $(lsof -ti:8080 | xargs ps -p 2>/dev/null | grep ai-hub | awk '{print $1}')`
 5. 等待进程确认退出：`sleep 2 && ps -p <PID> 2>/dev/null || echo "已退出"`
-6. 启动新版本：`nohup dist/ai-hub-darwin-arm64 -port 8080 > /tmp/ai-hub-8080.log 2>&1 &`
+6. 启动新版本：`nohup dist/ai-hub-darwin-arm64 -port 8080 > /dev/null 2>&1 &`
 7. 等待启动并验证版本：`sleep 4 && curl -s http://localhost:8080/api/v1/version`
 8. 确认返回的版本号与预期一致
 
