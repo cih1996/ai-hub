@@ -69,8 +69,9 @@ func validatePath(p string) bool {
 	return !strings.Contains(p, "..") && !strings.Contains(p, "~")
 }
 
-// resolvePaths returns (templatePath, dataPath, ok).
-// Both now point into ~/.ai-hub/ hierarchy.
+// resolvePaths returns (rulesPath, dataPath, ok).
+// For rules scope, both point to ~/.ai-hub/rules/.
+// For other scopes, rulesPath is under rules dir, dataPath under ~/.ai-hub/{scope}/.
 func resolvePaths(scope, p string) (string, string, bool) {
 	if !validatePath(p) {
 		return "", "", false
@@ -78,10 +79,6 @@ func resolvePaths(scope, p string) (string, string, bool) {
 	tplBase := core.TemplateDir()
 	dataBase := aiHubDir()
 
-	if scope == "rules" && p == "CLAUDE.md" {
-		path := filepath.Join(tplBase, "CLAUDE.md")
-		return path, path, true
-	}
 	tplFull := filepath.Join(tplBase, p)
 	dataFull := filepath.Join(dataBase, p)
 	if !strings.HasPrefix(tplFull, tplBase) || !strings.HasPrefix(dataFull, dataBase) {
@@ -108,20 +105,13 @@ func ListFiles(c *gin.Context) {
 	seen := map[string]bool{}
 
 	if scope == "rules" {
-		// Always include CLAUDE.md (built-in)
-		exists := fileExists(filepath.Join(tplBase, "CLAUDE.md"))
-		files = append(files, FileInfo{Name: "CLAUDE.md", Path: "CLAUDE.md", Exists: exists})
-		seen["CLAUDE.md"] = true
-
-		// Scan rules/ under the rules directory
-		rulesDir := filepath.Join(tplBase, "rules")
-		os.MkdirAll(rulesDir, 0755)
-		entries, _ := os.ReadDir(rulesDir)
+		// Flat scan: all *.md files in ~/.ai-hub/rules/
+		os.MkdirAll(tplBase, 0755)
+		entries, _ := os.ReadDir(tplBase)
 		for _, e := range entries {
-			p := "rules/" + e.Name()
-			if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") && !seen[p] {
-				seen[p] = true
-				files = append(files, FileInfo{Name: e.Name(), Path: p, Exists: true})
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") && !seen[e.Name()] {
+				seen[e.Name()] = true
+				files = append(files, FileInfo{Name: e.Name(), Path: e.Name(), Exists: true})
 			}
 		}
 	} else {

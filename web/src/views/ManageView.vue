@@ -9,16 +9,14 @@ interface FileItem {
   exists: boolean
 }
 
-const fileLabels: Record<string, string> = {
-  'CLAUDE.md': '全局规则',
-}
+const fileLabels: Record<string, string> = {}
 
 function getLabel(f: FileItem): string {
   return fileLabels[f.path] || fileLabels[f.name] || f.name.replace(/\.md$/, '')
 }
 
 const tabs: { key: string; label: string; desc: string }[] = [
-  { key: 'rules', label: '全局', desc: '~/.ai-hub/rules/CLAUDE.md + ~/.ai-hub/rules/rules/' },
+  { key: 'rules', label: '全局', desc: '~/.ai-hub/rules/' },
   { key: 'knowledge', label: '知识库', desc: '~/.ai-hub/knowledge/' },
   { key: 'memory', label: '记忆', desc: '~/.ai-hub/memory/' },
   { key: 'notes', label: '笔记', desc: '~/.ai-hub/notes/' },
@@ -27,7 +25,7 @@ const tabs: { key: string; label: string; desc: string }[] = [
 type Scope = 'rules' | 'knowledge' | 'memory' | 'notes'
 
 const activeTab = ref<Scope>('rules')
-const activeTabDesc = ref('~/.ai-hub/rules/CLAUDE.md + ~/.ai-hub/rules/rules/')
+const activeTabDesc = ref('~/.ai-hub/rules/')
 const files = ref<FileItem[]>([])
 const selectedFile = ref<FileItem | null>(null)
 const content = ref('')

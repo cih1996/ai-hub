@@ -64,36 +64,28 @@ func TemplateDir() string {
 	return templateDir
 }
 
-// BuildSystemPrompt reads all rule files from ~/.ai-hub/rules/,
-// concatenates and renders them, returning the full system prompt.
+// BuildSystemPrompt reads all *.md files from ~/.ai-hub/rules/ (flat),
+// concatenates them sorted by name, renders variables, and returns the full system prompt.
 func BuildSystemPrompt() string {
-	var parts []string
-
-	// 1. Main rule: CLAUDE.md
-	mainRule := filepath.Join(templateDir, "CLAUDE.md")
-	if data, err := os.ReadFile(mainRule); err == nil {
-		parts = append(parts, string(data))
-	}
-
-	// 2. Sub-rules: rules/*.md (sorted by name)
-	rulesDir := filepath.Join(templateDir, "rules")
-	if entries, err := os.ReadDir(rulesDir); err == nil {
-		names := make([]string, 0, len(entries))
-		for _, e := range entries {
-			if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
-				names = append(names, e.Name())
-			}
-		}
-		sort.Strings(names)
-		for _, name := range names {
-			if data, err := os.ReadFile(filepath.Join(rulesDir, name)); err == nil {
-				parts = append(parts, string(data))
-			}
-		}
-	}
-
-	if len(parts) == 0 {
+	entries, err := os.ReadDir(templateDir)
+	if err != nil {
 		return ""
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
+			names = append(names, e.Name())
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	sort.Strings(names)
+	var parts []string
+	for _, name := range names {
+		if data, err := os.ReadFile(filepath.Join(templateDir, name)); err == nil {
+			parts = append(parts, string(data))
+		}
 	}
 	combined := strings.Join(parts, "\n\n---\n\n")
 	return RenderTemplate(combined)

@@ -91,6 +91,9 @@ func main() {
 	// Install built-in skills to ~/.ai-hub/skills/
 	installBuiltinSkills(*dataDir)
 
+	// Migrate rules/rules/ → rules/ (flatten legacy nested structure)
+	migrateNestedRules(*dataDir)
+
 	// Install default rules (skip if already exists)
 	installClaudeRules(*dataDir)
 
@@ -302,6 +305,36 @@ func installVectorEngine() string {
 	})
 	log.Printf("[vector] scripts installed to %s", targetBase)
 	return targetBase
+}
+
+// migrateNestedRules moves files from rules/rules/ to rules/ (flatten).
+func migrateNestedRules(dataDir string) {
+	nested := filepath.Join(dataDir, "rules", "rules")
+	if _, err := os.Stat(nested); os.IsNotExist(err) {
+		return
+	}
+	entries, err := os.ReadDir(nested)
+	if err != nil {
+		return
+	}
+	target := filepath.Join(dataDir, "rules")
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		src := filepath.Join(nested, e.Name())
+		dst := filepath.Join(target, e.Name())
+		if _, err := os.Stat(dst); err == nil {
+			log.Printf("[rules] migrate skip (exists): %s", dst)
+			continue
+		}
+		if err := os.Rename(src, dst); err == nil {
+			log.Printf("[rules] migrated: %s → %s", src, dst)
+		}
+	}
+	// Remove empty nested dir
+	os.Remove(nested)
+	log.Println("[rules] migrated rules/rules/ → rules/")
 }
 
 // installClaudeRules copies embedded claude/* to the rules directory (~/.ai-hub/rules/)
