@@ -52,6 +52,25 @@ curl -X POST http://localhost:$AI_HUB_PORT/api/v1/chat/send \
 
 记住返回的 `session_id`，后续所有操作都靠它。
 
+### 创建带角色规则的会话（推荐）
+
+创建会话后，立即写入会话级规则，确保角色定位持久化：
+
+```bash
+# 第一步：创建会话并发送任务
+RESPONSE=$(curl -s -X POST http://localhost:$AI_HUB_PORT/api/v1/chat/send \
+  -H "Content-Type: application/json" \
+  -d '{"session_id": 0, "content": "你的任务指令", "work_dir": "/path/to/project"}')
+
+# 第二步：提取新会话ID，写入会话级规则
+NEW_ID=$(echo $RESPONSE | grep -o '"session_id":[0-9]*' | grep -o '[0-9]*')
+curl -X PUT "http://localhost:$AI_HUB_PORT/api/v1/session-rules/$NEW_ID" \
+  -H "Content-Type: application/json" \
+  -d '{"content": "你是XXX角色，职责是..."}'
+```
+
+这样即使 Claude 进程超时重启，角色规则也会自动重新注入。
+
 ---
 
 ## 操作二：向已有会话追加指令
@@ -299,3 +318,5 @@ curl -X DELETE http://localhost:$AI_HUB_PORT/api/v1/triggers/1
 7. 你自己也运行在一个会话中，不要向自己的 session_id 发送消息
 8. 你的会话 ID 可通过 `$AI_HUB_SESSION_ID` 环境变量获取，用于查询和管理自己的触发器
 9. 通过 `process_alive` 字段可判断会话是否有活跃进程，`idle_sec` 可判断进程空闲时长
+10. **创建多角色协作团队时，必须为每个角色会话写入会话级规则（session-rules），确保角色定位持久化，进程重启后自动恢复**
+11. **会话级规则通过 `PUT /api/v1/session-rules/{session_id}` 写入，通过 `GET /api/v1/session-rules/{session_id}` 读取**
