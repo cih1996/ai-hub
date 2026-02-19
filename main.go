@@ -64,6 +64,11 @@ func main() {
 	core.InitPool(core.NewClaudeCodeClient())
 	defer core.Pool.ShutdownPool()
 
+	// Register process state change callback for WS broadcast
+	core.Pool.OnStateChange = func(hubSessionID int64, alive bool, state string) {
+		api.BroadcastProcessState(hubSessionID, alive, state)
+	}
+
 	// Pass version to API layer
 	api.SetVersion(Version)
 
