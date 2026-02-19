@@ -65,7 +65,8 @@ func TemplateDir() string {
 }
 
 // BuildSystemPrompt reads all *.md files from ~/.ai-hub/rules/ (flat),
-// concatenates them sorted by name, renders variables, and returns the full system prompt.
+// concatenates them sorted by name, appends Skills summary, renders variables,
+// and returns the full system prompt.
 func BuildSystemPrompt() string {
 	entries, err := os.ReadDir(templateDir)
 	if err != nil {
@@ -87,8 +88,68 @@ func BuildSystemPrompt() string {
 			parts = append(parts, string(data))
 		}
 	}
+
+	// Append Skills summary
+	if summary := buildSkillsSummary(); summary != "" {
+		parts = append(parts, summary)
+	}
+
 	combined := strings.Join(parts, "\n\n---\n\n")
 	return RenderTemplate(combined)
+}
+
+// buildSkillsSummary scans ~/.ai-hub/skills/*/SKILL.md, extracts YAML
+// frontmatter (name + description), and returns a summary block.
+func buildSkillsSummary() string {
+	home, _ := os.UserHomeDir()
+	skillsDir := filepath.Join(home, ".ai-hub", "skills")
+	dirs, err := os.ReadDir(skillsDir)
+	if err != nil {
+		return ""
+	}
+	var lines []string
+	for _, d := range dirs {
+		if !d.IsDir() {
+			continue
+		}
+		path := filepath.Join(skillsDir, d.Name(), "SKILL.md")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		name, desc := parseSkillYAML(string(data))
+		if name == "" {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("- %s（%s）：%s", name, d.Name(), desc))
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	header := "可用技能（触发后 Read ~/.ai-hub/skills/<目录名>/SKILL.md 获取完整操作手册）："
+	return header + "\n" + strings.Join(lines, "\n")
+}
+
+// parseSkillYAML extracts name and description from YAML frontmatter.
+func parseSkillYAML(content string) (string, string) {
+	if !strings.HasPrefix(content, "---") {
+		return "", ""
+	}
+	end := strings.Index(content[3:], "---")
+	if end < 0 {
+		return "", ""
+	}
+	header := content[3 : 3+end]
+	var name, desc string
+	for _, line := range strings.Split(header, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "name:") {
+			name = strings.Trim(strings.TrimPrefix(line, "name:"), " \"")
+		} else if strings.HasPrefix(line, "description:") {
+			desc = strings.Trim(strings.TrimPrefix(line, "description:"), " \"")
+		}
+	}
+	return name, desc
 }
 
 // RenderAllTemplates is kept for backward compatibility but now is a no-op.
