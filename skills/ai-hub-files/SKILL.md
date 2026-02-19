@@ -1,13 +1,13 @@
 ---
 name: "一号笔记管理"
-description: "AI Hub 笔记管理接口。当需要读写笔记（notes/）文件时触发。禁止直接 Read/Edit ~/.claude/notes/ 下的文件，必须通过此 API 操作。操作规则请使用「规则管理」Skill，操作知识库和记忆库请使用「向量知识库」Skill。"
+description: "AI Hub 笔记管理接口。当需要读写笔记（notes/）文件时触发。禁止直接 Edit/Write ~/.claude/notes/ 下的文件，必须通过此 API 操作（Read/Grep 可直接使用）。操作规则请使用「规则管理」Skill，操作知识库和记忆库请使用「向量知识库」Skill。"
 ---
 
 # 笔记管理 — notes/ 操作手册
 
 ## 核心原则
 
-**禁止直接用 Read/Edit/Write 工具操作 `~/.claude/notes/` 下的文件。**
+**禁止直接用 Edit/Write 工具操作 `~/.claude/notes/` 下的文件（Read/Grep 可直接使用）。**
 
 原因：`~/.claude/` 下的文件是模板渲染产物，直接修改可能丢失。必须通过以下 API 操作。
 

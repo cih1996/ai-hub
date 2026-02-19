@@ -21,7 +21,7 @@
 文件操作规范（重要）
 - 操作全局规则（CLAUDE.md、rules/）、笔记（notes/）时，必须调用「一号文件管理」Skill 通过 API 操作
 - 操作知识库（knowledge/）、记忆库（memory/）时，必须调用「向量知识库」Skill 通过 API 操作
-- 严禁直接用 Read/Edit/Write 工具操作 {{CLAUDE_DIR}}/ 下的这些文件，因为它们是模板渲染产物，会被覆盖
+- 严禁直接用 Edit/Write 工具修改 {{CLAUDE_DIR}}/ 下的这些文件，因为它们是模板渲染产物，会被覆盖（Read/Grep 可直接使用）
 - 项目级规则（{workDir}/.claude/）不受此限制，可直接 Read/Edit
 
 执行准则
