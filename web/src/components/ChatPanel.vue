@@ -25,6 +25,36 @@ const sessionRulesContent = ref('')
 const sessionRulesSaving = ref(false)
 const sessionRulesLoading = ref(false)
 
+// Title editing state
+const editingTitle = ref(false)
+const titleInput = ref('')
+const titleInputEl = ref<HTMLInputElement>()
+
+function startEditTitle() {
+  if (!store.currentSession) return
+  titleInput.value = store.currentSession.title
+  editingTitle.value = true
+  nextTick(() => titleInputEl.value?.focus())
+}
+
+async function saveTitle() {
+  const s = store.currentSession
+  if (!s || !titleInput.value.trim()) {
+    editingTitle.value = false
+    return
+  }
+  const newTitle = titleInput.value.trim()
+  if (newTitle !== s.title) {
+    await api.updateSession(s.id, { title: newTitle })
+    s.title = newTitle
+  }
+  editingTitle.value = false
+}
+
+function cancelEditTitle() {
+  editingTitle.value = false
+}
+
 marked.setOptions({ breaks: true, gfm: true })
 
 function renderMd(text: string): string {
@@ -181,7 +211,16 @@ function formatToolInput(raw: string): string {
     <!-- Chat header bar -->
     <div v-if="store.currentSession" class="chat-header">
       <div class="header-left">
-        <div class="header-title">{{ store.currentSession.title }}</div>
+        <input
+          v-if="editingTitle"
+          ref="titleInputEl"
+          v-model="titleInput"
+          class="header-title-input"
+          @keydown.enter="saveTitle"
+          @keydown.esc="cancelEditTitle"
+          @blur="saveTitle"
+        />
+        <div v-else class="header-title" @click="startEditTitle" title="点击编辑标题">{{ store.currentSession.title }}</div>
         <div class="header-workdir">{{ displayWorkDir }}</div>
       </div>
       <div class="header-right">
@@ -488,6 +527,25 @@ function formatToolInput(raw: string): string {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  padding: 2px 4px;
+  margin: -2px -4px;
+}
+.header-title:hover {
+  background: var(--bg-hover);
+}
+.header-title-input {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 2px 4px;
+  margin: -2px -4px;
+  outline: none;
+  width: 100%;
 }
 .header-workdir {
   font-size: 12px;
