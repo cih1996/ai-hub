@@ -159,10 +159,16 @@ func ReadFile(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
 		return
 	}
-	// Try primary path first, then fallback
-	data, err := os.ReadFile(tplPath)
-	if err != nil && dataPath != tplPath {
-		data, err = os.ReadFile(dataPath)
+	// rules scope reads from tplPath, others from dataPath
+	primaryPath := tplPath
+	fallbackPath := dataPath
+	if scope != "rules" {
+		primaryPath = dataPath
+		fallbackPath = tplPath
+	}
+	data, err := os.ReadFile(primaryPath)
+	if err != nil && fallbackPath != primaryPath {
+		data, err = os.ReadFile(fallbackPath)
 	}
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"content": ""})
@@ -177,21 +183,25 @@ func WriteFile(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	tplPath, _, ok := resolvePaths(req.Scope, req.Path)
+	tplPath, dataPath, ok := resolvePaths(req.Scope, req.Path)
 	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
 		return
 	}
-	// Save to rules/data directory
-	os.MkdirAll(filepath.Dir(tplPath), 0755)
-	if err := os.WriteFile(tplPath, []byte(req.Content), 0644); err != nil {
+	// rules scope writes to tplPath (rules dir), others write to dataPath (ai-hub dir)
+	writePath := tplPath
+	if req.Scope != "rules" {
+		writePath = dataPath
+	}
+	os.MkdirAll(filepath.Dir(writePath), 0755)
+	if err := os.WriteFile(writePath, []byte(req.Content), 0644); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	// Trigger vector sync for knowledge/memory
 	if req.Scope == "knowledge" || req.Scope == "memory" {
-		core.SyncFileToVector(req.Scope, tplPath)
+		core.SyncFileToVector(req.Scope, writePath)
 	}
 
 	c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -207,24 +217,28 @@ func CreateFile(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "scope and path are required"})
 		return
 	}
-	tplPath, _, ok := resolvePaths(req.Scope, req.Path)
+	tplPath, dataPath, ok := resolvePaths(req.Scope, req.Path)
 	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
 		return
 	}
-	if fileExists(tplPath) {
+	writePath := tplPath
+	if req.Scope != "rules" {
+		writePath = dataPath
+	}
+	if fileExists(writePath) {
 		c.JSON(http.StatusConflict, gin.H{"error": "file already exists"})
 		return
 	}
-	os.MkdirAll(filepath.Dir(tplPath), 0755)
-	if err := os.WriteFile(tplPath, []byte(req.Content), 0644); err != nil {
+	os.MkdirAll(filepath.Dir(writePath), 0755)
+	if err := os.WriteFile(writePath, []byte(req.Content), 0644); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	// Trigger vector sync for knowledge/memory
 	if req.Scope == "knowledge" || req.Scope == "memory" {
-		core.SyncFileToVector(req.Scope, tplPath)
+		core.SyncFileToVector(req.Scope, writePath)
 	}
 
 	c.JSON(http.StatusCreated, gin.H{"ok": true})
