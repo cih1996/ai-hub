@@ -366,10 +366,7 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 			Result           string          `json:"result"`
 			Event            json.RawMessage `json:"event"`
 			ConversationName string          `json:"conversation_name"`
-			Error            *struct {
-				Message string `json:"message"`
-				Type    string `json:"type"`
-			} `json:"error"`
+			Error json.RawMessage `json:"error"`
 		}
 		if err := json.Unmarshal([]byte(line), &wrapper); err != nil {
 			log.Printf("[claude] json parse error: %v, line: %.200s", err, line)
@@ -378,10 +375,23 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 
 		switch wrapper.Type {
 		case "error":
-			// API-level error
+			// API-level error: Error can be string or object
 			errMsg := "unknown error"
-			if wrapper.Error != nil && wrapper.Error.Message != "" {
-				errMsg = wrapper.Error.Message
+			if len(wrapper.Error) > 0 {
+				// Try string first
+				var errStr string
+				if err := json.Unmarshal(wrapper.Error, &errStr); err == nil {
+					errMsg = errStr
+				} else {
+					// Try object
+					var errObj struct {
+						Message string `json:"message"`
+						Type    string `json:"type"`
+					}
+					if err := json.Unmarshal(wrapper.Error, &errObj); err == nil && errObj.Message != "" {
+						errMsg = errObj.Message
+					}
+				}
 			}
 			log.Printf("[claude] API error: %s", errMsg)
 			send(WSMessage{Type: "error", SessionID: sessID, Content: errMsg})
