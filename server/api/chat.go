@@ -301,6 +301,7 @@ func runStream(session *model.Session, query string, isNewSession bool) {
 	}
 
 	var fullResponse string
+	var metadataJSON string
 
 	log.Printf("[chat] session=%d provider=%s mode=%s model=%s base_url=%s",
 		session.ID, provider.Name, provider.Mode, provider.ModelID, provider.BaseURL)
@@ -308,7 +309,7 @@ func runStream(session *model.Session, query string, isNewSession bool) {
 	switch provider.Mode {
 	case "claude-code":
 		isResume := !isNewSession
-		fullResponse, err = streamClaudeCode(ctx, provider, query, session.ClaudeSessionID, isResume, stream.Send, session.ID, session.WorkDir)
+		fullResponse, metadataJSON, err = streamClaudeCode(ctx, provider, query, session.ClaudeSessionID, isResume, stream.Send, session.ID, session.WorkDir)
 	default:
 		err = streamOpenAI(ctx, provider, session.ID, func(chunk string) {
 			fullResponse += chunk
@@ -327,14 +328,29 @@ func runStream(session *model.Session, query string, isNewSession bool) {
 			SessionID: session.ID,
 			Role:      "assistant",
 			Content:   fullResponse,
+			Metadata:  metadataJSON,
 		}
 		store.AddMessage(assistantMsg)
 	}
 
-	stream.Send(WSMessage{Type: "done", SessionID: session.ID})
+	stream.Send(WSMessage{Type: "done", SessionID: session.ID, Content: metadataJSON})
 }
 
-func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID string, resume bool, send func(WSMessage), sessID int64, workDir string) (string, error) {
+// StepInfo represents a single execution step for metadata persistence
+type StepInfo struct {
+	Type   string `json:"type"`             // "thinking" | "tool"
+	Name   string `json:"name,omitempty"`   // tool name
+	Input  string `json:"input,omitempty"`  // tool input summary
+	Status string `json:"status,omitempty"` // "done"
+}
+
+// StepsMetadata is the JSON structure stored in message.metadata
+type StepsMetadata struct {
+	Steps    []StepInfo `json:"steps"`
+	Thinking string     `json:"thinking,omitempty"` // truncated thinking summary
+}
+
+func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID string, resume bool, send func(WSMessage), sessID int64, workDir string) (string, string, error) {
 	req := core.ClaudeCodeRequest{
 		Query:        query,
 		SessionID:    sessionID,
@@ -359,8 +375,13 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 	}
 	var fullResponse string
 
+	// Steps accumulator for metadata persistence
+	var steps []StepInfo
+	var thinkingSummary string
 	// Track content block index -> tool ID for correlating deltas
 	toolIDs := make(map[int]string)
+	toolNames := make(map[int]string)
+	toolInputs := make(map[int]string)
 
 	err := claudeClient.StreamPersistent(ctx, req, func(line string) {
 		// First parse the top-level wrapper
@@ -425,6 +446,8 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 			case "content_block_start":
 				if inner.ContentBlock.Type == "tool_use" {
 					toolIDs[inner.Index] = inner.ContentBlock.ID
+					toolNames[inner.Index] = inner.ContentBlock.Name
+					toolInputs[inner.Index] = ""
 					send(WSMessage{
 						Type:      "tool_start",
 						SessionID: sessID,
@@ -442,18 +465,39 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 					}
 				case "thinking_delta":
 					if inner.Delta.Thinking != "" {
+						// Accumulate thinking summary (truncate to 200 chars)
+						if len([]rune(thinkingSummary)) < 200 {
+							thinkingSummary += inner.Delta.Thinking
+							if len([]rune(thinkingSummary)) > 200 {
+								thinkingSummary = string([]rune(thinkingSummary)[:200])
+							}
+						}
 						send(WSMessage{Type: "thinking", SessionID: sessID, Content: inner.Delta.Thinking})
 					}
 				case "input_json_delta":
 					if inner.Delta.PartialJSON != "" {
 						toolID := toolIDs[inner.Index]
+						toolInputs[inner.Index] += inner.Delta.PartialJSON
 						send(WSMessage{Type: "tool_input", SessionID: sessID, ToolID: toolID, Content: inner.Delta.PartialJSON})
 					}
 				}
 			case "content_block_stop":
 				if toolID, ok := toolIDs[inner.Index]; ok {
+					// Record tool step for metadata
+					inputSummary := toolInputs[inner.Index]
+					if len([]rune(inputSummary)) > 300 {
+						inputSummary = string([]rune(inputSummary)[:300])
+					}
+					steps = append(steps, StepInfo{
+						Type:   "tool",
+						Name:   toolNames[inner.Index],
+						Input:  inputSummary,
+						Status: "done",
+					})
 					send(WSMessage{Type: "tool_result", SessionID: sessID, ToolID: toolID})
 					delete(toolIDs, inner.Index)
+					delete(toolNames, inner.Index)
+					delete(toolInputs, inner.Index)
 				}
 			}
 
@@ -474,7 +518,20 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 		default:
 		}
 	})
-	return fullResponse, err
+
+	// Build metadata JSON from accumulated steps
+	var metadataJSON string
+	if thinkingSummary != "" {
+		steps = append([]StepInfo{{Type: "thinking", Name: "Thinking", Status: "done"}}, steps...)
+	}
+	if len(steps) > 0 {
+		meta := StepsMetadata{Steps: steps, Thinking: thinkingSummary}
+		if b, err := json.Marshal(meta); err == nil {
+			metadataJSON = string(b)
+		}
+	}
+
+	return fullResponse, metadataJSON, err
 }
 
 func streamOpenAI(ctx context.Context, p *model.Provider, sessionID int64, onChunk func(string)) error {

@@ -64,6 +64,9 @@ func migrate() error {
 	// Safe column migration: add work_dir to sessions (SQLite ignores duplicate ALTER)
 	DB.Exec(`ALTER TABLE sessions ADD COLUMN work_dir TEXT NOT NULL DEFAULT ''`)
 
+	// Messages: add metadata column
+	DB.Exec(`ALTER TABLE messages ADD COLUMN metadata TEXT NOT NULL DEFAULT ''`)
+
 	// Triggers table
 	DB.Exec(`CREATE TABLE IF NOT EXISTS triggers (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,

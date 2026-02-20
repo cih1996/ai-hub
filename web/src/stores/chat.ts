@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Session, Message, Provider, WSMessage, ToolCall } from '../types'
+import type { Session, Message, Provider, WSMessage, ToolCall, StepsMetadata } from '../types'
 import * as api from '../composables/api'
 
 export const useChatStore = defineStore('chat', () => {
@@ -147,13 +147,30 @@ export const useChatStore = defineStore('chat', () => {
           }
           streamingContent.value += msg.content
           break
-        case 'done':
+        case 'done': {
+          // Build metadata from server response or local state
+          let metadata = msg.content || ''
+          if (!metadata && (thinkingContent.value || toolCalls.value.length > 0)) {
+            const steps: StepsMetadata['steps'] = []
+            if (thinkingContent.value) {
+              steps.push({ type: 'thinking', name: 'Thinking', status: 'done' })
+            }
+            for (const tc of toolCalls.value) {
+              steps.push({ type: 'tool', name: tc.name, input: tc.input?.slice(0, 300), status: 'done' })
+            }
+            const meta: StepsMetadata = {
+              steps,
+              thinking: thinkingContent.value?.slice(0, 200),
+            }
+            metadata = JSON.stringify(meta)
+          }
           if (streamingContent.value) {
             messages.value.push({
               id: Date.now(),
               session_id: msg.session_id,
               role: 'assistant',
               content: streamingContent.value,
+              metadata: metadata || undefined,
               created_at: new Date().toISOString(),
             })
           }
@@ -162,6 +179,7 @@ export const useChatStore = defineStore('chat', () => {
           toolCalls.value = []
           streaming.value = false
           break
+        }
         case 'error':
           streamingContent.value = ''
           thinkingContent.value = ''

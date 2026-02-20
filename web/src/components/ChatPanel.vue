@@ -4,6 +4,7 @@ import { marked } from 'marked'
 import { useChatStore } from '../stores/chat'
 import * as api from '../composables/api'
 import type { FileItem } from '../composables/api'
+import type { StepsMetadata } from '../types'
 
 const store = useChatStore()
 const input = ref('')
@@ -11,6 +12,49 @@ const messagesEl = ref<HTMLElement>()
 const textareaEl = ref<HTMLTextAreaElement>()
 const stepsExpanded = ref(false)
 const isComposing = ref(false)
+// Track expanded state for historical message steps (by message id)
+const historyStepsExpanded = ref<Record<number, boolean>>({})
+
+// Tool name Chinese mapping
+const toolNameMap: Record<string, string> = {
+  Read: '读取文件',
+  Edit: '编辑文件',
+  Write: '写入文件',
+  Bash: '执行命令',
+  Grep: '搜索内容',
+  Glob: '查找文件',
+  WebFetch: '获取网页',
+  WebSearch: '搜索网页',
+  Task: '子任务',
+  TodoWrite: '任务清单',
+  Thinking: '思考中',
+  NotebookEdit: '编辑笔记本',
+  AskUserQuestion: '询问用户',
+  Skill: '调用技能',
+  ToolSearch: '搜索工具',
+}
+
+// Tool color category mapping
+function toolColorClass(name: string): string {
+  if (name === 'Thinking' || name === '思考中') return 'step-thinking'
+  if (['Read', 'Write', 'Edit', 'NotebookEdit'].includes(name)) return 'step-file'
+  if (name === 'Bash') return 'step-bash'
+  if (['Grep', 'Glob', 'WebSearch', 'ToolSearch'].includes(name)) return 'step-search'
+  return 'step-default'
+}
+
+function localizeToolName(name: string): string {
+  return toolNameMap[name] || name
+}
+
+function parseMetadata(metadata?: string): StepsMetadata | null {
+  if (!metadata) return null
+  try {
+    return JSON.parse(metadata) as StepsMetadata
+  } catch {
+    return null
+  }
+}
 
 // Toast state
 const toastMsg = ref('')
@@ -306,6 +350,42 @@ function formatToolInput(raw: string): string {
           </div>
           <div class="message-body">
             <div class="message-role">{{ msg.role === 'user' ? 'You' : 'AI' }}</div>
+            <!-- Historical steps panel (for assistant messages with metadata) -->
+            <div v-if="msg.role === 'assistant' && parseMetadata(msg.metadata)" class="activity-block history-steps">
+              <div class="activity-header" @click="historyStepsExpanded[msg.id] = !historyStepsExpanded[msg.id]">
+                <svg class="done-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M20 6L9 17l-5-5"/>
+                </svg>
+                <span class="activity-label">
+                  {{ parseMetadata(msg.metadata)!.steps.length }} 个步骤
+                </span>
+                <svg class="chevron" :class="{ expanded: historyStepsExpanded[msg.id] }" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M6 9l6 6 6-6"/>
+                </svg>
+              </div>
+              <div v-if="historyStepsExpanded[msg.id]" class="activity-body">
+                <div v-if="parseMetadata(msg.metadata)!.thinking" class="thinking-section">
+                  <div class="section-label step-thinking">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
+                    </svg>
+                    思考中
+                  </div>
+                  <div class="thinking-text">{{ parseMetadata(msg.metadata)!.thinking }}</div>
+                </div>
+                <div v-for="(step, idx) in parseMetadata(msg.metadata)!.steps.filter(s => s.type === 'tool')" :key="idx" class="tool-item">
+                  <div class="tool-header">
+                    <span class="tool-status done">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M20 6L9 17l-5-5"/>
+                      </svg>
+                    </span>
+                    <span class="tool-name" :class="toolColorClass(step.name || '')">{{ localizeToolName(step.name || '') }}</span>
+                  </div>
+                  <div v-if="step.input" class="tool-input">{{ formatToolInput(step.input) }}</div>
+                </div>
+              </div>
+            </div>
             <div
               v-if="msg.role === 'assistant'"
               class="message-content md-content"
@@ -333,7 +413,7 @@ function formatToolInput(raw: string): string {
                   <path d="M21 12a9 9 0 11-6.219-8.56"/>
                 </svg>
                 <span class="activity-label">
-                  {{ stepCount > 0 ? `${stepCount} step${stepCount > 1 ? 's' : ''}` : 'Processing...' }}
+                  {{ stepCount > 0 ? `${stepCount} 个步骤` : '处理中...' }}
                 </span>
                 <svg class="chevron" :class="{ expanded: stepsExpanded }" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M6 9l6 6 6-6"/>
@@ -341,11 +421,11 @@ function formatToolInput(raw: string): string {
               </div>
               <div v-if="stepsExpanded" class="activity-body">
                 <div v-if="store.thinkingContent" class="thinking-section">
-                  <div class="section-label">
+                  <div class="section-label step-thinking">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
                     </svg>
-                    Thinking
+                    思考中
                   </div>
                   <div class="thinking-text">{{ store.thinkingContent }}</div>
                 </div>
@@ -359,7 +439,7 @@ function formatToolInput(raw: string): string {
                         <path d="M20 6L9 17l-5-5"/>
                       </svg>
                     </span>
-                    <span class="tool-name">{{ tc.name }}</span>
+                    <span class="tool-name" :class="toolColorClass(tc.name)">{{ localizeToolName(tc.name) }}</span>
                   </div>
                   <div v-if="tc.input" class="tool-input">{{ formatToolInput(tc.input) }}</div>
                 </div>
@@ -702,11 +782,20 @@ function formatToolInput(raw: string): string {
   display: flex; align-items: center; gap: 8px; font-size: 13px;
 }
 .tool-status { display: flex; align-items: center; flex-shrink: 0; }
-.tool-status.running { color: var(--accent); }
-.tool-status.done { color: var(--success); }
+.tool-status.running { color: #3b82f6; }
+.tool-status.done { color: #22c55e; }
 .tool-name {
   font-weight: 600; color: var(--text-primary); font-size: 13px;
 }
+/* Step color categories */
+.step-thinking { color: #8b5cf6; }
+.step-file { color: #22c55e; }
+.step-bash { color: #f59e0b; }
+.step-search { color: #06b6d4; }
+.step-default { color: var(--text-primary); }
+/* History steps: done check icon */
+.done-check { color: #22c55e; }
+.history-steps { margin-bottom: 8px; }
 .tool-input {
   margin-top: 4px; padding: 6px 8px;
   background: var(--bg-primary); border-radius: var(--radius-sm);

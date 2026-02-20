@@ -80,8 +80,8 @@ func DeleteSession(id int64) error {
 func AddMessage(m *model.Message) error {
 	m.CreatedAt = time.Now()
 	result, err := DB.Exec(
-		`INSERT INTO messages (session_id, role, content, created_at) VALUES (?, ?, ?, ?)`,
-		m.SessionID, m.Role, m.Content, m.CreatedAt,
+		`INSERT INTO messages (session_id, role, content, metadata, created_at) VALUES (?, ?, ?, ?, ?)`,
+		m.SessionID, m.Role, m.Content, m.Metadata, m.CreatedAt,
 	)
 	if err != nil {
 		return err
@@ -97,7 +97,7 @@ func AddMessage(m *model.Message) error {
 
 func GetMessages(sessionID int64) ([]model.Message, error) {
 	rows, err := DB.Query(
-		`SELECT id, session_id, role, content, created_at FROM messages WHERE session_id = ? ORDER BY created_at`,
+		`SELECT id, session_id, role, content, metadata, created_at FROM messages WHERE session_id = ? ORDER BY created_at`,
 		sessionID,
 	)
 	if err != nil {
@@ -107,7 +107,7 @@ func GetMessages(sessionID int64) ([]model.Message, error) {
 	var list []model.Message
 	for rows.Next() {
 		var m model.Message
-		if err := rows.Scan(&m.ID, &m.SessionID, &m.Role, &m.Content, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.SessionID, &m.Role, &m.Content, &m.Metadata, &m.CreatedAt); err != nil {
 			return nil, err
 		}
 		list = append(list, m)

@@ -28,7 +28,20 @@ export interface Message {
   session_id: number
   role: 'user' | 'assistant'
   content: string
+  metadata?: string
   created_at: string
+}
+
+export interface StepInfo {
+  type: 'thinking' | 'tool'
+  name?: string
+  input?: string
+  status?: string
+}
+
+export interface StepsMetadata {
+  steps: StepInfo[]
+  thinking?: string
 }
 
 export interface WSMessage {

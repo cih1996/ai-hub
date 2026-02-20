@@ -46,6 +46,7 @@ type Message struct {
 	SessionID int64     `json:"session_id"`
 	Role      string    `json:"role"` // "user" | "assistant"
 	Content   string    `json:"content"`
+	Metadata  string    `json:"metadata,omitempty"` // JSON: 执行步骤持久化数据
 	CreatedAt time.Time `json:"created_at"`
 }
 
