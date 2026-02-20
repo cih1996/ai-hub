@@ -344,6 +344,16 @@ func installClaudeRules(dataDir string) {
 	targetBase := filepath.Join(dataDir, "rules")
 	log.Printf("[rules] template dir: %s", targetBase)
 
+	// Clean up legacy split rule files (merged back into CLAUDE.md in #30)
+	legacyFiles := []string{"rule-ai-behavior.md", "rule-memory-knowledge.md"}
+	for _, name := range legacyFiles {
+		p := filepath.Join(targetBase, name)
+		if _, err := os.Stat(p); err == nil {
+			os.Remove(p)
+			log.Printf("[rules] removed legacy file: %s", p)
+		}
+	}
+
 	count := 0
 	fs.WalkDir(claudeRulesFS, "claude", func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
