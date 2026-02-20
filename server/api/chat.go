@@ -325,7 +325,9 @@ func runStream(session *model.Session, query string, isNewSession bool) {
 
 	if err != nil {
 		log.Printf("[chat] error: %v", err)
-		stream.Send(WSMessage{Type: "error", SessionID: session.ID, Content: err.Error()})
+		// Use broadcast instead of stream.Send to ensure error reaches frontend
+		// even if the WS client has disconnected/resubscribed during retries
+		broadcast(WSMessage{Type: "error", SessionID: session.ID, Content: err.Error()})
 		return
 	}
 

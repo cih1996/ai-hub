@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+
+	"github.com/google/uuid"
 )
 
 type ClaudeCodeClient struct {
@@ -192,9 +194,10 @@ func (c *ClaudeCodeClient) StreamPersistent(ctx context.Context, req ClaudeCodeR
 		}
 	}
 
-	// Second retry: start fresh (--session-id) — always attempt regardless of proc state
+	// Second retry: start fresh with a NEW UUID — always attempt regardless of proc state
 	Pool.Kill(req.HubSessionID)
 	log.Printf("[pool] resume failed or process error, retrying with new session for session %d", req.HubSessionID)
+	req.SessionID = uuid.New().String() // generate new UUID to avoid "Session ID already in use"
 	req.Resume = false
 	proc, err = Pool.GetOrCreate(req, false)
 	if err != nil {
