@@ -13,6 +13,41 @@ import (
 // --- Vector MCP tool handlers ---
 // These are HTTP endpoints that Claude CLI calls via MCP configuration.
 
+// SearchVector performs semantic search with scope in request body
+// POST /api/v1/vector/search
+func SearchVector(c *gin.Context) {
+	var req struct {
+		Scope string `json:"scope"`
+		Query string `json:"query"`
+		TopK  int    `json:"top_k"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.Scope != "knowledge" && req.Scope != "memory" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "scope must be 'knowledge' or 'memory'"})
+		return
+	}
+	if req.Query == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "query is required"})
+		return
+	}
+	if req.TopK <= 0 {
+		req.TopK = 5
+	}
+	if !core.Vector.IsReady() {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "vector engine not ready"})
+		return
+	}
+	results, err := core.Vector.Search(req.Scope, req.Query, req.TopK)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"results": results})
+}
+
 // SearchKnowledge performs semantic search on knowledge files
 // POST /api/v1/vector/search_knowledge
 func SearchKnowledge(c *gin.Context) {

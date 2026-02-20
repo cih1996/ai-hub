@@ -178,6 +178,7 @@ func main() {
 		v1.DELETE("/triggers/:id", api.DeleteTrigger)
 
 		// Vector engine (Skill tools)
+		v1.POST("/vector/search", api.SearchVector)
 		v1.POST("/vector/search_knowledge", api.SearchKnowledge)
 		v1.POST("/vector/search_memory", api.SearchMemory)
 		v1.POST("/vector/read_knowledge", api.ReadKnowledge)
