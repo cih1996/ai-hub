@@ -189,12 +189,22 @@ export const useChatStore = defineStore('chat', () => {
           break
         }
         case 'error':
+          // Preserve already-received content before clearing
+          if (streamingContent.value) {
+            messages.value.push({
+              id: Date.now(),
+              session_id: msg.session_id,
+              role: 'assistant',
+              content: streamingContent.value,
+              created_at: new Date().toISOString(),
+            })
+          }
           streamingContent.value = ''
           thinkingContent.value = ''
           toolCalls.value = []
           streaming.value = false
           messages.value.push({
-            id: Date.now(),
+            id: Date.now() + 1,
             session_id: msg.session_id,
             role: 'assistant',
             content: `Error: ${msg.content}`,

@@ -322,7 +322,17 @@ func runStream(session *model.Session, query string, isNewSession bool) {
 
 	if err != nil {
 		log.Printf("[chat] error: %v", err)
-		stream.Send(WSMessage{Type: "error", SessionID: session.ID, Content: err.Error()})
+		// Save partial response before reporting error — don't lose already-received content
+		if fullResponse != "" {
+			assistantMsg := &model.Message{
+				SessionID: session.ID,
+				Role:      "assistant",
+				Content:   fullResponse,
+				Metadata:  metadataJSON,
+			}
+			store.AddMessage(assistantMsg)
+		}
+		broadcast(WSMessage{Type: "error", SessionID: session.ID, Content: err.Error()})
 		return
 	}
 
