@@ -172,12 +172,12 @@ export const useChatStore = defineStore('chat', () => {
             }
             metadata = JSON.stringify(meta)
           }
-          if (streamingContent.value) {
+          if (streamingContent.value || metadata) {
             messages.value.push({
               id: Date.now(),
               session_id: msg.session_id,
               role: 'assistant',
-              content: streamingContent.value,
+              content: streamingContent.value || '[任务已执行，详见执行步骤]',
               metadata: metadata || undefined,
               created_at: new Date().toISOString(),
             })
@@ -190,12 +190,24 @@ export const useChatStore = defineStore('chat', () => {
         }
         case 'error':
           // Preserve already-received content before clearing
-          if (streamingContent.value) {
+          if (streamingContent.value || toolCalls.value.length > 0 || thinkingContent.value) {
+            let metadata: string | undefined
+            if (toolCalls.value.length > 0 || thinkingContent.value) {
+              const steps: StepsMetadata['steps'] = []
+              if (thinkingContent.value) {
+                steps.push({ type: 'thinking', name: 'Thinking', status: 'done' })
+              }
+              for (const tc of toolCalls.value) {
+                steps.push({ type: 'tool', name: tc.name, input: tc.input?.slice(0, 300), status: 'done' })
+              }
+              metadata = JSON.stringify({ steps, thinking: thinkingContent.value?.slice(0, 200) })
+            }
             messages.value.push({
               id: Date.now(),
               session_id: msg.session_id,
               role: 'assistant',
-              content: streamingContent.value,
+              content: streamingContent.value || '[任务已执行，详见执行步骤]',
+              metadata,
               created_at: new Date().toISOString(),
             })
           }

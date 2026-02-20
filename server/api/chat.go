@@ -323,11 +323,15 @@ func runStream(session *model.Session, query string, isNewSession bool) {
 	if err != nil {
 		log.Printf("[chat] error: %v", err)
 		// Save partial response before reporting error — don't lose already-received content
-		if fullResponse != "" {
+		if fullResponse != "" || metadataJSON != "" {
+			content := fullResponse
+			if content == "" {
+				content = "[任务已执行，详见执行步骤]"
+			}
 			assistantMsg := &model.Message{
 				SessionID: session.ID,
 				Role:      "assistant",
-				Content:   fullResponse,
+				Content:   content,
 				Metadata:  metadataJSON,
 			}
 			store.AddMessage(assistantMsg)
@@ -336,11 +340,15 @@ func runStream(session *model.Session, query string, isNewSession bool) {
 		return
 	}
 
-	if fullResponse != "" {
+	if fullResponse != "" || metadataJSON != "" {
+		content := fullResponse
+		if content == "" {
+			content = "[任务已执行，详见执行步骤]"
+		}
 		assistantMsg := &model.Message{
 			SessionID: session.ID,
 			Role:      "assistant",
-			Content:   fullResponse,
+			Content:   content,
 			Metadata:  metadataJSON,
 		}
 		store.AddMessage(assistantMsg)
