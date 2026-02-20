@@ -274,6 +274,29 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  async function restartSession() {
+    if (!currentSessionId.value || streaming.value) return
+    try {
+      await api.restartSession(currentSessionId.value)
+      // Reload messages to show the system restart message
+      messages.value = await api.getMessages(currentSessionId.value)
+      // Update process state in sidebar
+      const s = sessions.value.find((s) => s.id === currentSessionId.value)
+      if (s) {
+        s.process_alive = false
+        s.process_state = ''
+      }
+    } catch (e: any) {
+      messages.value.push({
+        id: Date.now(),
+        session_id: currentSessionId.value,
+        role: 'assistant',
+        content: `重启失败: ${e.message}`,
+        created_at: new Date().toISOString(),
+      })
+    }
+  }
+
   async function compressContext() {
     if (!currentSessionId.value || streaming.value) return
     streaming.value = true
@@ -319,5 +342,6 @@ export const useChatStore = defineStore('chat', () => {
     sendMessage,
     stopStreaming,
     compressContext,
+    restartSession,
   }
 })

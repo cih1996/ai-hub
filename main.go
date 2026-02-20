@@ -135,6 +135,7 @@ func main() {
 		v1.DELETE("/sessions/:id", api.DeleteSession)
 		v1.GET("/sessions/:id/messages", api.GetMessages)
 		v1.POST("/sessions/:id/compress", api.CompressSession)
+		v1.POST("/sessions/:id/restart", api.RestartSession)
 
 		// Session rules
 		v1.GET("/session-rules/:id", api.GetSessionRules)

@@ -247,6 +247,17 @@ function formatToolInput(raw: string): string {
         <span class="header-context">{{ contextCount }} 条上下文</span>
         <button
           class="btn-compress"
+          @click="store.restartSession()"
+          :disabled="store.streaming"
+          title="重启会话（杀掉 CLI 进程，刷新规则）"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 105.64-11.36L3 10"/>
+          </svg>
+          重启
+        </button>
+        <button
+          class="btn-compress"
           @click="store.compressContext()"
           :disabled="store.streaming"
           title="压缩上下文（重置 CLI 会话，保留最近对话摘要）"

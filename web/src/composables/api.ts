@@ -37,6 +37,10 @@ export const getMessages = (sessionId: number) =>
 export const compressSession = (id: number) =>
   request<{ ok: boolean }>(`/sessions/${id}/compress`, { method: 'POST' })
 
+// Restart session (kill CLI process, refresh rules)
+export const restartSession = (id: number) =>
+  request<{ ok: boolean }>(`/sessions/${id}/restart`, { method: 'POST' })
+
 // Chat
 export const sendChat = (sessionId: number, content: string, workDir?: string) =>
   request<{ session_id: number; status: string }>('/chat/send', {
