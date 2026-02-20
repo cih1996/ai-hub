@@ -203,6 +203,9 @@ func HandleChat(c *gin.Context) {
 			if ok {
 				stream.SwapSend(sendJSON)
 				sendJSON(WSMessage{Type: "streaming_status", SessionID: msg.SessionID, Content: "streaming"})
+			} else {
+				// Session is not streaming — tell client to correct its state
+				sendJSON(WSMessage{Type: "streaming_status", SessionID: msg.SessionID, Content: "idle"})
 			}
 		}
 	}
@@ -333,7 +336,8 @@ func runStream(session *model.Session, query string, isNewSession bool) {
 		store.AddMessage(assistantMsg)
 	}
 
-	stream.Send(WSMessage{Type: "done", SessionID: session.ID, Content: metadataJSON})
+	// Broadcast done so even reconnected/new WS clients receive it (stream.Send is single-client)
+	broadcast(WSMessage{Type: "done", SessionID: session.ID, Content: metadataJSON})
 }
 
 // StepInfo represents a single execution step for metadata persistence

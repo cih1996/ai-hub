@@ -112,7 +112,15 @@ export const useChatStore = defineStore('chat', () => {
 
       switch (msg.type) {
         case 'streaming_status':
-          streaming.value = true
+          if (msg.content === 'idle') {
+            // Server says session is not streaming — correct local state
+            streaming.value = false
+            streamingContent.value = ''
+            thinkingContent.value = ''
+            toolCalls.value = []
+          } else {
+            streaming.value = true
+          }
           break
         case 'thinking':
           thinkingContent.value += msg.content
