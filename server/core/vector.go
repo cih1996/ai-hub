@@ -89,6 +89,14 @@ func (v *VectorEngine) bootstrap() {
 
 	// Step 5: start FastAPI service
 	if err := v.startProcess(); err != nil {
+		if err.Error() == "reuse_existing" {
+			// Healthy process already running on the port — reuse it
+			v.mu.Lock()
+			v.ready = true
+			v.mu.Unlock()
+			log.Println("[vector] engine ready (reused existing process)")
+			return
+		}
 		v.setDisabled("process start failed: " + err.Error())
 		return
 	}
@@ -170,7 +178,58 @@ func (v *VectorEngine) downloadModel() error {
 	return nil
 }
 
+// handlePortConflict checks if the vector engine port is already occupied.
+// If a healthy process is found, it sets ready=true and returns a sentinel error to skip startup.
+// If an unhealthy process is found, it kills it before returning nil.
+func (v *VectorEngine) handlePortConflict() error {
+	// Quick health check on the port
+	url := v.baseURL + "/health"
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		// Port not responding — might still be occupied by a dead process
+		v.killPortProcess()
+		return nil
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode == 200 {
+		// Healthy process already running — reuse it
+		log.Printf("[vector] port %d already has a healthy process, reusing", v.port)
+		return fmt.Errorf("reuse_existing")
+	}
+
+	// Port responds but not healthy — kill and restart
+	log.Printf("[vector] port %d responds but unhealthy (status %d), killing", v.port, resp.StatusCode)
+	v.killPortProcess()
+	time.Sleep(1 * time.Second)
+	return nil
+}
+
+// killPortProcess finds and kills any process occupying the vector engine port.
+func (v *VectorEngine) killPortProcess() {
+	out, err := exec.Command("lsof", "-ti", fmt.Sprintf(":%d", v.port)).Output()
+	if err != nil || len(strings.TrimSpace(string(out))) == 0 {
+		return
+	}
+	pids := strings.Fields(strings.TrimSpace(string(out)))
+	for _, pidStr := range pids {
+		pid, err := strconv.Atoi(pidStr)
+		if err != nil || pid <= 0 {
+			continue
+		}
+		log.Printf("[vector] killing residual process pid=%d on port %d", pid, v.port)
+		killProcessGroup(pid, true)
+	}
+	time.Sleep(500 * time.Millisecond)
+}
+
 func (v *VectorEngine) startProcess() error {
+	// Check if port is already occupied by a residual process
+	if err := v.handlePortConflict(); err != nil {
+		return err
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	mainPy := filepath.Join(v.scriptDir, "main.py")
 	cmd := exec.CommandContext(ctx, v.pythonPath, mainPy)
@@ -259,6 +318,23 @@ func (v *VectorEngine) Stop() {
 		v.cancel = nil
 	}
 	log.Println("[vector] stopped")
+}
+
+// Restart stops the current engine (if any) and re-bootstraps from scratch.
+// Safe to call even when the engine is disabled or not ready.
+func (v *VectorEngine) Restart() {
+	log.Println("[vector] restart requested")
+	v.Stop()
+
+	// Reset state
+	v.mu.Lock()
+	v.disabled = false
+	v.err = ""
+	v.cmd = nil
+	v.cancel = nil
+	v.mu.Unlock()
+
+	v.bootstrap()
 }
 
 // IsReady returns whether the vector engine is available

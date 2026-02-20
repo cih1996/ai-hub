@@ -224,6 +224,17 @@ func StatsVector(c *gin.Context) {
 	c.JSON(http.StatusOK, stats)
 }
 
+// RestartVector restarts the vector engine
+// POST /api/v1/vector/restart
+func RestartVector(c *gin.Context) {
+	if core.Vector == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "vector engine not initialized"})
+		return
+	}
+	go core.Vector.Restart()
+	c.JSON(http.StatusOK, gin.H{"ok": true, "message": "vector engine restarting"})
+}
+
 // VectorStatus returns vector engine status
 // GET /api/v1/vector/status
 func VectorStatus(c *gin.Context) {
