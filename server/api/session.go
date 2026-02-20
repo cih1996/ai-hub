@@ -186,6 +186,46 @@ func CompressSession(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true, "message": "context compressed, new session started"})
 }
 
+// RestartSession handles POST /api/v1/sessions/:id/restart
+// Kills the CLI process and generates a new claude_session_id so next message picks up fresh rules.
+func RestartSession(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid session id"})
+		return
+	}
+
+	if IsSessionStreaming(id) {
+		c.JSON(http.StatusConflict, gin.H{"error": "session is currently streaming"})
+		return
+	}
+
+	_, err = store.GetSession(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return
+	}
+
+	// Kill existing CLI process
+	core.Pool.Kill(id)
+
+	// Clear claude_session_id so next message creates a fresh CLI session (--session-id)
+	if err := store.UpdateClaudeSessionID(id, ""); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update session id"})
+		return
+	}
+
+	// Save a system message
+	sysMsg := &model.Message{
+		SessionID: id,
+		Role:      "user",
+		Content:   "【系统】会话已重启，规则已刷新。",
+	}
+	store.AddMessage(sysMsg)
+
+	c.JSON(http.StatusOK, gin.H{"ok": true, "message": "session restarted, rules refreshed"})
+}
+
 // buildCondensedQuery takes recent messages and builds a condensed prompt for context recovery.
 func buildCondensedQuery(msgs []model.Message) string {
 	const maxMsgs = 10

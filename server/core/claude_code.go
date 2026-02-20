@@ -190,22 +190,18 @@ func (c *ClaudeCodeClient) StreamPersistent(ctx context.Context, req ClaudeCodeR
 				return nil
 			}
 		}
-
-		// Second retry: start fresh (--session-id) if resume also failed
-		if proc == nil || proc.IsDead() {
-			Pool.Kill(req.HubSessionID)
-			log.Printf("[pool] resume failed, retrying with new session for session %d", req.HubSessionID)
-			req.Resume = false
-			proc, err = Pool.GetOrCreate(req, false)
-			if err != nil {
-				log.Printf("[pool] new session failed, falling back: %v", err)
-				return c.Stream(ctx, req, onData)
-			}
-			return proc.SendAndStream(ctx, req.Query, onData)
-		}
-		return err
 	}
-	return err
+
+	// Second retry: start fresh (--session-id) — always attempt regardless of proc state
+	Pool.Kill(req.HubSessionID)
+	log.Printf("[pool] resume failed or process error, retrying with new session for session %d", req.HubSessionID)
+	req.Resume = false
+	proc, err = Pool.GetOrCreate(req, false)
+	if err != nil {
+		log.Printf("[pool] new session failed, falling back: %v", err)
+		return c.Stream(ctx, req, onData)
+	}
+	return proc.SendAndStream(ctx, req.Query, onData)
 }
 
 func maskKey(key string) string {

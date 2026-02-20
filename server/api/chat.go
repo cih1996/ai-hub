@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
@@ -307,7 +308,13 @@ func runStream(session *model.Session, query string, isNewSession bool) {
 
 	switch provider.Mode {
 	case "claude-code":
-		isResume := !isNewSession
+		isResume := !isNewSession && session.ClaudeSessionID != ""
+		if session.ClaudeSessionID == "" {
+			// Generate a new UUID for fresh CLI session
+			newUUID := uuid.New().String()
+			session.ClaudeSessionID = newUUID
+			store.UpdateClaudeSessionID(session.ID, newUUID)
+		}
 		fullResponse, err = streamClaudeCode(ctx, provider, query, session.ClaudeSessionID, isResume, stream.Send, session.ID, session.WorkDir)
 	default:
 		err = streamOpenAI(ctx, provider, session.ID, func(chunk string) {
