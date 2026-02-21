@@ -67,22 +67,22 @@ onMounted(() => store.loadProviders())
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M19 12H5M12 19l-7-7 7-7"/>
           </svg>
-          Back
+          返回
         </button>
-        <h1>Settings</h1>
+        <h1>设置</h1>
       </div>
 
       <section class="section">
         <div class="section-header">
           <div>
-            <h2>Providers</h2>
-            <p class="section-desc">Configure your LLM API endpoints. Claude models auto-route through Claude Code CLI.</p>
+            <h2>模型供应商</h2>
+            <p class="section-desc">配置 LLM API 端点。Claude 模型自动通过 Claude Code CLI 路由。</p>
           </div>
           <button class="btn-add" @click="showForm = true">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M12 5v14M5 12h14"/>
             </svg>
-            Add
+            添加
           </button>
         </div>
 
@@ -91,8 +91,8 @@ onMounted(() => store.loadProviders())
             <div class="provider-info">
               <div class="provider-name">
                 {{ p.name }}
-                <span v-if="p.is_default" class="badge default">Default</span>
-                <span class="badge mode">{{ p.mode === 'claude-code' ? 'Claude Code' : 'Direct API' }}</span>
+                <span v-if="p.is_default" class="badge default">默认</span>
+                <span class="badge mode">{{ p.mode === 'claude-code' ? 'Claude Code' : '直连 API' }}</span>
               </div>
               <div class="provider-meta">
                 {{ p.model_id }}
@@ -103,53 +103,53 @@ onMounted(() => store.loadProviders())
               </div>
             </div>
             <div class="provider-actions">
-              <button class="btn-sm" @click="editProvider(p)">Edit</button>
-              <button class="btn-sm btn-danger" @click="removeProvider(p.id)">Delete</button>
+              <button class="btn-sm" @click="editProvider(p)">编辑</button>
+              <button class="btn-sm btn-danger" @click="removeProvider(p.id)">删除</button>
             </div>
           </div>
           <div v-if="store.providers.length === 0" class="empty">
-            No providers yet. Add one to start chatting.
+            暂无供应商，请添加一个开始使用。
           </div>
         </div>
 
         <!-- Form Modal -->
         <div v-if="showForm" class="form-overlay" @click.self="resetForm">
           <div class="form-modal">
-            <h3>{{ editing ? 'Edit' : 'Add' }} Provider</h3>
+            <h3>{{ editing ? '编辑' : '添加' }}供应商</h3>
 
             <div class="form-group">
-              <label>Name</label>
-              <input v-model="form.name" placeholder="e.g. Claude Pro, GPT-4o" />
+              <label>名称</label>
+              <input v-model="form.name" placeholder="如：Claude Pro、GPT-4o" />
             </div>
 
             <div class="form-group">
-              <label>API Base URL</label>
+              <label>API 地址</label>
               <input v-model="form.base_url" placeholder="https://api.example.com" />
-              <span class="hint">The API endpoint. Leave empty for default Anthropic API.</span>
+              <span class="hint">API 端点地址，留空则使用默认 Anthropic API。</span>
             </div>
 
             <div class="form-group">
-              <label>API Key</label>
+              <label>API 密钥</label>
               <input v-model="form.api_key" type="password" placeholder="sk-..." />
             </div>
 
             <div class="form-group">
-              <label>Model ID</label>
+              <label>模型 ID</label>
               <input v-model="form.model_id" placeholder="claude-sonnet-4-20250514 / gpt-4o" />
-              <span class="hint">Models containing "claude" auto-route through Claude Code CLI.</span>
+              <span class="hint">包含 "claude" 的模型自动通过 Claude Code CLI 路由。</span>
             </div>
 
             <div class="form-group checkbox">
               <label>
                 <input type="checkbox" v-model="form.is_default" />
-                Set as default provider
+                设为默认供应商
               </label>
             </div>
 
             <div class="form-actions">
-              <button class="btn-cancel" @click="resetForm">Cancel</button>
+              <button class="btn-cancel" @click="resetForm">取消</button>
               <button class="btn-save" @click="saveProvider" :disabled="!form.name || !form.api_key || !form.model_id">
-                Save
+                保存
               </button>
             </div>
           </div>
