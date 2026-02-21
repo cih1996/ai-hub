@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, onMounted } from 'vue'
-import { listFiles, readFileContent, writeFileContent, createFileApi, deleteFileApi, getTemplateVars, getDefaultFile } from '../composables/api'
-import type { TemplateVar } from '../composables/api'
+import { listFiles, readFileContent, writeFileContent, createFileApi, deleteFileApi, getTemplateVars, getDefaultFile, vectorSearch } from '../composables/api'
+import type { TemplateVar, VectorSearchResult } from '../composables/api'
 
 interface FileItem {
   name: string
@@ -36,6 +36,57 @@ const newFileName = ref('')
 const templateVars = ref<TemplateVar[]>([])
 const showVars = ref(false)
 const restoringDefault = ref(false)
+
+// Vector search
+const searchQuery = ref('')
+const searchScope = ref<'knowledge' | 'memory' | 'all'>('all')
+const searching = ref(false)
+const searchResults = ref<(VectorSearchResult & { scope: string })[]>([])
+const searchDone = ref(false)
+const expandedResult = ref<string | null>(null)
+
+function similarityColor(s: number): string {
+  if (s >= 0.7) return 'var(--success, #22c55e)'
+  if (s >= 0.4) return 'var(--warning, #eab308)'
+  return 'var(--text-muted)'
+}
+
+async function onSearch() {
+  const q = searchQuery.value.trim()
+  if (!q) return
+  searching.value = true
+  searchResults.value = []
+  searchDone.value = false
+  try {
+    if (searchScope.value === 'all') {
+      const [k, m] = await Promise.all([
+        vectorSearch('knowledge', q, 10),
+        vectorSearch('memory', q, 10),
+      ])
+      const merged = [
+        ...k.results.map(r => ({ ...r, scope: 'knowledge' })),
+        ...m.results.map(r => ({ ...r, scope: 'memory' })),
+      ]
+      merged.sort((a, b) => b.similarity - a.similarity)
+      searchResults.value = merged
+    } else {
+      const res = await vectorSearch(searchScope.value, q, 10)
+      searchResults.value = res.results.map(r => ({ ...r, scope: searchScope.value }))
+    }
+  } catch (e: any) {
+    searchResults.value = []
+  }
+  searchDone.value = true
+  searching.value = false
+}
+
+function toggleExpand(id: string) {
+  expandedResult.value = expandedResult.value === id ? null : id
+}
+
+function scopeLabel(s: string): string {
+  return s === 'knowledge' ? '知识库' : '记忆库'
+}
 
 async function restoreDefault() {
   if (!selectedFile.value) return
@@ -150,6 +201,37 @@ onMounted(async () => {
         >{{ tab.label }}</button>
       </div>
       <div class="tab-desc">{{ activeTabDesc }}</div>
+      <div class="search-bar">
+        <div class="search-inputs">
+          <input
+            v-model="searchQuery"
+            class="search-input"
+            placeholder="输入关键词进行语义搜索"
+            @keyup.enter="onSearch"
+          />
+          <select v-model="searchScope" class="search-scope">
+            <option value="all">全部</option>
+            <option value="knowledge">知识库</option>
+            <option value="memory">记忆库</option>
+          </select>
+          <button class="btn-search" :disabled="searching || !searchQuery.trim()" @click="onSearch">
+            <svg v-if="searching" class="spinning" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+            <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+            {{ searching ? '搜索中...' : '搜索' }}
+          </button>
+        </div>
+        <div v-if="searchDone && searchResults.length === 0" class="search-empty">未找到相关结果</div>
+        <div v-if="searchResults.length > 0" class="search-results">
+          <div v-for="r in searchResults" :key="r.id + r.scope" class="search-result-item" @click="toggleExpand(r.id + r.scope)">
+            <div class="result-header">
+              <span class="result-scope" :class="'scope-' + r.scope">{{ scopeLabel(r.scope) }}</span>
+              <span class="result-filename">{{ r.id }}</span>
+              <span class="result-score" :style="{ color: similarityColor(r.similarity) }">{{ (r.similarity * 100).toFixed(1) }}%</span>
+            </div>
+            <div class="result-preview">{{ expandedResult === r.id + r.scope ? r.document : r.document.slice(0, 200) + (r.document.length > 200 ? '...' : '') }}</div>
+          </div>
+        </div>
+      </div>
     </div>
     <div class="manage-body">
       <div class="file-list">
@@ -307,5 +389,48 @@ onMounted(async () => {
 .editor-empty {
   flex: 1; display: flex; align-items: center; justify-content: center;
   color: var(--text-muted); font-size: 14px;
+}
+/* Vector search */
+.search-bar { margin-top: 10px; }
+.search-inputs { display: flex; gap: 6px; align-items: center; }
+.search-input {
+  flex: 1; padding: 6px 10px; font-size: 13px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--bg-primary); color: var(--text-primary);
+}
+.search-scope {
+  padding: 6px 8px; font-size: 12px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--bg-primary); color: var(--text-primary);
+}
+.btn-search {
+  display: flex; align-items: center; gap: 4px; padding: 6px 12px;
+  border-radius: var(--radius); font-size: 12px; font-weight: 500;
+  background: var(--accent); color: #fff; transition: opacity var(--transition);
+  cursor: pointer; white-space: nowrap; flex-shrink: 0;
+}
+.btn-search:hover:not(:disabled) { opacity: 0.9; }
+.btn-search:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-search .spinning { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.search-empty { padding: 12px 0; text-align: center; color: var(--text-muted); font-size: 13px; }
+.search-results { margin-top: 8px; max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+.search-result-item {
+  padding: 8px 10px; background: var(--bg-secondary); border: 1px solid var(--border);
+  border-radius: var(--radius); cursor: pointer; transition: background var(--transition);
+}
+.search-result-item:hover { background: var(--bg-hover); }
+.result-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.result-scope {
+  font-size: 10px; padding: 1px 6px; border-radius: 9999px; flex-shrink: 0;
+}
+.scope-knowledge { background: rgba(59,130,246,0.15); color: #3b82f6; }
+.scope-memory { background: rgba(168,85,247,0.15); color: #a855f7; }
+.result-filename {
+  font-size: 12px; color: var(--text-primary); font-weight: 500;
+  flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.result-score { font-size: 12px; font-weight: 600; flex-shrink: 0; font-family: 'SF Mono', 'Fira Code', monospace; }
+.result-preview {
+  font-size: 12px; color: var(--text-muted); line-height: 1.5;
+  white-space: pre-wrap; word-break: break-all;
 }
 </style>

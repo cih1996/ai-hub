@@ -156,6 +156,19 @@ export const updateTrigger = (id: number, t: Partial<Trigger>) =>
 export const deleteTrigger = (id: number) =>
   request<{ ok: boolean }>(`/triggers/${id}`, { method: 'DELETE' })
 
+// Vector search
+export interface VectorSearchResult {
+  id: string
+  document: string
+  similarity: number
+  metadata: Record<string, any>
+}
+export const vectorSearch = (scope: string, query: string, topK: number = 5) =>
+  request<{ results: VectorSearchResult[] }>('/vector/search', {
+    method: 'POST',
+    body: JSON.stringify({ scope, query, top_k: topK }),
+  })
+
 // Channels
 export const listChannels = () => request<Channel[]>('/channels')
 export const createChannel = (ch: Partial<Channel>) =>
