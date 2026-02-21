@@ -102,7 +102,6 @@ async function onDeploy() {
 部署参数：
 - 应用名称：${form.value.name}
 - 应用描述：AI Hub 智能助手
-- Webhook 地址：http://129.204.22.176:18080/api/v1/webhook/feishu
 
 部署完成后请输出 App ID 和 App Secret。`
     const res = await sendChat(0, content)
