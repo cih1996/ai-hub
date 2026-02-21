@@ -404,6 +404,8 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 	toolIDs := make(map[int]string)
 	toolNames := make(map[int]string)
 	toolInputs := make(map[int]string)
+	// Full text from assistant message (preserves newlines, used as fallback)
+	var assistantFullText string
 
 	err := claudeClient.StreamPersistent(ctx, req, func(line string) {
 		// First parse the top-level wrapper
@@ -529,14 +531,43 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 					broadcast(WSMessage{Type: "session_title_update", SessionID: sessID, Content: wrapper.ConversationName})
 				}
 			}
-			if wrapper.Subtype == "success" && wrapper.Result != "" && fullResponse == "" {
-				fullResponse = wrapper.Result
-				send(WSMessage{Type: "chunk", SessionID: sessID, Content: wrapper.Result})
+			if wrapper.Subtype == "success" && fullResponse == "" {
+				// Prefer assistant message content (preserves newlines) over result summary
+				fallback := assistantFullText
+				if fallback == "" {
+					fallback = wrapper.Result
+				}
+				if fallback != "" {
+					log.Printf("[claude] session %d: using result fallback (assistant_text=%d bytes, result=%d bytes)", sessID, len(assistantFullText), len(wrapper.Result))
+					fullResponse = fallback
+					send(WSMessage{Type: "chunk", SessionID: sessID, Content: fallback})
+				}
 			} else if wrapper.Subtype == "error" && wrapper.Result != "" {
 				send(WSMessage{Type: "error", SessionID: sessID, Content: wrapper.Result})
 			}
 
-		// Ignore "assistant" and "system" types — they are duplicates of stream_event data
+		case "assistant":
+			// Parse assistant message to capture full text with formatting (newlines preserved)
+			var aMsg struct {
+				Message struct {
+					Content []struct {
+						Type string `json:"type"`
+						Text string `json:"text"`
+					} `json:"content"`
+				} `json:"message"`
+			}
+			if err := json.Unmarshal([]byte(line), &aMsg); err == nil {
+				var texts []string
+				for _, b := range aMsg.Message.Content {
+					if b.Type == "text" && b.Text != "" {
+						texts = append(texts, b.Text)
+					}
+				}
+				if len(texts) > 0 {
+					assistantFullText = strings.Join(texts, "\n")
+				}
+			}
+
 		default:
 		}
 	})
