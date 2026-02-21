@@ -42,6 +42,13 @@ func (c *wsClient) Send(msg WSMessage) {
 	c.conn.WriteJSON(msg)
 }
 
+func (c *wsClient) Ping() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	return c.conn.WriteMessage(websocket.PingMessage, nil)
+}
+
 var (
 	wsClients   = make(map[*wsClient]struct{})
 	wsClientsMu sync.RWMutex
@@ -140,6 +147,10 @@ func HandleChat(c *gin.Context) {
 	}
 	defer conn.Close()
 
+	client := &wsClient{conn: conn}
+	registerClient(client)
+	defer unregisterClient(client)
+
 	// Heartbeat: ping every 30s, expect pong within 60s
 	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 	conn.SetPongHandler(func(string) error {
@@ -154,8 +165,7 @@ func HandleChat(c *gin.Context) {
 		for {
 			select {
 			case <-ticker.C:
-				conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				if err := client.Ping(); err != nil {
 					return
 				}
 			case <-pingDone:
@@ -163,10 +173,6 @@ func HandleChat(c *gin.Context) {
 			}
 		}
 	}()
-
-	client := &wsClient{conn: conn}
-	registerClient(client)
-	defer unregisterClient(client)
 	defer close(pingDone)
 
 	sendJSON := func(msg WSMessage) {
