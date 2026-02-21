@@ -88,6 +88,18 @@ func migrate() error {
 	)`)
 	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_triggers_session ON triggers(session_id)`)
 
+	// Channels table (IM gateway)
+	DB.Exec(`CREATE TABLE IF NOT EXISTS channels (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL DEFAULT '',
+		platform TEXT NOT NULL DEFAULT '',
+		session_id INTEGER DEFAULT 0,
+		config TEXT NOT NULL DEFAULT '{}',
+		enabled INTEGER NOT NULL DEFAULT 1,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`)
+
 	return nil
 }
 

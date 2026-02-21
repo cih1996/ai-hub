@@ -66,3 +66,15 @@ type Trigger struct {
 	CreatedAt   string `json:"created_at"`
 	UpdatedAt   string `json:"updated_at"`
 }
+
+// Channel 通讯频道（IM 网关）
+type Channel struct {
+	ID        int64     `json:"id"`
+	Name      string    `json:"name"`
+	Platform  string    `json:"platform"`   // "feishu" | "telegram" | "qq"
+	SessionID int64     `json:"session_id"` // 绑定的会话 ID
+	Config    string    `json:"config"`     // JSON: 平台配置
+	Enabled   bool      `json:"enabled"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}

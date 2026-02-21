@@ -177,6 +177,15 @@ func main() {
 		v1.PUT("/triggers/:id", api.UpdateTrigger)
 		v1.DELETE("/triggers/:id", api.DeleteTrigger)
 
+		// Channels (IM gateway)
+		v1.GET("/channels", api.ListChannels)
+		v1.POST("/channels", api.CreateChannel)
+		v1.PUT("/channels/:id", api.UpdateChannel)
+		v1.DELETE("/channels/:id", api.DeleteChannel)
+
+		// Webhooks (IM platform callbacks)
+		v1.POST("/webhook/feishu", api.HandleFeishuWebhook)
+
 		// Vector engine (Skill tools)
 		v1.POST("/vector/search", api.SearchVector)
 		v1.POST("/vector/search_knowledge", api.SearchKnowledge)

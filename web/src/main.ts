@@ -17,6 +17,7 @@ const router = createRouter({
         { path: 'skills', name: 'skills', component: () => import('./views/SkillsView.vue') },
         { path: 'mcp', name: 'mcp', component: () => import('./views/McpView.vue') },
         { path: 'triggers', name: 'triggers', component: () => import('./views/TriggersView.vue') },
+        { path: 'channels', name: 'channels', component: () => import('./views/ChannelsView.vue') },
       ],
     },
     { path: '/settings', name: 'settings', component: () => import('./views/SettingsView.vue') },

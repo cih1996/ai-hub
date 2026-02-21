@@ -74,3 +74,14 @@ export interface Trigger {
   created_at: string
   updated_at: string
 }
+
+export interface Channel {
+  id: number
+  name: string
+  platform: string
+  session_id: number
+  config: string
+  enabled: boolean
+  created_at: string
+  updated_at: string
+}

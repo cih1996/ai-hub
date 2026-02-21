@@ -30,6 +30,7 @@ const isManage = computed(() => route.path.startsWith('/manage'))
 const isSkills = computed(() => route.path.startsWith('/skills'))
 const isMcp = computed(() => route.path.startsWith('/mcp'))
 const isTriggers = computed(() => route.path.startsWith('/triggers'))
+const isChannels = computed(() => route.path.startsWith('/channels'))
 
 interface SessionGroup {
   key: string
@@ -138,6 +139,12 @@ function formatTime(dateStr: string) {
           <polyline points="12 6 12 12 16 14"/>
         </svg>
         <span>定时</span>
+      </button>
+      <button class="nav-item" :class="{ active: isChannels }" @click="router.push('/channels')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
+        </svg>
+        <span>通讯</span>
       </button>
     </div>
 

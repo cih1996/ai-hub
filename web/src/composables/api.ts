@@ -1,4 +1,4 @@
-import type { Provider, Session, Message, Trigger } from '../types'
+import type { Provider, Session, Message, Trigger, Channel } from '../types'
 
 const BASE = '/api/v1'
 
@@ -155,3 +155,12 @@ export const updateTrigger = (id: number, t: Partial<Trigger>) =>
   request<Trigger>(`/triggers/${id}`, { method: 'PUT', body: JSON.stringify(t) })
 export const deleteTrigger = (id: number) =>
   request<{ ok: boolean }>(`/triggers/${id}`, { method: 'DELETE' })
+
+// Channels
+export const listChannels = () => request<Channel[]>('/channels')
+export const createChannel = (ch: Partial<Channel>) =>
+  request<Channel>('/channels', { method: 'POST', body: JSON.stringify(ch) })
+export const updateChannel = (id: number, ch: Partial<Channel>) =>
+  request<Channel>(`/channels/${id}`, { method: 'PUT', body: JSON.stringify(ch) })
+export const deleteChannel = (id: number) =>
+  request<{ ok: boolean }>(`/channels/${id}`, { method: 'DELETE' })
