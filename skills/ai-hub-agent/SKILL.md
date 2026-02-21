@@ -36,7 +36,8 @@ curl -X POST http://localhost:$AI_HUB_PORT/api/v1/chat/send \
   -d '{
     "session_id": 0,
     "content": "你的任务指令",
-    "work_dir": "/path/to/project"
+    "work_dir": "/path/to/project",
+    "group_name": "团队名称"
   }'
 ```
 
@@ -49,6 +50,7 @@ curl -X POST http://localhost:$AI_HUB_PORT/api/v1/chat/send \
 - `session_id: 0` — 创建新会话
 - `content` — 任务指令，写清楚你要这个会话做什么
 - `work_dir` — 该会话的工作目录，CLI 将在此目录下运行。省略或空字符串则使用用户 home 目录
+- `group_name` — 会话分组名称，同一团队的所有会话应使用相同的 group_name，前端侧边栏会按此字段分组显示。省略或空字符串则归入默认组
 
 记住返回的 `session_id`，后续所有操作都靠它。
 
@@ -60,7 +62,7 @@ curl -X POST http://localhost:$AI_HUB_PORT/api/v1/chat/send \
 # 第一步：创建会话并发送任务
 RESPONSE=$(curl -s -X POST http://localhost:$AI_HUB_PORT/api/v1/chat/send \
   -H "Content-Type: application/json" \
-  -d '{"session_id": 0, "content": "你的任务指令", "work_dir": "/path/to/project"}')
+  -d '{"session_id": 0, "content": "你的任务指令", "work_dir": "/path/to/project", "group_name": "团队名称"}')
 
 # 第二步：提取新会话ID，写入会话级规则
 NEW_ID=$(echo $RESPONSE | grep -o '"session_id":[0-9]*' | grep -o '[0-9]*')
@@ -108,6 +110,7 @@ curl http://localhost:$AI_HUB_PORT/api/v1/sessions
     "title": "会话标题",
     "provider_id": "uuid",
     "work_dir": "/path/to/project",
+    "group_name": "团队名称",
     "streaming": true,
     "process_alive": true,
     "process_pid": 12345,
@@ -320,3 +323,4 @@ curl -X DELETE http://localhost:$AI_HUB_PORT/api/v1/triggers/1
 9. 通过 `process_alive` 字段可判断会话是否有活跃进程，`idle_sec` 可判断进程空闲时长
 10. **创建多角色协作团队时，必须为每个角色会话写入会话级规则（session-rules），确保角色定位持久化，进程重启后自动恢复**
 11. **会话级规则通过 `PUT /api/v1/session-rules/{session_id}` 写入，通过 `GET /api/v1/session-rules/{session_id}` 读取**
+12. **创建多角色协作团队时，所有角色会话应使用相同的 group_name，确保前端侧边栏将它们归为一组显示**
