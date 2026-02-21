@@ -173,6 +173,7 @@ async function onSmartCreate() {
     const res = await sendChat(0, '你已就绪。之后收到的每条消息都是飞书用户消息，请按会话规则处理并通过飞书 API 回复。')
 
     // 2. Pre-write session rules based on user description
+    const port = location.port || (location.protocol === 'https:' ? '443' : '80')
     const rules = `# 飞书消息处理助手
 
 ## 角色
@@ -183,6 +184,12 @@ ${smartDesc.value.trim()}
 2. 根据角色定位理解意图并生成回复
 3. 通过飞书 API 回复（参考 ~/.ai-hub/skills/feishu-message/SKILL.md）
 4. 飞书凭证（app_id、app_secret）从消息中的「频道凭证」部分获取
+
+## 会话间通信协议
+- 需要其他会话协助时：POST http://localhost:${port}/api/v1/chat/send
+- 派发消息中必须注明自己的会话ID，要求对方处理完后通过同一 API 回复
+- 严禁轮询或读取其他会话的消息记录
+- 派发后等待对方主动回复，收到后再通过飞书 API 回复用户
 
 ## 回复规范
 - 内容简洁友好，适合 IM 阅读
