@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { listChannels, createChannel, updateChannel, deleteChannel, listSessions, sendChat } from '../composables/api'
 import type { Channel, Session } from '../types'
 
@@ -17,6 +17,49 @@ const smartCreating = ref(false)
 const smartResult = ref('')
 
 const form = ref({ name: '', platform: 'feishu', session_id: 0, config: '{}' })
+
+const configFields = reactive({
+  feishu: { app_id: '', app_secret: '', verification_token: '' },
+  telegram: { bot_token: '' },
+  qq: { token: '' },
+})
+
+function parseConfigToFields(platform: string, config: string) {
+  try {
+    const obj = JSON.parse(config)
+    if (platform === 'feishu') {
+      configFields.feishu.app_id = obj.app_id || ''
+      configFields.feishu.app_secret = obj.app_secret || ''
+      configFields.feishu.verification_token = obj.verification_token || ''
+    } else if (platform === 'telegram') {
+      configFields.telegram.bot_token = obj.bot_token || ''
+    } else if (platform === 'qq') {
+      configFields.qq.token = obj.token || ''
+    }
+  } catch {
+    // reset on parse error
+    resetConfigFields(platform)
+  }
+}
+
+function resetConfigFields(platform?: string) {
+  if (!platform || platform === 'feishu') {
+    configFields.feishu = { app_id: '', app_secret: '', verification_token: '' }
+  }
+  if (!platform || platform === 'telegram') {
+    configFields.telegram = { bot_token: '' }
+  }
+  if (!platform || platform === 'qq') {
+    configFields.qq = { token: '' }
+  }
+}
+
+function serializeFieldsToConfig(platform: string): string {
+  if (platform === 'feishu') return JSON.stringify(configFields.feishu)
+  if (platform === 'telegram') return JSON.stringify(configFields.telegram)
+  if (platform === 'qq') return JSON.stringify(configFields.qq)
+  return '{}'
+}
 
 const platformOptions = [
   { value: 'feishu', label: '飞书' },
@@ -58,11 +101,13 @@ async function load() {
 
 function openCreate() {
   form.value = { name: '', platform: 'feishu', session_id: 0, config: '{}' }
+  resetConfigFields()
   showCreate.value = true
 }
 
 async function onCreate() {
   if (!form.value.name || !form.value.platform) return
+  form.value.config = serializeFieldsToConfig(form.value.platform)
   await createChannel(form.value)
   showCreate.value = false
   load()
@@ -71,10 +116,13 @@ async function onCreate() {
 function openEdit(ch: Channel) {
   editTarget.value = ch
   form.value = { name: ch.name, platform: ch.platform, session_id: ch.session_id, config: ch.config }
+  resetConfigFields()
+  parseConfigToFields(ch.platform, ch.config)
 }
 
 async function onEdit() {
   if (!editTarget.value) return
+  form.value.config = serializeFieldsToConfig(form.value.platform)
   await updateChannel(editTarget.value.id, form.value)
   editTarget.value = null
   load()
@@ -231,9 +279,18 @@ async function onSmartCreate() {
             </div>
           </div>
           <div class="form-group">
-            <label>平台配置 (JSON)</label>
-            <textarea v-model="form.config" rows="5" placeholder='{"app_id":"","app_secret":"","verification_token":""}'></textarea>
-            <span class="form-hint">飞书: app_id, app_secret, verification_token</span>
+            <label>平台配置</label>
+            <div v-if="form.platform === 'feishu'" class="config-fields">
+              <input v-model="configFields.feishu.app_id" placeholder="App ID" />
+              <input v-model="configFields.feishu.app_secret" placeholder="App Secret" />
+              <input v-model="configFields.feishu.verification_token" placeholder="Verification Token" />
+            </div>
+            <div v-else-if="form.platform === 'telegram'" class="config-fields">
+              <input v-model="configFields.telegram.bot_token" placeholder="Bot Token" />
+            </div>
+            <div v-else-if="form.platform === 'qq'" class="config-fields">
+              <input v-model="configFields.qq.token" placeholder="Token" />
+            </div>
           </div>
           <div v-if="form.platform === 'feishu'" class="deploy-section">
             <button class="btn-deploy" :disabled="deploying" @click="onDeploy">
@@ -290,8 +347,18 @@ async function onSmartCreate() {
             </div>
           </div>
           <div class="form-group">
-            <label>平台配置 (JSON)</label>
-            <textarea v-model="form.config" rows="5"></textarea>
+            <label>平台配置</label>
+            <div v-if="form.platform === 'feishu'" class="config-fields">
+              <input v-model="configFields.feishu.app_id" placeholder="App ID" />
+              <input v-model="configFields.feishu.app_secret" placeholder="App Secret" />
+              <input v-model="configFields.feishu.verification_token" placeholder="Verification Token" />
+            </div>
+            <div v-else-if="form.platform === 'telegram'" class="config-fields">
+              <input v-model="configFields.telegram.bot_token" placeholder="Bot Token" />
+            </div>
+            <div v-else-if="form.platform === 'qq'" class="config-fields">
+              <input v-model="configFields.qq.token" placeholder="Token" />
+            </div>
           </div>
           <div v-if="form.platform === 'feishu'" class="deploy-section">
             <button class="btn-deploy" :disabled="deploying" @click="onDeploy">
@@ -436,4 +503,5 @@ async function onSmartCreate() {
 .btn-smart-go:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-smart-go .spinning { animation: spin 1s linear infinite; }
 .smart-result { font-size: 12px; color: var(--accent); }
+.config-fields { display: flex; flex-direction: column; gap: 6px; }
 </style>
