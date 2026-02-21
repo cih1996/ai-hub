@@ -109,7 +109,7 @@ async function onDeploy() {
 
 部署完成后请输出 App ID 和 App Secret。`
     const res = await sendChat(0, content)
-    deployResult.value = `已创建部署会话 #${res.session_id}，AI 正在自动部署飞书应用`
+    deployResult.value = `已创建开通会话 #${res.session_id}，AI 正在自动开通飞书应用`
   } catch (e: any) {
     deployResult.value = `创建失败: ${e.message}`
   }
@@ -239,7 +239,7 @@ async function onSmartCreate() {
             <button class="btn-deploy" :disabled="deploying" @click="onDeploy">
               <svg v-if="!deploying" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/><circle cx="12" cy="16" r="1"/></svg>
               <svg v-else class="spinning" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
-              {{ deploying ? '正在创建部署任务...' : '一键 AI 部署' }}
+              {{ deploying ? '正在创建开通任务...' : '一键开通飞书应用' }}
             </button>
             <span v-if="deployResult" class="deploy-result">{{ deployResult }}</span>
           </div>
@@ -297,7 +297,7 @@ async function onSmartCreate() {
             <button class="btn-deploy" :disabled="deploying" @click="onDeploy">
               <svg v-if="!deploying" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/><circle cx="12" cy="16" r="1"/></svg>
               <svg v-else class="spinning" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
-              {{ deploying ? '正在创建部署任务...' : '一键 AI 部署' }}
+              {{ deploying ? '正在创建开通任务...' : '一键开通飞书应用' }}
             </button>
             <span v-if="deployResult" class="deploy-result">{{ deployResult }}</span>
           </div>
