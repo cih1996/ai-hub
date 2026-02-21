@@ -11,6 +11,10 @@ const editTarget = ref<Channel | null>(null)
 const deleteTarget = ref<Channel | null>(null)
 const deploying = ref(false)
 const deployResult = ref('')
+const showSmartCreate = ref(false)
+const smartDesc = ref('')
+const smartCreating = ref(false)
+const smartResult = ref('')
 
 const form = ref({ name: '', platform: 'feishu', session_id: 0, config: '{}' })
 
@@ -111,6 +115,36 @@ async function onDeploy() {
   }
   deploying.value = false
 }
+
+async function onSmartCreate() {
+  if (!smartDesc.value.trim()) return
+  smartCreating.value = true
+  smartResult.value = ''
+  try {
+    const port = location.port || (location.protocol === 'https:' ? '443' : '80')
+    const content = `你是一个飞书消息处理助手。请完成以下初始化：
+
+1. 阅读 ~/.ai-hub/skills/feishu-message/SKILL.md，理解如何通过飞书 API 回复消息
+2. 通过环境变量 $AI_HUB_SESSION_ID 获取你当前的会话 ID，然后通过 PUT http://localhost:${port}/api/v1/session-rules/<你的会话ID> 创建会话级规则，规则内容根据以下用户需求生成：
+   - 用户需求：${smartDesc.value}
+   - 规则中必须包含：收到【飞书消息】后如何理解意图、如何生成回复、如何调用飞书 API 发送回复
+   - 飞书凭证（app_id、app_secret）从收到的飞书消息上下文中获取，或通过频道配置获取
+3. 规则创建完成后，回复确认信息，说明你的角色定位和处理方式
+
+之后的每条消息都是从飞书转发来的用户消息，请按规则处理并回复。`
+    const res = await sendChat(0, content)
+    form.value.session_id = res.session_id
+    smartResult.value = `已创建会话 #${res.session_id}`
+    // Refresh sessions so the new one appears in dropdown
+    const s = await listSessions()
+    sessions.value = s
+    showSmartCreate.value = false
+    smartDesc.value = ''
+  } catch (e: any) {
+    smartResult.value = `创建失败: ${e.message}`
+  }
+  smartCreating.value = false
+}
 </script>
 
 <template>
@@ -175,10 +209,26 @@ async function onDeploy() {
           </div>
           <div class="form-group">
             <label>绑定会话</label>
-            <select v-model.number="form.session_id">
-              <option :value="0">不绑定</option>
-              <option v-for="s in sessions" :key="s.id" :value="s.id">#{{ s.id }} {{ s.title }}</option>
-            </select>
+            <div class="session-row">
+              <select v-model.number="form.session_id">
+                <option :value="0">不绑定</option>
+                <option v-for="s in sessions" :key="s.id" :value="s.id">#{{ s.id }} {{ s.title }}</option>
+              </select>
+              <button class="btn-smart" @click="showSmartCreate = !showSmartCreate" type="button">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                智能创建
+              </button>
+            </div>
+            <div v-if="showSmartCreate" class="smart-create-area">
+              <textarea v-model="smartDesc" rows="3" placeholder="描述一下你希望 AI 怎么处理飞书消息，比如：自动回答产品相关问题、充当客服角色等"></textarea>
+              <div class="smart-create-actions">
+                <button class="btn-smart-go" :disabled="smartCreating || !smartDesc.trim()" @click="onSmartCreate" type="button">
+                  <svg v-if="smartCreating" class="spinning" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+                  {{ smartCreating ? '正在创建...' : '创建会话' }}
+                </button>
+                <span v-if="smartResult" class="smart-result">{{ smartResult }}</span>
+              </div>
+            </div>
           </div>
           <div class="form-group">
             <label>平台配置 (JSON)</label>
@@ -218,10 +268,26 @@ async function onDeploy() {
           </div>
           <div class="form-group">
             <label>绑定会话</label>
-            <select v-model.number="form.session_id">
-              <option :value="0">不绑定</option>
-              <option v-for="s in sessions" :key="s.id" :value="s.id">#{{ s.id }} {{ s.title }}</option>
-            </select>
+            <div class="session-row">
+              <select v-model.number="form.session_id">
+                <option :value="0">不绑定</option>
+                <option v-for="s in sessions" :key="s.id" :value="s.id">#{{ s.id }} {{ s.title }}</option>
+              </select>
+              <button class="btn-smart" @click="showSmartCreate = !showSmartCreate" type="button">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                智能创建
+              </button>
+            </div>
+            <div v-if="showSmartCreate" class="smart-create-area">
+              <textarea v-model="smartDesc" rows="3" placeholder="描述一下你希望 AI 怎么处理飞书消息，比如：自动回答产品相关问题、充当客服角色等"></textarea>
+              <div class="smart-create-actions">
+                <button class="btn-smart-go" :disabled="smartCreating || !smartDesc.trim()" @click="onSmartCreate" type="button">
+                  <svg v-if="smartCreating" class="spinning" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+                  {{ smartCreating ? '正在创建...' : '创建会话' }}
+                </button>
+                <span v-if="smartResult" class="smart-result">{{ smartResult }}</span>
+              </div>
+            </div>
           </div>
           <div class="form-group">
             <label>平台配置 (JSON)</label>
@@ -345,4 +411,29 @@ async function onDeploy() {
 .btn-deploy .spinning { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .deploy-result { font-size: 12px; color: var(--accent); }
+.session-row { display: flex; gap: 8px; align-items: center; }
+.session-row select { flex: 1; }
+.btn-smart {
+  display: flex; align-items: center; gap: 4px; padding: 6px 12px;
+  border-radius: var(--radius); font-size: 12px; font-weight: 500;
+  background: var(--bg-hover); color: var(--accent); border: 1px solid var(--border);
+  transition: all var(--transition); cursor: pointer; white-space: nowrap; flex-shrink: 0;
+}
+.btn-smart:hover { background: var(--accent-soft); border-color: var(--accent); }
+.smart-create-area { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+.smart-create-area textarea {
+  width: 100%; padding: 8px 10px; font-size: 13px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--bg-primary); color: var(--text-primary);
+  resize: vertical;
+}
+.smart-create-actions { display: flex; align-items: center; gap: 8px; }
+.btn-smart-go {
+  display: flex; align-items: center; gap: 4px; padding: 5px 12px;
+  border-radius: var(--radius); font-size: 12px; font-weight: 500;
+  background: var(--accent); color: #fff; transition: opacity var(--transition); cursor: pointer;
+}
+.btn-smart-go:hover:not(:disabled) { opacity: 0.9; }
+.btn-smart-go:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-smart-go .spinning { animation: spin 1s linear infinite; }
+.smart-result { font-size: 12px; color: var(--accent); }
 </style>
