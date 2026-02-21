@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { listChannels, createChannel, updateChannel, deleteChannel, listSessions } from '../composables/api'
+import { listChannels, createChannel, updateChannel, deleteChannel, listSessions, sendChat } from '../composables/api'
 import type { Channel, Session } from '../types'
 
 const channels = ref<Channel[]>([])
@@ -9,6 +9,8 @@ const loading = ref(false)
 const showCreate = ref(false)
 const editTarget = ref<Channel | null>(null)
 const deleteTarget = ref<Channel | null>(null)
+const deploying = ref(false)
+const deployResult = ref('')
 
 const form = ref({ name: '', platform: 'feishu', session_id: 0, config: '{}' })
 
@@ -89,6 +91,27 @@ async function onDelete() {
 }
 
 onMounted(load)
+
+async function onDeploy() {
+  if (!form.value.name) { deployResult.value = '请先填写频道名称'; return }
+  deploying.value = true
+  deployResult.value = ''
+  try {
+    const content = `请读取 ~/.ai-hub/skills/feishu-deploy/SKILL.md 获取飞书应用部署流程，然后按流程执行。
+
+部署参数：
+- 应用名称：${form.value.name}
+- 应用描述：AI Hub 智能助手
+- Webhook 地址：http://129.204.22.176:18080/api/v1/webhook/feishu
+
+部署完成后请输出 App ID 和 App Secret。`
+    const res = await sendChat(0, content)
+    deployResult.value = `已创建部署会话 #${res.session_id}，AI 正在自动部署飞书应用`
+  } catch (e: any) {
+    deployResult.value = `创建失败: ${e.message}`
+  }
+  deploying.value = false
+}
 </script>
 
 <template>
@@ -163,6 +186,14 @@ onMounted(load)
             <textarea v-model="form.config" rows="5" placeholder='{"app_id":"","app_secret":"","verification_token":""}'></textarea>
             <span class="form-hint">飞书: app_id, app_secret, verification_token</span>
           </div>
+          <div v-if="form.platform === 'feishu'" class="deploy-section">
+            <button class="btn-deploy" :disabled="deploying" @click="onDeploy">
+              <svg v-if="!deploying" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/><circle cx="12" cy="16" r="1"/></svg>
+              <svg v-else class="spinning" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+              {{ deploying ? '正在创建部署任务...' : '一键 AI 部署' }}
+            </button>
+            <span v-if="deployResult" class="deploy-result">{{ deployResult }}</span>
+          </div>
           <div class="modal-actions">
             <button class="modal-btn cancel" @click="showCreate = false">取消</button>
             <button class="modal-btn confirm" @click="onCreate">创建</button>
@@ -196,6 +227,14 @@ onMounted(load)
           <div class="form-group">
             <label>平台配置 (JSON)</label>
             <textarea v-model="form.config" rows="5"></textarea>
+          </div>
+          <div v-if="form.platform === 'feishu'" class="deploy-section">
+            <button class="btn-deploy" :disabled="deploying" @click="onDeploy">
+              <svg v-if="!deploying" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/><circle cx="12" cy="16" r="1"/></svg>
+              <svg v-else class="spinning" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+              {{ deploying ? '正在创建部署任务...' : '一键 AI 部署' }}
+            </button>
+            <span v-if="deployResult" class="deploy-result">{{ deployResult }}</span>
           </div>
           <div class="modal-actions">
             <button class="modal-btn cancel" @click="editTarget = null">取消</button>
@@ -295,4 +334,16 @@ onMounted(load)
 .modal-btn.cancel:hover { color: var(--text-primary); }
 .modal-btn.confirm { color: #fff; background: var(--accent); }
 .modal-btn.confirm:hover { opacity: 0.9; }
+.deploy-section { margin-bottom: 14px; display: flex; flex-direction: column; gap: 6px; }
+.btn-deploy {
+  display: flex; align-items: center; gap: 6px; padding: 6px 14px;
+  border-radius: var(--radius); font-size: 13px; font-weight: 500;
+  background: var(--bg-hover); color: var(--text-secondary); border: 1px solid var(--border);
+  transition: all var(--transition); cursor: pointer; width: fit-content;
+}
+.btn-deploy:hover:not(:disabled) { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.btn-deploy:disabled { opacity: 0.6; cursor: not-allowed; }
+.btn-deploy .spinning { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.deploy-result { font-size: 12px; color: var(--accent); }
 </style>
