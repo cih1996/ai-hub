@@ -136,6 +136,34 @@ func CreateSessionWithMessage(providerID string, content string, workDir string,
 	return s, nil
 }
 
+// GetPendingUserMessages returns user messages that arrived after the last assistant message.
+// These are messages queued while the session was streaming.
+func GetPendingUserMessages(sessionID int64) ([]model.Message, error) {
+	rows, err := DB.Query(`
+		SELECT id, session_id, role, content, metadata, created_at FROM messages
+		WHERE session_id = ? AND role = 'user'
+		AND id > COALESCE(
+			(SELECT MAX(id) FROM messages WHERE session_id = ? AND role = 'assistant'),
+			0
+		)
+		ORDER BY created_at`,
+		sessionID, sessionID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var list []model.Message
+	for rows.Next() {
+		var m model.Message
+		if err := rows.Scan(&m.ID, &m.SessionID, &m.Role, &m.Content, &m.Metadata, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		list = append(list, m)
+	}
+	return list, nil
+}
+
 func UpdateSessionTitle(id int64, title string) error {
 	_, err := DB.Exec(`UPDATE sessions SET title=?, updated_at=? WHERE id=?`, title, time.Now(), id)
 	return err

@@ -259,9 +259,24 @@ func SendChat(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
 			return
 		}
-		// Check if session is already streaming
+		// Check if session is already streaming — queue message instead of rejecting
 		if IsSessionStreaming(session.ID) {
-			c.JSON(http.StatusConflict, gin.H{"error": "session is already processing"})
+			userMsg := &model.Message{
+				SessionID: session.ID,
+				Role:      "user",
+				Content:   req.Content,
+			}
+			if err := store.AddMessage(userMsg); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "save message failed: " + err.Error()})
+				return
+			}
+			log.Printf("[chat] session %d is streaming, message queued (msg_id=%d)", session.ID, userMsg.ID)
+			// Broadcast queued message so frontend displays it
+			broadcast(WSMessage{Type: "message_queued", SessionID: session.ID, Content: req.Content})
+			c.JSON(http.StatusOK, gin.H{
+				"session_id": session.ID,
+				"status":     "queued",
+			})
 			return
 		}
 		userMsg := &model.Message{
@@ -302,6 +317,8 @@ func runStream(session *model.Session, query string, isNewSession bool) {
 		delete(activeStreams, session.ID)
 		activeStreamsMu.Unlock()
 		broadcast(WSMessage{Type: "session_update", SessionID: session.ID, Content: "idle"})
+		// Process any messages that were queued while streaming
+		processQueuedMessages(session.ID)
 	}()
 
 	provider, err := store.GetProvider(session.ProviderID)
@@ -363,6 +380,36 @@ func runStream(session *model.Session, query string, isNewSession bool) {
 
 	// Broadcast done so even reconnected/new WS clients receive it (stream.Send is single-client)
 	broadcast(WSMessage{Type: "done", SessionID: session.ID, Content: metadataJSON})
+}
+
+// processQueuedMessages checks for user messages that arrived while streaming,
+// merges them, and kicks off a new runStream to process them.
+func processQueuedMessages(sessionID int64) {
+	pending, err := store.GetPendingUserMessages(sessionID)
+	if err != nil || len(pending) == 0 {
+		return
+	}
+
+	// Guard: if another stream already started (race), bail out
+	if IsSessionStreaming(sessionID) {
+		return
+	}
+
+	session, err := store.GetSession(sessionID)
+	if err != nil {
+		log.Printf("[queue] session %d not found: %v", sessionID, err)
+		return
+	}
+
+	// Merge all pending messages into one query
+	var contents []string
+	for _, m := range pending {
+		contents = append(contents, m.Content)
+	}
+	merged := strings.Join(contents, "\n\n---\n\n")
+
+	log.Printf("[queue] session %d: processing %d queued message(s)", sessionID, len(pending))
+	go runStream(session, merged, false)
 }
 
 // StepInfo represents a single execution step for metadata persistence

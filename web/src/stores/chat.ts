@@ -107,6 +107,21 @@ export const useChatStore = defineStore('chat', () => {
         return
       }
 
+      // message_queued: a message was saved while session was streaming
+      if (msg.type === 'message_queued') {
+        // If viewing this session, add the queued message to the list
+        if (msg.session_id === currentSessionId.value) {
+          messages.value.push({
+            id: Date.now(),
+            session_id: msg.session_id,
+            role: 'user',
+            content: msg.content,
+            created_at: new Date().toISOString(),
+          })
+        }
+        return
+      }
+
       // All other events: ignore if not for the current session
       if (msg.session_id !== currentSessionId.value) return
 

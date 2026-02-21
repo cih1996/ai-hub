@@ -253,17 +253,15 @@ func forwardToSession(sessionID int64, content string) {
 		log.Printf("[webhook] session %d not found: %v", sessionID, err)
 		return
 	}
-	if IsSessionStreaming(session.ID) {
-		log.Printf("[webhook] session %d is busy, queuing message", sessionID)
-		// Save as user message even if busy
-		msg := &model.Message{SessionID: session.ID, Role: "user", Content: content}
-		store.AddMessage(msg)
-		return
-	}
-	// Save user message
+	// Save user message (even if busy — queue processing will pick it up)
 	msg := &model.Message{SessionID: session.ID, Role: "user", Content: content}
 	if err := store.AddMessage(msg); err != nil {
 		log.Printf("[webhook] save message failed: %v", err)
+		return
+	}
+	if IsSessionStreaming(session.ID) {
+		log.Printf("[webhook] session %d is streaming, message queued (msg_id=%d)", sessionID, msg.ID)
+		broadcast(WSMessage{Type: "message_queued", SessionID: session.ID, Content: content})
 		return
 	}
 	// Kick off streaming
