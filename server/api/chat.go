@@ -218,6 +218,7 @@ func SendChat(c *gin.Context) {
 		SessionID int64  `json:"session_id"`
 		Content   string `json:"content"`
 		WorkDir   string `json:"work_dir"`
+		GroupName string `json:"group_name"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: " + err.Error()})
@@ -237,7 +238,7 @@ func SendChat(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "No default provider configured. Go to Settings to add one."})
 			return
 		}
-		session, err = store.CreateSessionWithMessage(provider.ID, req.Content, req.WorkDir)
+		session, err = store.CreateSessionWithMessage(provider.ID, req.Content, req.WorkDir, req.GroupName)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "create session failed: " + err.Error()})
 			return

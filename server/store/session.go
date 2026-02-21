@@ -115,11 +115,12 @@ func GetMessages(sessionID int64) ([]model.Message, error) {
 	return list, nil
 }
 
-func CreateSessionWithMessage(providerID string, content string, workDir string) (*model.Session, error) {
+func CreateSessionWithMessage(providerID string, content string, workDir string, groupName string) (*model.Session, error) {
 	s := &model.Session{
 		Title:      truncateTitle(content),
 		ProviderID: providerID,
 		WorkDir:    workDir,
+		GroupName:  groupName,
 	}
 	if err := CreateSession(s); err != nil {
 		return nil, fmt.Errorf("create session: %w", err)
