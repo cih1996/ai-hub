@@ -15,6 +15,7 @@ export interface Session {
   title: string
   provider_id: string
   work_dir: string
+  group_name: string
   streaming: boolean
   has_triggers: boolean
   process_alive: boolean

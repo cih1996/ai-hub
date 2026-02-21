@@ -32,7 +32,7 @@ const isMcp = computed(() => route.path.startsWith('/mcp'))
 const isTriggers = computed(() => route.path.startsWith('/triggers'))
 
 interface SessionGroup {
-  dir: string
+  key: string
   label: string
   sessions: Session[]
 }
@@ -40,22 +40,24 @@ interface SessionGroup {
 const groupedSessions = computed<SessionGroup[]>(() => {
   const groups = new Map<string, Session[]>()
   for (const s of store.sessions) {
-    const dir = s.work_dir || ''
-    if (!groups.has(dir)) groups.set(dir, [])
-    groups.get(dir)!.push(s)
+    // Prefer group_name, fall back to work_dir
+    const key = s.group_name || s.work_dir || ''
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key)!.push(s)
   }
   const result: SessionGroup[] = []
-  // Default group (empty work_dir) first
+  // Default group (no group_name and no work_dir) first
   const defaultGroup = groups.get('')
   if (defaultGroup) {
-    result.push({ dir: '', label: '系统默认', sessions: defaultGroup })
+    result.push({ key: '', label: '默认', sessions: defaultGroup })
     groups.delete('')
   }
-  // Other groups sorted by directory path
-  const sortedDirs = [...groups.keys()].sort()
-  for (const dir of sortedDirs) {
-    const label = dir.replace(/^\/Users\/[^/]+/, '~')
-    result.push({ dir, label, sessions: groups.get(dir)! })
+  // Other groups sorted alphabetically
+  const sortedKeys = [...groups.keys()].sort()
+  for (const key of sortedKeys) {
+    // If it looks like a path, shorten it; otherwise use as-is
+    const label = key.startsWith('/') ? key.replace(/^\/Users\/[^/]+/, '~') : key
+    result.push({ key, label, sessions: groups.get(key)! })
   }
   return result
 })
@@ -140,7 +142,7 @@ function formatTime(dateStr: string) {
     </div>
 
     <div class="session-list">
-      <template v-for="group in groupedSessions" :key="group.dir">
+      <template v-for="group in groupedSessions" :key="group.key">
         <div v-if="groupedSessions.length > 1" class="group-label">{{ group.label }}</div>
         <div
           v-for="s in group.sessions"

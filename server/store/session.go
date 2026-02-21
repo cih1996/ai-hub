@@ -17,8 +17,8 @@ func CreateSession(s *model.Session) error {
 		s.Title = "New Chat"
 	}
 	result, err := DB.Exec(
-		`INSERT INTO sessions (title, provider_id, claude_session_id, work_dir, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		s.Title, s.ProviderID, s.ClaudeSessionID, s.WorkDir, s.CreatedAt, s.UpdatedAt,
+		`INSERT INTO sessions (title, provider_id, claude_session_id, work_dir, group_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		s.Title, s.ProviderID, s.ClaudeSessionID, s.WorkDir, s.GroupName, s.CreatedAt, s.UpdatedAt,
 	)
 	if err != nil {
 		return err
@@ -32,7 +32,7 @@ func CreateSession(s *model.Session) error {
 }
 
 func ListSessions() ([]model.Session, error) {
-	rows, err := DB.Query(`SELECT id, title, provider_id, claude_session_id, work_dir, created_at, updated_at FROM sessions ORDER BY updated_at DESC`)
+	rows, err := DB.Query(`SELECT id, title, provider_id, claude_session_id, work_dir, group_name, created_at, updated_at FROM sessions ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -40,7 +40,7 @@ func ListSessions() ([]model.Session, error) {
 	var list []model.Session
 	for rows.Next() {
 		var s model.Session
-		if err := rows.Scan(&s.ID, &s.Title, &s.ProviderID, &s.ClaudeSessionID, &s.WorkDir, &s.CreatedAt, &s.UpdatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.Title, &s.ProviderID, &s.ClaudeSessionID, &s.WorkDir, &s.GroupName, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			return nil, err
 		}
 		list = append(list, s)
@@ -51,8 +51,8 @@ func ListSessions() ([]model.Session, error) {
 func GetSession(id int64) (*model.Session, error) {
 	var s model.Session
 	err := DB.QueryRow(
-		`SELECT id, title, provider_id, claude_session_id, work_dir, created_at, updated_at FROM sessions WHERE id = ?`, id,
-	).Scan(&s.ID, &s.Title, &s.ProviderID, &s.ClaudeSessionID, &s.WorkDir, &s.CreatedAt, &s.UpdatedAt)
+		`SELECT id, title, provider_id, claude_session_id, work_dir, group_name, created_at, updated_at FROM sessions WHERE id = ?`, id,
+	).Scan(&s.ID, &s.Title, &s.ProviderID, &s.ClaudeSessionID, &s.WorkDir, &s.GroupName, &s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -62,8 +62,8 @@ func GetSession(id int64) (*model.Session, error) {
 func UpdateSession(s *model.Session) error {
 	s.UpdatedAt = time.Now()
 	_, err := DB.Exec(
-		`UPDATE sessions SET title=?, provider_id=?, updated_at=? WHERE id=?`,
-		s.Title, s.ProviderID, s.UpdatedAt, s.ID,
+		`UPDATE sessions SET title=?, provider_id=?, group_name=?, updated_at=? WHERE id=?`,
+		s.Title, s.ProviderID, s.GroupName, s.UpdatedAt, s.ID,
 	)
 	return err
 }

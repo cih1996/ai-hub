@@ -67,6 +67,9 @@ func migrate() error {
 	// Messages: add metadata column
 	DB.Exec(`ALTER TABLE messages ADD COLUMN metadata TEXT NOT NULL DEFAULT ''`)
 
+	// Sessions: add group_name column
+	DB.Exec(`ALTER TABLE sessions ADD COLUMN group_name TEXT NOT NULL DEFAULT ''`)
+
 	// Triggers table
 	DB.Exec(`CREATE TABLE IF NOT EXISTS triggers (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
