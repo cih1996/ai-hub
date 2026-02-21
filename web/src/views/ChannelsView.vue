@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { listChannels, createChannel, updateChannel, deleteChannel, listSessions, sendChat } from '../composables/api'
+import { listChannels, createChannel, updateChannel, deleteChannel, listSessions, sendChat, putSessionRules } from '../composables/api'
 import type { Channel, Session } from '../types'
 
 const channels = ref<Channel[]>([])
@@ -169,18 +169,27 @@ async function onSmartCreate() {
   smartCreating.value = true
   smartResult.value = ''
   try {
-    const port = location.port || (location.protocol === 'https:' ? '443' : '80')
-    const content = `你是一个飞书消息处理助手。请完成以下初始化：
+    // 1. Create new session with a brief init message
+    const res = await sendChat(0, '你已就绪。之后收到的每条消息都是飞书用户消息，请按会话规则处理并通过飞书 API 回复。')
 
-1. 阅读 ~/.ai-hub/skills/feishu-message/SKILL.md，理解如何通过飞书 API 回复消息
-2. 通过环境变量 $AI_HUB_SESSION_ID 获取你当前的会话 ID，然后通过 PUT http://localhost:${port}/api/v1/session-rules/<你的会话ID> 创建会话级规则，规则内容根据以下用户需求生成：
-   - 用户需求：${smartDesc.value}
-   - 规则中必须包含：收到【飞书消息】后如何理解意图、如何生成回复、如何调用飞书 API 发送回复
-   - 飞书凭证（app_id、app_secret）从收到的飞书消息上下文中获取，或通过频道配置获取
-3. 规则创建完成后，回复确认信息，说明你的角色定位和处理方式
+    // 2. Pre-write session rules based on user description
+    const rules = `# 飞书消息处理助手
 
-之后的每条消息都是从飞书转发来的用户消息，请按规则处理并回复。`
-    const res = await sendChat(0, content)
+## 角色
+${smartDesc.value.trim()}
+
+## 消息处理流程
+1. 收到【飞书消息】后，解析发送者、会话ID、消息内容
+2. 根据角色定位理解意图并生成回复
+3. 通过飞书 API 回复（参考 ~/.ai-hub/skills/feishu-message/SKILL.md）
+4. 飞书凭证（app_id、app_secret）从消息中的「频道凭证」部分获取
+
+## 回复规范
+- 内容简洁友好，适合 IM 阅读
+- 每条消息必须回复，不能丢失`
+    await putSessionRules(res.session_id, rules)
+
+    // 3. Bind session to form
     form.value.session_id = res.session_id
     smartResult.value = `已创建会话 #${res.session_id}`
     // Refresh sessions so the new one appears in dropdown
