@@ -45,6 +45,7 @@ tail -50 ~/.ai-hub/logs/ai-hub.log
 | DELETE | /api/v1/sessions/:id | 删除会话 |
 | GET | /api/v1/sessions/:id/messages | 获取会话消息 |
 | POST | /api/v1/sessions/:id/compress | 压缩会话上下文 |
+| POST | /api/v1/sessions/:id/restart | 重启会话 |
 
 ### Session Rules（会话规则）
 | 方法 | 路径 | 说明 |
@@ -107,6 +108,7 @@ tail -50 ~/.ai-hub/logs/ai-hub.log
 ### Vector（向量知识库）
 | 方法 | 路径 | 说明 |
 |------|------|------|
+| POST | /api/v1/vector/search | 统一语义搜索（body: {query, scope, top_k}） |
 | POST | /api/v1/vector/search_knowledge | 语义搜索知识库 |
 | POST | /api/v1/vector/search_memory | 语义搜索记忆库 |
 | POST | /api/v1/vector/read_knowledge | 读取知识文件 |
@@ -117,6 +119,16 @@ tail -50 ~/.ai-hub/logs/ai-hub.log
 | POST | /api/v1/vector/delete_memory | 删除记忆文件 |
 | GET | /api/v1/vector/stats | 向量命中统计 |
 | GET | /api/v1/vector/status | 向量引擎状态 |
+| POST | /api/v1/vector/restart | 重启向量引擎 |
+
+### Channels（通讯频道）
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | /api/v1/channels | 列出所有频道 |
+| POST | /api/v1/channels | 创建频道 |
+| PUT | /api/v1/channels/:id | 更新频道 |
+| DELETE | /api/v1/channels/:id | 删除频道 |
+| POST | /api/v1/webhook/feishu | 飞书 Webhook 回调 |
 
 ## 三、项目仓库
 

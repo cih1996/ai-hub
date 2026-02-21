@@ -192,9 +192,9 @@ func HandleFeishuWebhook(c *gin.Context) {
 		return
 	}
 
-	// Build forwarded message with context
-	forwarded := fmt.Sprintf("【飞书消息】\n发送者: %s\n会话: %s\n消息ID: %s\n内容: %s",
-		senderID, chatID, messageID, text)
+	// Build forwarded message with context and channel credentials
+	forwarded := fmt.Sprintf("【飞书消息】\n发送者: %s\n会话: %s\n消息ID: %s\n内容: %s\n---\n频道凭证（用于回复）:\n%s",
+		senderID, chatID, messageID, text, extractChannelCredentials(ch))
 
 	log.Printf("[webhook/feishu] forwarding to session %d: %s", ch.SessionID, text)
 
@@ -227,7 +227,7 @@ func handleFeishuEventV1(c *gin.Context, raw map[string]interface{}) {
 
 	// Remove @bot mention prefix if present
 	text = strings.TrimSpace(text)
-	forwarded := fmt.Sprintf("【飞书消息】\n内容: %s", text)
+	forwarded := fmt.Sprintf("【飞书消息】\n内容: %s\n---\n频道凭证（用于回复）:\n%s", text, extractChannelCredentials(ch))
 	forwardToSession(ch.SessionID, forwarded)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
@@ -244,6 +244,27 @@ func extractFeishuText(msgType, content string) string {
 		return content
 	}
 	return textContent.Text
+}
+
+// extractChannelCredentials extracts app_id and app_secret from channel config JSON
+func extractChannelCredentials(ch *model.Channel) string {
+	var cfg map[string]interface{}
+	if err := json.Unmarshal([]byte(ch.Config), &cfg); err != nil {
+		return "（无法解析频道配置）"
+	}
+	appID, _ := cfg["app_id"].(string)
+	appSecret, _ := cfg["app_secret"].(string)
+	lines := []string{}
+	if appID != "" {
+		lines = append(lines, fmt.Sprintf("App ID: %s", appID))
+	}
+	if appSecret != "" {
+		lines = append(lines, fmt.Sprintf("App Secret: %s", appSecret))
+	}
+	if len(lines) == 0 {
+		return "（频道未配置凭证）"
+	}
+	return strings.Join(lines, "\n")
 }
 
 // forwardToSession sends a message to a session, triggering AI processing
