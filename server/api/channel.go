@@ -265,5 +265,5 @@ func forwardToSession(sessionID int64, content string) {
 		return
 	}
 	// Kick off streaming
-	go runStream(session, content, false)
+	go runStream(session, content, false, msg.ID)
 }

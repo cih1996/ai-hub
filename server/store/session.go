@@ -136,18 +136,14 @@ func CreateSessionWithMessage(providerID string, content string, workDir string,
 	return s, nil
 }
 
-// GetPendingUserMessages returns user messages that arrived after the last assistant message.
-// These are messages queued while the session was streaming.
-func GetPendingUserMessages(sessionID int64) ([]model.Message, error) {
+// GetPendingUserMessages returns user messages that arrived after the trigger message.
+// triggerMsgID is the user message that started the current streaming round.
+func GetPendingUserMessages(sessionID int64, triggerMsgID int64) ([]model.Message, error) {
 	rows, err := DB.Query(`
 		SELECT id, session_id, role, content, metadata, created_at FROM messages
-		WHERE session_id = ? AND role = 'user'
-		AND id > COALESCE(
-			(SELECT MAX(id) FROM messages WHERE session_id = ? AND role = 'assistant'),
-			0
-		)
+		WHERE session_id = ? AND role = 'user' AND id > ?
 		ORDER BY created_at`,
-		sessionID, sessionID,
+		sessionID, triggerMsgID,
 	)
 	if err != nil {
 		return nil, err
@@ -162,6 +158,13 @@ func GetPendingUserMessages(sessionID int64) ([]model.Message, error) {
 		list = append(list, m)
 	}
 	return list, nil
+}
+
+// GetLastUserMessageID returns the ID of the last user message in a session.
+func GetLastUserMessageID(sessionID int64) int64 {
+	var id int64
+	DB.QueryRow(`SELECT COALESCE(MAX(id), 0) FROM messages WHERE session_id = ? AND role = 'user'`, sessionID).Scan(&id)
+	return id
 }
 
 func UpdateSessionTitle(id int64, title string) error {

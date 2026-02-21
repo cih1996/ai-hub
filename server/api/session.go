@@ -181,7 +181,8 @@ func CompressSession(c *gin.Context) {
 	store.AddMessage(sysMsg)
 
 	// Kick off new stream with condensed query (new session, not resume)
-	go runStream(session, condensedQuery, true)
+	triggerMsgID := store.GetLastUserMessageID(session.ID)
+	go runStream(session, condensedQuery, true, triggerMsgID)
 
 	c.JSON(http.StatusOK, gin.H{"ok": true, "message": "context compressed, new session started"})
 }

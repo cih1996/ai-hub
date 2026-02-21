@@ -291,7 +291,8 @@ func SendChat(c *gin.Context) {
 	}
 
 	// Kick off streaming in background — results are pushed via WS broadcast
-	go runStream(session, req.Content, isNewSession)
+	triggerMsgID := store.GetLastUserMessageID(session.ID)
+	go runStream(session, req.Content, isNewSession, triggerMsgID)
 
 	c.JSON(http.StatusOK, gin.H{
 		"session_id": session.ID,
@@ -300,7 +301,7 @@ func SendChat(c *gin.Context) {
 }
 
 // runStream executes the AI streaming in background, pushing events via WS to subscribed clients
-func runStream(session *model.Session, query string, isNewSession bool) {
+func runStream(session *model.Session, query string, isNewSession bool, triggerMsgID int64) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -318,7 +319,7 @@ func runStream(session *model.Session, query string, isNewSession bool) {
 		activeStreamsMu.Unlock()
 		broadcast(WSMessage{Type: "session_update", SessionID: session.ID, Content: "idle"})
 		// Process any messages that were queued while streaming
-		processQueuedMessages(session.ID)
+		processQueuedMessages(session.ID, triggerMsgID)
 	}()
 
 	provider, err := store.GetProvider(session.ProviderID)
@@ -382,10 +383,10 @@ func runStream(session *model.Session, query string, isNewSession bool) {
 	broadcast(WSMessage{Type: "done", SessionID: session.ID, Content: metadataJSON})
 }
 
-// processQueuedMessages checks for user messages that arrived while streaming,
+// processQueuedMessages checks for user messages that arrived after triggerMsgID,
 // merges them, and kicks off a new runStream to process them.
-func processQueuedMessages(sessionID int64) {
-	pending, err := store.GetPendingUserMessages(sessionID)
+func processQueuedMessages(sessionID int64, triggerMsgID int64) {
+	pending, err := store.GetPendingUserMessages(sessionID, triggerMsgID)
 	if err != nil || len(pending) == 0 {
 		return
 	}
@@ -408,8 +409,12 @@ func processQueuedMessages(sessionID int64) {
 	}
 	merged := strings.Join(contents, "\n\n---\n\n")
 
-	log.Printf("[queue] session %d: processing %d queued message(s)", sessionID, len(pending))
-	go runStream(session, merged, false)
+	// Use the last pending message ID as triggerMsgID for the next round
+	// This prevents infinite retry if streaming fails without saving assistant message
+	newTriggerMsgID := pending[len(pending)-1].ID
+
+	log.Printf("[queue] session %d: processing %d queued message(s), triggerMsgID %d -> %d", sessionID, len(pending), triggerMsgID, newTriggerMsgID)
+	go runStream(session, merged, false, newTriggerMsgID)
 }
 
 // StepInfo represents a single execution step for metadata persistence
