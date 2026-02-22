@@ -45,6 +45,7 @@ func (c *ClaudeCodeClient) Stream(ctx context.Context, req ClaudeCodeRequest, on
 	// Build flags first, query last — matches documented CLI patterns
 	args := []string{
 		"-p",
+		"--dangerously-skip-permissions",
 		"--verbose",
 		"--output-format", "stream-json",
 		"--include-partial-messages",
@@ -68,9 +69,6 @@ func (c *ClaudeCodeClient) Stream(ctx context.Context, req ClaudeCodeRequest, on
 	if req.ModelID != "" {
 		args = append(args, "--model", req.ModelID)
 	}
-
-	// Max permissions - skip all permission prompts
-	args = append(args, "--dangerously-skip-permissions")
 
 	// Query must be the last positional argument
 	args = append(args, req.Query)

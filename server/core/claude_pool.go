@@ -141,6 +141,7 @@ func (p *ProcessPool) idleReaper() {
 func (p *ProcessPool) spawnProcess(req ClaudeCodeRequest, isResume bool) (*PersistentProcess, error) {
 	args := []string{
 		"-p",
+		"--dangerously-skip-permissions",
 		"--verbose",
 		"--input-format", "stream-json",
 		"--output-format", "stream-json",
@@ -162,8 +163,6 @@ func (p *ProcessPool) spawnProcess(req ClaudeCodeRequest, isResume bool) (*Persi
 	if req.ModelID != "" {
 		args = append(args, "--model", req.ModelID)
 	}
-	args = append(args, "--dangerously-skip-permissions")
-
 	ctx, cancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(ctx, p.client.BinaryPath, args...)
 
