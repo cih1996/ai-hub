@@ -1,6 +1,6 @@
 ---
 name: "一号系统感知"
-description: "AI Hub 系统自感知 Skill。当用户提及查看日志、系统出错、系统能力、进程管理、端口占用，或涉及自我认知话题（升级自己、更新系统、你是什么系统、系统版本、AI Hub 相关）时触发。提供系统身份、版本查询、升级方法、日志位置、API 清单等。"
+description: "AI Hub 系统自感知 Skill。当用户提及查看日志、系统出错、系统能力、进程管理、端口占用、系统自检、初始化系统、环境检查、向量引擎异常，或涉及自我认知话题（升级自己、更新系统、你是什么系统、系统版本、AI Hub 相关）时触发。提供系统身份、版本查询、升级方法、日志位置、API 清单、系统自检与自动修复等。"
 ---
 
 # 系统自感知 — AI Hub 运维手册
@@ -176,3 +176,93 @@ lsof -i:$AI_HUB_PORT
 # 查看当前版本
 curl -s http://localhost:$AI_HUB_PORT/api/v1/version
 ```
+
+## 五、系统自检与初始化
+
+当用户说「初始化系统」「系统自检」「环境检查」时，按以下清单逐项检测并自动修复。全程自主执行，不要逐步询问用户。
+
+### 检测清单
+
+按顺序执行，每项检测后输出 ✅ 或 ❌ + 自动修复：
+
+#### 1. Python 环境
+```bash
+python3 --version 2>&1
+```
+- ✅ Python 3.8+ → 通过
+- ❌ 未安装 → macOS: `brew install python3`，Linux: `apt install -y python3 python3-pip` 或 `yum install -y python3 python3-pip`
+
+#### 2. pip 包管理器
+```bash
+python3 -m pip --version 2>&1
+```
+- ❌ 未安装 → `python3 -m ensurepip --upgrade` 或 `curl -sSL https://bootstrap.pypa.io/get-pip.py | python3`
+- 安装后配置国内镜像：`python3 -m pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple`
+
+#### 3. 向量引擎依赖
+```bash
+python3 -c "import sentence_transformers; print('OK')" 2>&1
+```
+- ❌ 缺失 → `python3 -m pip install sentence-transformers -i https://pypi.tuna.tsinghua.edu.cn/simple`
+- 安装后验证：`python3 -c "from sentence_transformers import SentenceTransformer; print('OK')"`
+
+#### 4. 向量引擎状态
+```bash
+curl -s http://localhost:${AI_HUB_PORT:-8080}/api/v1/vector/status
+```
+- `ready` → ✅ 通过
+- 其他 → 重启向量引擎：`curl -s -X POST http://localhost:${AI_HUB_PORT:-8080}/api/v1/vector/restart`
+- 等待 10 秒后再次检测，3 次仍失败查日志：`grep -i vector ~/.ai-hub/logs/ai-hub.log | tail -20`
+
+#### 5. 端口检测
+```bash
+lsof -i:${AI_HUB_PORT:-8080} | head -5
+```
+- 确认 AI Hub 进程占用目标端口
+- 如果被其他进程占用，提示用户处理
+
+#### 6. 数据目录权限
+```bash
+for dir in ~/.ai-hub/rules ~/.ai-hub/skills ~/.ai-hub/knowledge ~/.ai-hub/memory ~/.ai-hub/notes ~/.ai-hub/logs; do
+  if [ -d "$dir" ] && [ -w "$dir" ]; then
+    echo "✅ $dir"
+  else
+    echo "❌ $dir"
+    mkdir -p "$dir" && chmod 755 "$dir"
+  fi
+done
+```
+
+#### 7. 全局规则完整性
+```bash
+ls ~/.ai-hub/rules/CLAUDE.md 2>&1
+```
+- ❌ 不存在 → 重启 AI Hub 会自动重新安装（go:embed），或通过 API 获取默认内容：
+  `curl -s http://localhost:${AI_HUB_PORT:-8080}/api/v1/files/default`
+
+#### 8. Claude CLI 可用性
+```bash
+claude --version 2>&1
+```
+- ❌ 未安装 → `npm install -g @anthropic-ai/claude-code`（需要 Node.js 18+）
+
+### 输出格式
+
+自检完成后输出汇总：
+
+```
+🔍 AI Hub 系统自检报告
+━━━━━━━━━━━━━━━━━━━━
+✅ Python 3.x.x
+✅ pip 24.x
+✅ 向量引擎依赖
+✅ 向量引擎运行中
+✅ 端口 8080 正常
+✅ 数据目录权限正常
+✅ 全局规则完整
+✅ Claude CLI v2.x.x
+━━━━━━━━━━━━━━━━━━━━
+系统状态：正常 / 已修复 N 项 / N 项需手动处理
+```
+
+如果有自动修复的项目，额外说明修复了什么。

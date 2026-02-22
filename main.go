@@ -199,6 +199,7 @@ func main() {
 		v1.POST("/vector/delete_memory", api.DeleteMemory)
 		v1.GET("/vector/stats", api.StatsVector)
 		v1.GET("/vector/status", api.VectorStatus)
+		v1.GET("/vector/health", api.VectorHealth)
 		v1.POST("/vector/restart", api.RestartVector)
 	}
 

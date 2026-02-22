@@ -4,6 +4,7 @@ import (
 	"ai-hub/server/core"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -239,4 +240,32 @@ func RestartVector(c *gin.Context) {
 // GET /api/v1/vector/status
 func VectorStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, core.Vector.Status())
+}
+
+// VectorHealth returns a simplified health check for frontend banner
+// GET /api/v1/vector/health
+func VectorHealth(c *gin.Context) {
+	status := core.Vector.Status()
+	ready, _ := status["ready"].(bool)
+	disabled, _ := status["disabled"].(bool)
+	errMsg, _ := status["error"].(string)
+
+	health := gin.H{
+		"ready":    ready,
+		"disabled": disabled,
+	}
+	if errMsg != "" {
+		health["error"] = errMsg
+	}
+
+	// Check Python availability
+	if !ready {
+		if _, err := exec.LookPath("python3"); err != nil {
+			health["fix_hint"] = "python3_missing"
+		} else {
+			health["fix_hint"] = "engine_not_ready"
+		}
+	}
+
+	c.JSON(http.StatusOK, health)
 }

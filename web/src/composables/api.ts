@@ -169,6 +169,9 @@ export const vectorSearch = (scope: string, query: string, topK: number = 5) =>
     body: JSON.stringify({ scope, query, top_k: topK }),
   })
 
+export const vectorHealth = () =>
+  request<{ ready: boolean; disabled: boolean; error?: string; fix_hint?: string }>('/vector/health')
+
 // Channels
 export const listChannels = () => request<Channel[]>('/channels')
 export const createChannel = (ch: Partial<Channel>) =>

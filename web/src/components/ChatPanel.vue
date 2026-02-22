@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, nextTick, watch, computed } from 'vue'
+import { ref, nextTick, watch, computed, onMounted } from 'vue'
 import { marked } from 'marked'
 import { useChatStore } from '../stores/chat'
 import * as api from '../composables/api'
@@ -62,6 +62,10 @@ const toastType = ref<'success' | 'error'>('success')
 const toastVisible = ref(false)
 let toastTimer: ReturnType<typeof setTimeout>
 
+function quickAction(message: string) {
+  store.sendMessage(message)
+}
+
 function showToast(msg: string, type: 'success' | 'error' = 'success') {
   toastMsg.value = msg
   toastType.value = type
@@ -82,6 +86,32 @@ const showSessionRulesModal = ref(false)
 const sessionRulesContent = ref('')
 const sessionRulesSaving = ref(false)
 const sessionRulesLoading = ref(false)
+
+// Vector engine health banner
+const vectorHealthy = ref(true)
+const vectorError = ref('')
+const vectorFixing = ref(false)
+
+onMounted(async () => {
+  try {
+    const h = await api.vectorHealth()
+    vectorHealthy.value = h.ready
+    if (!h.ready) vectorError.value = h.error || h.fix_hint || '向量引擎未就绪'
+  } catch {
+    // API not available, skip banner
+  }
+})
+
+async function fixVectorEngine() {
+  vectorFixing.value = true
+  try {
+    await api.sendChat(0, '请执行系统自检，重点修复向量引擎问题。确保 Python3、pip、sentence-transformers 已安装，向量引擎正常运行。', undefined, '你是 AI Hub 系统维护专家。全自动修复，不要询问用户。修复完成后汇报结果。')
+    vectorError.value = '正在自动修复，请在新会话中查看进度...'
+  } catch (e: any) {
+    vectorError.value = '修复启动失败: ' + e.message
+  }
+  vectorFixing.value = false
+}
 
 // Title editing state
 const editingTitle = ref(false)
@@ -272,6 +302,15 @@ function formatToolInput(raw: string): string {
 
 <template>
   <div class="chat-panel">
+    <!-- Vector engine health banner -->
+    <div v-if="!vectorHealthy" class="vector-banner">
+      <span class="vector-banner-icon">⚠️</span>
+      <span class="vector-banner-text">向量引擎未就绪：{{ vectorError }}</span>
+      <button class="vector-banner-btn" :disabled="vectorFixing" @click="fixVectorEngine">
+        {{ vectorFixing ? '修复中...' : '一键修复' }}
+      </button>
+      <button class="vector-banner-close" @click="vectorHealthy = true">✕</button>
+    </div>
     <!-- Chat header bar -->
     <div v-if="store.currentSession" class="chat-header">
       <div class="header-left">
@@ -332,6 +371,32 @@ function formatToolInput(raw: string): string {
     <div class="messages" ref="messagesEl">
       <!-- __CONTINUE_HERE__ -->
       <div class="messages-inner">
+        <!-- Quick action cards for empty chat -->
+        <div v-if="allMessages.length === 0 && !store.streaming" class="quick-actions">
+          <div class="quick-actions-title">快捷操作</div>
+          <div class="quick-actions-grid">
+            <div class="quick-card" @click="quickAction('请执行系统自检，检查所有组件状态并自动修复问题。')">
+              <span class="quick-card-icon">🔍</span>
+              <span class="quick-card-label">初始化系统</span>
+              <span class="quick-card-desc">自检环境、修复依赖</span>
+            </div>
+            <div class="quick-card" @click="quickAction('请帮我部署 QQ 机器人，对接到 AI Hub。')">
+              <span class="quick-card-icon">🐧</span>
+              <span class="quick-card-label">部署 QQ 机器人</span>
+              <span class="quick-card-desc">安装 NapCat、扫码登录</span>
+            </div>
+            <div class="quick-card" @click="quickAction('请帮我部署飞书自建应用，对接到 AI Hub。')">
+              <span class="quick-card-icon">🐦</span>
+              <span class="quick-card-label">部署飞书应用</span>
+              <span class="quick-card-desc">创建应用、配置机器人</span>
+            </div>
+            <div class="quick-card" @click="quickAction('请查看当前系统状态，包括版本、进程、向量引擎、各会话运行情况。')">
+              <span class="quick-card-icon">📊</span>
+              <span class="quick-card-label">查看系统状态</span>
+              <span class="quick-card-desc">版本、进程、引擎状态</span>
+            </div>
+          </div>
+        </div>
         <div
           v-for="msg in allMessages"
           :key="msg.id"
@@ -614,6 +679,83 @@ function formatToolInput(raw: string): string {
   flex-direction: column;
   min-height: 0;
 }
+/* Vector health banner */
+.vector-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 24px;
+  background: #fef3cd;
+  border-bottom: 1px solid #ffc107;
+  font-size: 13px;
+  color: #856404;
+}
+.vector-banner-icon { font-size: 16px; }
+.vector-banner-text { flex: 1; }
+.vector-banner-btn {
+  padding: 4px 12px;
+  border: 1px solid #ffc107;
+  border-radius: 4px;
+  background: #fff;
+  color: #856404;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.vector-banner-btn:hover { background: #ffc107; color: #fff; }
+.vector-banner-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.vector-banner-close {
+  background: none;
+  border: none;
+  color: #856404;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0 4px;
+}
+/* Quick action cards */
+.quick-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 24px 24px;
+  gap: 16px;
+}
+.quick-actions-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+.quick-actions-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  max-width: 480px;
+  width: 100%;
+}
+.quick-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 16px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: center;
+}
+.quick-card:hover {
+  border-color: var(--accent);
+  background: var(--bg-primary);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+.quick-card-icon { font-size: 24px; }
+.quick-card-label { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.quick-card-desc { font-size: 11px; color: var(--text-secondary); }
 /* Chat header */
 .chat-header {
   display: flex;
