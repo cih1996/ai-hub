@@ -16,18 +16,19 @@ import (
 
 // PersistentProcess wraps a long-running Claude CLI process (stream-json mode)
 type PersistentProcess struct {
-	mu           sync.Mutex
-	cmd          *exec.Cmd
-	stdin        io.WriteCloser
-	cancel       context.CancelFunc
-	sessionID    string // Claude CLI --session-id UUID
-	hubSessionID int64  // AI Hub session ID
-	state        string // "idle" | "busy"
-	lastActive   time.Time
-	startedAt    time.Time
-	dead         bool
-	eventCh      chan string   // stdout NDJSON lines
-	doneCh       chan struct{} // process exit signal
+	mu             sync.Mutex
+	cmd            *exec.Cmd
+	stdin          io.WriteCloser
+	cancel         context.CancelFunc
+	sessionID      string // Claude CLI --session-id UUID
+	hubSessionID   int64  // AI Hub session ID
+	state          string // "idle" | "busy"
+	lastActive     time.Time
+	startedAt      time.Time
+	dead           bool
+	eventCh        chan string   // stdout NDJSON lines
+	doneCh         chan struct{} // process exit signal
+	promptFilePath string       // temp system prompt file, cleaned up on kill
 }
 
 // ProcessPool manages persistent Claude CLI processes keyed by hub session ID
@@ -154,8 +155,16 @@ func (p *ProcessPool) spawnProcess(req ClaudeCodeRequest, isResume bool) (*Persi
 			args = append(args, "--session-id", req.SessionID)
 		}
 	}
+	// Write system prompt to temp file to avoid Windows CreateProcess 32767-char
+	// limit and GBK/UTF-8 encoding issues (Issue #44)
+	var promptFile string
 	if req.SystemPrompt != "" {
-		args = append(args, "--system-prompt", req.SystemPrompt)
+		var ferr error
+		promptFile, ferr = writeSystemPromptFile(req.HubSessionID, req.SystemPrompt)
+		if ferr != nil {
+			return nil, fmt.Errorf("write system prompt: %w", ferr)
+		}
+		args = append(args, "--system-prompt-file", promptFile)
 	}
 	if req.MaxBudget > 0 {
 		args = append(args, "--max-budget-usd", fmt.Sprintf("%.2f", req.MaxBudget))
@@ -230,16 +239,17 @@ func (p *ProcessPool) spawnProcess(req ClaudeCodeRequest, isResume bool) (*Persi
 	}()
 
 	proc := &PersistentProcess{
-		cmd:          cmd,
-		stdin:        stdin,
-		cancel:       cancel,
-		sessionID:    req.SessionID,
-		hubSessionID: req.HubSessionID,
-		state:        "idle",
-		lastActive:   time.Now(),
-		startedAt:    time.Now(),
-		eventCh:      make(chan string, 256),
-		doneCh:       make(chan struct{}),
+		cmd:            cmd,
+		stdin:          stdin,
+		cancel:         cancel,
+		sessionID:      req.SessionID,
+		hubSessionID:   req.HubSessionID,
+		state:          "idle",
+		lastActive:     time.Now(),
+		startedAt:      time.Now(),
+		eventCh:        make(chan string, 256),
+		doneCh:         make(chan struct{}),
+		promptFilePath: promptFile,
 	}
 	go proc.readLoop(stdout)
 	return proc, nil
@@ -366,7 +376,7 @@ func (proc *PersistentProcess) IsDead() bool {
 	return proc.dead
 }
 
-// kill terminates the process
+// kill terminates the process and cleans up temp files
 func (proc *PersistentProcess) kill() {
 	proc.mu.Lock()
 	defer proc.mu.Unlock()
@@ -377,6 +387,11 @@ func (proc *PersistentProcess) kill() {
 		proc.cmd.Process.Kill()
 	}
 	proc.dead = true
+	// Clean up system prompt temp file
+	if proc.promptFilePath != "" {
+		os.Remove(proc.promptFilePath)
+		proc.promptFilePath = ""
+	}
 }
 
 // ProcessInfo holds runtime info about a persistent process

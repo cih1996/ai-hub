@@ -9,9 +9,23 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 )
+
+// writeSystemPromptFile writes the system prompt to a UTF-8 temp file and returns
+// the file path. Caller must os.Remove() the file when done.
+// This avoids Windows CreateProcess 32767-char limit and GBK/UTF-8 encoding issues.
+func writeSystemPromptFile(hubSessionID int64, content string) (string, error) {
+	dir := filepath.Join(os.TempDir(), "ai-hub")
+	os.MkdirAll(dir, 0755)
+	name := filepath.Join(dir, fmt.Sprintf("sysprompt-%d.md", hubSessionID))
+	if err := os.WriteFile(name, []byte(content), 0644); err != nil {
+		return "", fmt.Errorf("write system prompt file: %w", err)
+	}
+	return name, nil
+}
 
 type ClaudeCodeClient struct {
 	BinaryPath string
@@ -60,8 +74,17 @@ func (c *ClaudeCodeClient) Stream(ctx context.Context, req ClaudeCodeRequest, on
 			args = append(args, "--session-id", req.SessionID)
 		}
 	}
+	// Write system prompt to temp file to avoid Windows CreateProcess 32767-char
+	// limit and GBK/UTF-8 encoding issues (Issue #44)
+	var promptFile string
 	if req.SystemPrompt != "" {
-		args = append(args, "--system-prompt", req.SystemPrompt)
+		var err error
+		promptFile, err = writeSystemPromptFile(req.HubSessionID, req.SystemPrompt)
+		if err != nil {
+			return fmt.Errorf("write system prompt: %w", err)
+		}
+		defer os.Remove(promptFile)
+		args = append(args, "--system-prompt-file", promptFile)
 	}
 	if req.MaxBudget > 0 {
 		args = append(args, "--max-budget-usd", fmt.Sprintf("%.2f", req.MaxBudget))
