@@ -11,7 +11,16 @@ description: "QQ Bot 全流程部署引导。当需要安装 NapCat、配置 QQ 
 
 开始前确认以下信息：
 
-1. **操作系统**：询问用户使用的系统（macOS / Linux / Windows / Docker）
+1. **操作系统**：自动检测，不要问用户
+```bash
+OS=$(uname -s)
+ARCH=$(uname -m)
+echo "系统: $OS, 架构: $ARCH"
+```
+- `Darwin` → macOS 安装流程
+- `Linux` → Linux 安装流程
+- `MINGW*` / `MSYS*` → Windows 安装流程
+
 2. **必要参数**（由调用方提供或询问用户）：
    - `session_id`：要绑定的 AI Hub 会话 ID
    - `webhook_url`（可选）：如果调用方已提供则直接使用，否则在「网络环境检测」步骤自动获取
@@ -45,9 +54,9 @@ done
 
 ## 安装 NapCat
 
-根据用户操作系统引导安装：
+根据自动检测的操作系统执行对应安装流程：
 
-### macOS
+### macOS（Darwin）
 
 使用 NapCat-Mac-Installer：
 
@@ -81,28 +90,7 @@ curl -o napcat.sh https://nclatest.znin.net/NapNeko/NapCat-Installer/main/script
 
 告诉用户：「打开下载链接，找到最新版本的 NapCat.Shell.zip 下载。如果打不开或很慢，用加速下载链接。下载后解压，双击运行 launcher.bat。」
 
-### Docker
-
-```
-仓库地址：https://github.com/NapNeko/NapCat-Docker
-```
-
-Docker Hub 国内加速配置（如果拉取镜像慢）：
-```bash
-# 编辑 Docker 配置
-mkdir -p /etc/docker
-cat > /etc/docker/daemon.json << 'EOF'
-{
-  "registry-mirrors": [
-    "https://docker.1ms.run",
-    "https://docker.xuanyuan.me"
-  ]
-}
-EOF
-systemctl daemon-reload && systemctl restart docker
-```
-
-告诉用户：「如果 docker pull 很慢，先执行上面的命令配置国内镜像加速，然后再拉取。」
+> 如果用户主动提到想用 Docker，可以给链接 https://github.com/NapNeko/NapCat-Docker ，但不主动推荐。
 
 ## 启动与登录
 
