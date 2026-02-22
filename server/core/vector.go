@@ -11,11 +11,21 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
+
+// venvBinPath returns the correct path for a binary inside a Python venv.
+// Windows uses venv/Scripts/<name>.exe, Unix uses venv/bin/<name>.
+func venvBinPath(venvDir, name string) string {
+	if runtime.GOOS == "windows" {
+		return filepath.Join(venvDir, "Scripts", name+".exe")
+	}
+	return filepath.Join(venvDir, "bin", name)
+}
 
 // VectorEngine manages the Python vector engine subprocess
 type VectorEngine struct {
@@ -138,7 +148,7 @@ func (v *VectorEngine) detectPython() (string, error) {
 }
 
 func (v *VectorEngine) ensureVenv(pyPath string) error {
-	venvPython := filepath.Join(v.venvDir, "bin", "python")
+	venvPython := venvBinPath(v.venvDir, "python")
 	if _, err := os.Stat(venvPython); err == nil {
 		v.pythonPath = venvPython
 		return nil
@@ -154,7 +164,7 @@ func (v *VectorEngine) ensureVenv(pyPath string) error {
 
 func (v *VectorEngine) installDeps() error {
 	reqFile := filepath.Join(v.scriptDir, "requirements.txt")
-	pip := filepath.Join(v.venvDir, "bin", "pip")
+	pip := venvBinPath(v.venvDir, "pip")
 	cmd := exec.Command(pip, "install", "-q", "-r", reqFile)
 	cmd.Env = append(os.Environ(), "VIRTUAL_ENV="+v.venvDir)
 	if out, err := cmd.CombinedOutput(); err != nil {
