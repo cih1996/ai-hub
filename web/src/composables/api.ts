@@ -38,10 +38,10 @@ export const compressSession = (id: number) =>
   request<{ ok: boolean }>(`/sessions/${id}/compress`, { method: 'POST' })
 
 // Chat
-export const sendChat = (sessionId: number, content: string, workDir?: string) =>
+export const sendChat = (sessionId: number, content: string, workDir?: string, sessionRules?: string) =>
   request<{ session_id: number; status: string }>('/chat/send', {
     method: 'POST',
-    body: JSON.stringify({ session_id: sessionId, content, work_dir: workDir || '' }),
+    body: JSON.stringify({ session_id: sessionId, content, work_dir: workDir || '', session_rules: sessionRules || '' }),
   })
 
 // Status

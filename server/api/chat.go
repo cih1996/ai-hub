@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -221,10 +222,11 @@ func HandleChat(c *gin.Context) {
 // Validates/creates session, saves user message, kicks off streaming in background, returns immediately.
 func SendChat(c *gin.Context) {
 	var req struct {
-		SessionID int64  `json:"session_id"`
-		Content   string `json:"content"`
-		WorkDir   string `json:"work_dir"`
-		GroupName string `json:"group_name"`
+		SessionID    int64  `json:"session_id"`
+		Content      string `json:"content"`
+		WorkDir      string `json:"work_dir"`
+		GroupName    string `json:"group_name"`
+		SessionRules string `json:"session_rules"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: " + err.Error()})
@@ -252,6 +254,13 @@ func SendChat(c *gin.Context) {
 		// Broadcast new session to all connected clients
 		sessionJSON, _ := json.Marshal(session)
 		broadcast(WSMessage{Type: "session_created", SessionID: session.ID, Content: string(sessionJSON)})
+
+		// Write session rules before starting stream (avoids race condition with putSessionRules)
+		if req.SessionRules != "" {
+			dir := sessionRulesDir()
+			os.MkdirAll(dir, 0755)
+			os.WriteFile(sessionRulesPath(session.ID), []byte(req.SessionRules), 0644)
+		}
 	} else {
 		var err error
 		session, err = store.GetSession(req.SessionID)

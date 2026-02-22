@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { listChannels, createChannel, updateChannel, deleteChannel, listSessions, sendChat, putSessionRules } from '../composables/api'
+import { listChannels, createChannel, updateChannel, deleteChannel, listSessions, sendChat } from '../composables/api'
 import type { Channel, Session } from '../types'
 
 const channels = ref<Channel[]>([])
@@ -170,7 +170,6 @@ async function onDeployQQ() {
   deploying.value = true
   deployResult.value = ''
   try {
-    const res = await sendChat(0, '请引导我部署 QQ 机器人（NapCat），我不太懂技术，请一步步告诉我该怎么做。')
     const rules = `你是 QQ 机器人部署助手。请阅读 ~/.ai-hub/skills/qq-deploy/SKILL.md 获取完整部署手册。
 
 关键要求：
@@ -179,7 +178,7 @@ async function onDeployQQ() {
 - 遇到下载慢或失败，自动切换国内镜像源
 - 主动检测用户本地代理环境
 - 部署完成后输出 NapCat HTTP 地址、WebSocket 地址和 Token`
-    await putSessionRules(res.session_id, rules)
+    const res = await sendChat(0, '请引导我部署 QQ 机器人（NapCat），我不太懂技术，请一步步告诉我该怎么做。', '', rules)
     deployResult.value = `已创建部署会话 #${res.session_id}，AI 正在引导部署 QQ 机器人`
   } catch (e: any) {
     deployResult.value = `创建失败: ${e.message}`
@@ -192,10 +191,7 @@ async function onSmartCreate() {
   smartCreating.value = true
   smartResult.value = ''
   try {
-    // 1. Create new session with a brief init message
-    const res = await sendChat(0, '你已就绪。之后收到的每条消息都是飞书用户消息，请按会话规则处理并通过飞书 API 回复。')
-
-    // 2. Pre-write session rules based on user description
+    // 1. Build session rules based on user description
     const port = location.port || (location.protocol === 'https:' ? '443' : '80')
     const rules = `# 飞书消息处理助手
 
@@ -217,7 +213,9 @@ ${smartDesc.value.trim()}
 ## 回复规范
 - 内容简洁友好，适合 IM 阅读
 - 每条消息必须回复，不能丢失`
-    await putSessionRules(res.session_id, rules)
+
+    // 2. Create session with rules in one atomic call
+    const res = await sendChat(0, '你已就绪。之后收到的每条消息都是飞书用户消息，请按会话规则处理并通过飞书 API 回复。', '', rules)
 
     // 3. Bind session to form
     form.value.session_id = res.session_id
