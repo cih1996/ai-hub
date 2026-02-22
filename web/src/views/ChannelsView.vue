@@ -166,6 +166,27 @@ async function onDeploy() {
   deploying.value = false
 }
 
+async function onDeployQQ() {
+  deploying.value = true
+  deployResult.value = ''
+  try {
+    const res = await sendChat(0, '请引导我部署 QQ 机器人（NapCat），我不太懂技术，请一步步告诉我该怎么做。')
+    const rules = `你是 QQ 机器人部署助手。请阅读 ~/.ai-hub/skills/qq-deploy/SKILL.md 获取完整部署手册。
+
+关键要求：
+- 用户是非技术人员，全程用简单易懂的语言引导
+- 每一步只给一个操作，等用户确认后再继续
+- 遇到下载慢或失败，自动切换国内镜像源
+- 主动检测用户本地代理环境
+- 部署完成后输出 NapCat HTTP 地址、WebSocket 地址和 Token`
+    await putSessionRules(res.session_id, rules)
+    deployResult.value = `已创建部署会话 #${res.session_id}，AI 正在引导部署 QQ 机器人`
+  } catch (e: any) {
+    deployResult.value = `创建失败: ${e.message}`
+  }
+  deploying.value = false
+}
+
 async function onSmartCreate() {
   if (!smartDesc.value.trim()) return
   smartCreating.value = true
@@ -320,6 +341,14 @@ ${smartDesc.value.trim()}
             </button>
             <span v-if="deployResult" class="deploy-result">{{ deployResult }}</span>
           </div>
+          <div v-if="form.platform === 'qq'" class="deploy-section">
+            <button class="btn-deploy" :disabled="deploying" @click="onDeployQQ">
+              <svg v-if="!deploying" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a7 7 0 017 7c0 3-2 5-3 7l1 4H7l1-4c-1-2-3-4-3-7a7 7 0 017-7z"/><path d="M9 22h6"/></svg>
+              <svg v-else class="spinning" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+              {{ deploying ? '正在创建部署任务...' : '一键部署 QQ 机器人' }}
+            </button>
+            <span v-if="deployResult" class="deploy-result">{{ deployResult }}</span>
+          </div>
           <div class="modal-actions">
             <button class="modal-btn cancel" @click="showCreate = false">取消</button>
             <button class="modal-btn confirm" @click="onCreate">创建</button>
@@ -387,6 +416,14 @@ ${smartDesc.value.trim()}
               <svg v-if="!deploying" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/><circle cx="12" cy="16" r="1"/></svg>
               <svg v-else class="spinning" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
               {{ deploying ? '正在创建开通任务...' : '一键开通飞书应用' }}
+            </button>
+            <span v-if="deployResult" class="deploy-result">{{ deployResult }}</span>
+          </div>
+          <div v-if="form.platform === 'qq'" class="deploy-section">
+            <button class="btn-deploy" :disabled="deploying" @click="onDeployQQ">
+              <svg v-if="!deploying" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a7 7 0 017 7c0 3-2 5-3 7l1 4H7l1-4c-1-2-3-4-3-7a7 7 0 017-7z"/><path d="M9 22h6"/></svg>
+              <svg v-else class="spinning" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+              {{ deploying ? '正在创建部署任务...' : '一键部署 QQ 机器人' }}
             </button>
             <span v-if="deployResult" class="deploy-result">{{ deployResult }}</span>
           </div>

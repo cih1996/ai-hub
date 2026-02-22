@@ -5,7 +5,7 @@ description: "QQ Bot 全流程部署引导。当需要安装 NapCat、配置 QQ 
 
 # QQ Bot 部署 — 引导手册
 
-你是 QQ Bot 的部署引导专家。通过对话引导用户完成 NapCat 安装、QQ 登录、网络配置和 AI Hub 频道对接。
+你是 QQ Bot 的部署引导专家。目标用户可能不熟悉命令行，请用最简单的语言引导，每一步只给一个操作，等用户确认后再继续。遇到错误时给出具体解决方案，不要只说「请检查网络」。
 
 ## 前置检查
 
@@ -15,6 +15,33 @@ description: "QQ Bot 全流程部署引导。当需要安装 NapCat、配置 QQ 
 2. **必要参数**（由调用方提供或询问用户）：
    - `session_id`：要绑定的 AI Hub 会话 ID
    - `webhook_url`（可选）：如果调用方已提供则直接使用，否则在「网络环境检测」步骤自动获取
+
+## 网络与代理检测
+
+在安装开始前，先检测网络环境：
+
+```bash
+# 检测常见代理端口
+for port in 7890 7891 1080 1081 10808 10809; do
+  if curl -s --max-time 2 --proxy http://127.0.0.1:$port https://www.google.com > /dev/null 2>&1; then
+    echo "检测到代理: 127.0.0.1:$port"
+    export http_proxy=http://127.0.0.1:$port
+    export https_proxy=http://127.0.0.1:$port
+    break
+  fi
+done
+```
+
+- 检测到代理 → 自动配置环境变量，后续下载直连 GitHub
+- 未检测到代理 → 优先使用国内加速源下载
+- 加速源也失败 → 引导用户手动下载（给链接，让用户下载后告诉文件路径）
+
+### 国内加速源
+
+所有涉及 GitHub 下载的地方，优先使用加速前缀：
+- 首选：`https://ghfast.top/`（示例：`https://ghfast.top/https://github.com/NapNeko/NapCatQQ/releases/download/...`）
+- 备选：`https://gh-proxy.com/`、`https://mirror.ghproxy.com/`
+- 加速源全部失败再尝试直连
 
 ## 安装 NapCat
 
@@ -26,31 +53,56 @@ description: "QQ Bot 全流程部署引导。当需要安装 NapCat、配置 QQ 
 
 ```
 安装地址：https://github.com/NapNeko/NapCat-Mac-Installer
+加速地址：https://ghfast.top/https://github.com/NapNeko/NapCat-Mac-Installer
 ```
 
-告诉用户：「打开上面的链接，按 README 下载安装即可。安装完成后告诉我。」
+告诉用户：「打开上面的链接（如果打不开就用加速地址），按页面说明下载安装。安装完成后告诉我。」
 
 ### Linux
 
 ```bash
+# 国内加速版
+curl -o napcat.sh https://ghfast.top/https://raw.githubusercontent.com/NapNeko/NapCat-Installer/main/script/install.sh && bash napcat.sh
+```
+
+如果加速源失败，回退直连：
+```bash
 curl -o napcat.sh https://nclatest.znin.net/NapNeko/NapCat-Installer/main/script/install.sh && bash napcat.sh
 ```
 
-告诉用户：「复制上面的命令到终端执行，按提示完成安装。」
+告诉用户：「复制上面的命令到终端执行，按提示完成安装。如果下载很慢，告诉我，我换个地址。」
 
 ### Windows
 
 ```
 下载地址：https://github.com/NapNeko/NapCatQQ/releases
-下载 NapCat.Shell.Windows.OneKey.zip，解压后运行 launcher.bat
+加速下载：https://ghfast.top/https://github.com/NapNeko/NapCatQQ/releases/download/<版本>/NapCat.Shell.zip
 ```
+
+告诉用户：「打开下载链接，找到最新版本的 NapCat.Shell.zip 下载。如果打不开或很慢，用加速下载链接。下载后解压，双击运行 launcher.bat。」
 
 ### Docker
 
 ```
 仓库地址：https://github.com/NapNeko/NapCat-Docker
-按 README 的 docker-compose 示例启动即可。
 ```
+
+Docker Hub 国内加速配置（如果拉取镜像慢）：
+```bash
+# 编辑 Docker 配置
+mkdir -p /etc/docker
+cat > /etc/docker/daemon.json << 'EOF'
+{
+  "registry-mirrors": [
+    "https://docker.1ms.run",
+    "https://docker.xuanyuan.me"
+  ]
+}
+EOF
+systemctl daemon-reload && systemctl restart docker
+```
+
+告诉用户：「如果 docker pull 很慢，先执行上面的命令配置国内镜像加速，然后再拉取。」
 
 ## 启动与登录
 
@@ -60,7 +112,7 @@ curl -o napcat.sh https://nclatest.znin.net/NapNeko/NapCat-Installer/main/script
 
 等待用户确认登录成功后继续。
 
-## 网络环境检测
+## Webhook 网络环境检测
 
 > 如果调用方已提供 `webhook_url`，跳过本步骤，直接进入 WebUI 配置。
 
@@ -101,7 +153,7 @@ curl -s --max-time 5 -o /dev/null -w "%{http_code}" http://<公网IP>:<端口>/a
 # 安装（macOS）
 brew install cloudflared
 # 安装（Linux）
-curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared && chmod +x /usr/local/bin/cloudflared
+curl -L https://ghfast.top/https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared && chmod +x /usr/local/bin/cloudflared
 ```
 
 ```bash
@@ -129,9 +181,9 @@ NapCat 启动后自带 WebUI 管理界面。
 > `WebUI is running at http://0.0.0.0:6099`
 > `WebUI token: xxxx`
 >
-> 请打开 http://localhost:6099 ，用日志中的 token 登录。登录后告诉我。
+> 请在浏览器打开 http://localhost:6099 ，用日志中的 token 登录。登录后告诉我。
 
-等待用户确认登录 WebUI 后，引导配置两项网络设置：
+等待用户确认登录 WebUI 后，引导配置网络设置：
 
 ### 1. HTTP 服务端（供 AI Hub 调用发消息）
 
@@ -140,8 +192,8 @@ NapCat 启动后自带 WebUI 管理界面。
 > 在 WebUI 的「网络配置」中，添加一个 **HTTP 服务端**：
 > - 启用：开
 > - 端口：`3055`（默认即可，也可自定义）
-> - 设置一个 token（用于鉴权，随便写一个字符串）
-> - 保存
+> - 设置一个 token（用于鉴权，随便写一个字符串，比如 `mytoken123`）
+> - 点击保存
 >
 > 记下这个端口和 token，等下要用。比如地址就是 `http://<NapCat所在IP>:3055`。
 
@@ -153,7 +205,7 @@ NapCat 启动后自带 WebUI 管理界面。
 > - 启用：开
 > - 端口：`3056`（或自定义）
 > - token：跟 HTTP 服务端用同一个即可
-> - 保存
+> - 点击保存
 >
 > 记下这个端口，比如地址就是 `ws://<NapCat所在IP>:3056`。
 
@@ -162,7 +214,7 @@ NapCat 启动后自带 WebUI 管理界面。
 > 如果 NapCat 和 AI Hub 在同一台机器上，也可以添加一个 **HTTP 客户端**主动推送消息：
 > - 启用：开
 > - URL：`{webhook_url}`
-> - 保存
+> - 点击保存
 >
 > 远程部署时不需要配置此项，AI Hub 会通过 WebSocket 主动连接 NapCat 收消息。
 
@@ -192,17 +244,18 @@ WebUI 配置完成后，引导用户在 AI Hub 创建 QQ 频道：
 3. 确认 AI 能通过 NapCat API 回复消息：
 
 ```bash
-curl -s -X POST 'http://localhost:3000/send_private_msg' \
+curl -s -X POST 'http://<NapCat地址>/send_private_msg' \
   -H 'Authorization: Bearer <token>' \
   -H 'Content-Type: application/json' \
   -d '{"user_id": <发送者QQ号>, "message": "你好，AI Hub 已连接！"}'
 ```
 
-如果验证失败，排查顺序：
-- NapCat 是否在运行（进程是否存在）
-- WebUI 中 HTTP 服务端和客户端是否都已启用
-- Token 是否一致（AI Hub 频道配置 vs NapCat WebUI）
-- Webhook URL 是否可达（curl 测试）
+如果验证失败，按顺序排查：
+1. NapCat 是否在运行？（让用户检查终端是否还开着）
+2. WebUI 中 HTTP 服务端和 WS 服务端是否都已启用？
+3. Token 是否一致？（AI Hub 频道配置 vs NapCat WebUI 中设置的）
+4. 端口是否被防火墙拦截？（远程服务器需要开放 3055、3056 端口）
+5. AI Hub 日志中是否有 `[qq-ws]` 相关连接记录？（`tail -50 ~/.ai-hub/logs/ai-hub.log`）
 
 ## 完成后输出
 
@@ -211,10 +264,11 @@ curl -s -X POST 'http://localhost:3000/send_private_msg' \
 ```
 ✅ QQ 频道部署完成
 - QQ 号：<登录的QQ号>
-- NapCat 地址：<napcat_url>
-- Webhook 地址：<webhook_url>
+- NapCat HTTP 地址：<napcat_http_url>
+- NapCat WebSocket 地址：<napcat_ws_url>
+- Token：<token>
 - 绑定会话：#<session_id>
 - 状态：已启用
 ```
 
-将 NapCat 地址和 Token 回传给任务发起方。
+将 NapCat HTTP 地址、WebSocket 地址和 Token 回传给任务发起方。
