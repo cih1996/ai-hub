@@ -13,6 +13,9 @@ export const useChatStore = defineStore('chat', () => {
   const thinkingContent = ref('')
   const toolCalls = ref<ToolCall[]>([])
   const ws = ref<WebSocket | null>(null)
+  const wsConnected = ref(false)
+  let wsReconnectDelay = 1000 // exponential backoff: 1s → 2s → 4s → ... → 30s
+  let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null
 
   const workDir = ref('')
 
@@ -26,16 +29,24 @@ export const useChatStore = defineStore('chat', () => {
 
   function connectWS() {
     if (ws.value && ws.value.readyState === WebSocket.OPEN) return
+    if (wsReconnectTimer) {
+      clearTimeout(wsReconnectTimer)
+      wsReconnectTimer = null
+    }
 
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
     const wsUrl = `${protocol}//${location.host}/ws/chat`
     ws.value = new WebSocket(wsUrl)
 
     ws.value.onopen = () => {
+      wsConnected.value = true
+      wsReconnectDelay = 1000 // reset backoff on successful connect
       // Reattach to active stream if viewing a session
       if (currentSessionId.value > 0) {
         ws.value?.send(JSON.stringify({ type: 'subscribe', session_id: currentSessionId.value }))
       }
+      // Refresh sessions and version after reconnect
+      loadSessions()
     }
 
     ws.value.onmessage = (event) => {
@@ -242,7 +253,14 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     ws.value.onclose = () => {
-      setTimeout(connectWS, 2000)
+      wsConnected.value = false
+      wsReconnectTimer = setTimeout(connectWS, wsReconnectDelay)
+      wsReconnectDelay = Math.min(wsReconnectDelay * 2, 30000) // cap at 30s
+    }
+
+    ws.value.onerror = () => {
+      // onerror is always followed by onclose, so just mark disconnected
+      wsConnected.value = false
     }
   }
 
@@ -373,6 +391,7 @@ export const useChatStore = defineStore('chat', () => {
     thinkingContent,
     toolCalls,
     workDir,
+    wsConnected,
     connectWS,
     loadProviders,
     loadSessions,
