@@ -129,6 +129,7 @@ tail -50 ~/.ai-hub/logs/ai-hub.log
 | PUT | /api/v1/channels/:id | 更新频道 |
 | DELETE | /api/v1/channels/:id | 删除频道 |
 | POST | /api/v1/webhook/feishu | 飞书 Webhook 回调 |
+| POST | /api/v1/webhook/qq | QQ Webhook 回调（OneBot 11），支持 ?channel_id= 指定频道 |
 
 ## 三、项目仓库
 

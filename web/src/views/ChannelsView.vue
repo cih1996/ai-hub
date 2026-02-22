@@ -21,7 +21,7 @@ const form = ref({ name: '', platform: 'feishu', session_id: 0, config: '{}' })
 const configFields = reactive({
   feishu: { app_id: '', app_secret: '', verification_token: '' },
   telegram: { bot_token: '' },
-  qq: { token: '' },
+  qq: { napcat_url: '', token: '' },
 })
 
 function parseConfigToFields(platform: string, config: string) {
@@ -34,6 +34,7 @@ function parseConfigToFields(platform: string, config: string) {
     } else if (platform === 'telegram') {
       configFields.telegram.bot_token = obj.bot_token || ''
     } else if (platform === 'qq') {
+      configFields.qq.napcat_url = obj.napcat_url || ''
       configFields.qq.token = obj.token || ''
     }
   } catch {
@@ -50,7 +51,7 @@ function resetConfigFields(platform?: string) {
     configFields.telegram = { bot_token: '' }
   }
   if (!platform || platform === 'qq') {
-    configFields.qq = { token: '' }
+    configFields.qq = { napcat_url: '', token: '' }
   }
 }
 
@@ -305,7 +306,8 @@ ${smartDesc.value.trim()}
               <input v-model="configFields.telegram.bot_token" placeholder="Bot Token" />
             </div>
             <div v-else-if="form.platform === 'qq'" class="config-fields">
-              <input v-model="configFields.qq.token" placeholder="Token" />
+              <input v-model="configFields.qq.napcat_url" placeholder="NapCat HTTP 地址（如 http://127.0.0.1:3000）" />
+              <input v-model="configFields.qq.token" placeholder="Token（可选，与 NapCat 配置一致）" />
             </div>
           </div>
           <div v-if="form.platform === 'feishu'" class="deploy-section">
@@ -373,7 +375,8 @@ ${smartDesc.value.trim()}
               <input v-model="configFields.telegram.bot_token" placeholder="Bot Token" />
             </div>
             <div v-else-if="form.platform === 'qq'" class="config-fields">
-              <input v-model="configFields.qq.token" placeholder="Token" />
+              <input v-model="configFields.qq.napcat_url" placeholder="NapCat HTTP 地址（如 http://127.0.0.1:3000）" />
+              <input v-model="configFields.qq.token" placeholder="Token（可选，与 NapCat 配置一致）" />
             </div>
           </div>
           <div v-if="form.platform === 'feishu'" class="deploy-section">

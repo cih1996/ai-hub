@@ -246,25 +246,140 @@ func extractFeishuText(msgType, content string) string {
 	return textContent.Text
 }
 
-// extractChannelCredentials extracts app_id and app_secret from channel config JSON
+// extractChannelCredentials extracts credentials from channel config JSON based on platform
 func extractChannelCredentials(ch *model.Channel) string {
 	var cfg map[string]interface{}
 	if err := json.Unmarshal([]byte(ch.Config), &cfg); err != nil {
 		return "（无法解析频道配置）"
 	}
-	appID, _ := cfg["app_id"].(string)
-	appSecret, _ := cfg["app_secret"].(string)
 	lines := []string{}
-	if appID != "" {
-		lines = append(lines, fmt.Sprintf("App ID: %s", appID))
-	}
-	if appSecret != "" {
-		lines = append(lines, fmt.Sprintf("App Secret: %s", appSecret))
+	switch ch.Platform {
+	case "feishu":
+		if v, _ := cfg["app_id"].(string); v != "" {
+			lines = append(lines, fmt.Sprintf("App ID: %s", v))
+		}
+		if v, _ := cfg["app_secret"].(string); v != "" {
+			lines = append(lines, fmt.Sprintf("App Secret: %s", v))
+		}
+	case "qq":
+		if v, _ := cfg["napcat_url"].(string); v != "" {
+			lines = append(lines, fmt.Sprintf("NapCat地址: %s", v))
+		}
+		if v, _ := cfg["token"].(string); v != "" {
+			lines = append(lines, fmt.Sprintf("Token: %s", v))
+		}
+	default:
+		for k, v := range cfg {
+			if s, ok := v.(string); ok && s != "" {
+				lines = append(lines, fmt.Sprintf("%s: %s", k, s))
+			}
+		}
 	}
 	if len(lines) == 0 {
 		return "（频道未配置凭证）"
 	}
 	return strings.Join(lines, "\n")
+}
+
+// HandleQQWebhook POST /api/v1/webhook/qq
+// Receives OneBot 11 HTTP POST events from NapCat, forwards messages to bound sessions.
+func HandleQQWebhook(c *gin.Context) {
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "read body failed"})
+		return
+	}
+	log.Printf("[webhook/qq] received: %s", string(body))
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json"})
+		return
+	}
+
+	// Only handle message events
+	postType, _ := raw["post_type"].(string)
+	if postType != "message" {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+		return
+	}
+
+	// Find channel: by channel_id param or first enabled qq channel
+	var ch *model.Channel
+	if cidStr := c.Query("channel_id"); cidStr != "" {
+		cid, _ := strconv.ParseInt(cidStr, 10, 64)
+		if cid > 0 {
+			ch, _ = store.GetChannel(cid)
+			if ch != nil && (ch.Platform != "qq" || !ch.Enabled) {
+				ch = nil
+			}
+		}
+	}
+	if ch == nil {
+		ch, _ = store.GetEnabledChannelByPlatform("qq")
+	}
+	if ch == nil || ch.SessionID == 0 {
+		log.Printf("[webhook/qq] no enabled qq channel with bound session")
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+		return
+	}
+
+	// Token auth check
+	var cfg map[string]interface{}
+	if err := json.Unmarshal([]byte(ch.Config), &cfg); err == nil {
+		if token, _ := cfg["token"].(string); token != "" {
+			authHeader := c.GetHeader("Authorization")
+			if authHeader != "Bearer "+token && authHeader != token {
+				log.Printf("[webhook/qq] token mismatch for channel %d", ch.ID)
+				c.JSON(http.StatusForbidden, gin.H{"error": "token mismatch"})
+				return
+			}
+		}
+	}
+
+	// Extract message fields
+	msgType, _ := raw["message_type"].(string)
+	userID := jsonNumber(raw["user_id"])
+	groupID := jsonNumber(raw["group_id"])
+	messageID := jsonNumber(raw["message_id"])
+	message, _ := raw["message"].(string)
+	// Some NapCat versions send message as array, try raw_message fallback
+	if message == "" {
+		message, _ = raw["raw_message"].(string)
+	}
+	if message == "" {
+		log.Printf("[webhook/qq] empty message")
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+		return
+	}
+
+	// Build forwarded message
+	typeLabel := "私聊"
+	if msgType == "group" {
+		typeLabel = "群聊"
+	}
+	forwarded := fmt.Sprintf("【QQ消息】\n类型: %s\n发送者: %s", typeLabel, userID)
+	if msgType == "group" && groupID != "" {
+		forwarded += fmt.Sprintf("\n群号: %s", groupID)
+	}
+	forwarded += fmt.Sprintf("\n消息ID: %s\n内容: %s\n---\n频道凭证（用于回复）:\n%s",
+		messageID, message, extractChannelCredentials(ch))
+
+	log.Printf("[webhook/qq] forwarding to session %d: %s", ch.SessionID, message)
+	forwardToSession(ch.SessionID, forwarded)
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// jsonNumber extracts a number field as string from JSON (handles both float64 and string)
+func jsonNumber(v interface{}) string {
+	switch n := v.(type) {
+	case float64:
+		return fmt.Sprintf("%.0f", n)
+	case string:
+		return n
+	default:
+		return ""
+	}
 }
 
 // forwardToSession sends a message to a session, triggering AI processing

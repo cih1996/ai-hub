@@ -185,6 +185,7 @@ func main() {
 
 		// Webhooks (IM platform callbacks)
 		v1.POST("/webhook/feishu", api.HandleFeishuWebhook)
+		v1.POST("/webhook/qq", api.HandleQQWebhook)
 
 		// Vector engine (Skill tools)
 		v1.POST("/vector/search", api.SearchVector)
