@@ -43,6 +43,7 @@ func CreateChannel(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	QQWSMgr.OnChannelCreated(&ch)
 	c.JSON(http.StatusOK, ch)
 }
 
@@ -88,6 +89,7 @@ func UpdateChannel(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	QQWSMgr.OnChannelUpdated(existing)
 	c.JSON(http.StatusOK, existing)
 }
 
@@ -102,6 +104,7 @@ func DeleteChannel(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	QQWSMgr.OnChannelDeleted(id)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
@@ -262,7 +265,7 @@ func extractChannelCredentials(ch *model.Channel) string {
 			lines = append(lines, fmt.Sprintf("App Secret: %s", v))
 		}
 	case "qq":
-		if v, _ := cfg["napcat_url"].(string); v != "" {
+		if v, _ := cfg["napcat_http_url"].(string); v != "" {
 			lines = append(lines, fmt.Sprintf("NapCat地址: %s", v))
 		}
 		if v, _ := cfg["token"].(string); v != "" {

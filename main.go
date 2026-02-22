@@ -236,12 +236,16 @@ func main() {
 	// Start trigger scheduler
 	core.StartTriggerLoop(*port)
 
+	// Start QQ WebSocket client connections for enabled channels
+	api.QQWSMgr.StartAll()
+
 	// Signal handling: ensure cleanup on SIGINT/SIGTERM
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-quit
 		log.Println("[main] shutting down...")
+		api.QQWSMgr.Shutdown()
 		if core.Vector != nil {
 			core.Vector.Stop()
 		}

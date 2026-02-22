@@ -139,22 +139,32 @@ NapCat 启动后自带 WebUI 管理界面。
 
 > 在 WebUI 的「网络配置」中，添加一个 **HTTP 服务端**：
 > - 启用：开
-> - 端口：`3000`（默认即可，也可自定义）
+> - 端口：`3055`（默认即可，也可自定义）
 > - 设置一个 token（用于鉴权，随便写一个字符串）
 > - 保存
 >
-> 记下这个端口和 token，等下要用。比如地址就是 `http://localhost:3000`。
+> 记下这个端口和 token，等下要用。比如地址就是 `http://<NapCat所在IP>:3055`。
 
-### 2. HTTP 客户端（上报 QQ 消息到 AI Hub）
+### 2. WebSocket 服务端（供 AI Hub 连接收消息）
 
 告诉用户：
 
-> 继续在「网络配置」中，添加一个 **HTTP 客户端**：
+> 继续添加一个 **WebSocket 服务端**：
+> - 启用：开
+> - 端口：`3056`（或自定义）
+> - token：跟 HTTP 服务端用同一个即可
+> - 保存
+>
+> 记下这个端口，比如地址就是 `ws://<NapCat所在IP>:3056`。
+
+### 3. HTTP 客户端（可选，本地部署时使用）
+
+> 如果 NapCat 和 AI Hub 在同一台机器上，也可以添加一个 **HTTP 客户端**主动推送消息：
 > - 启用：开
 > - URL：`{webhook_url}`
 > - 保存
 >
-> 这样 QQ 收到的消息就会自动转发到 AI Hub。
+> 远程部署时不需要配置此项，AI Hub 会通过 WebSocket 主动连接 NapCat 收消息。
 
 ## 在 AI Hub 创建频道
 
@@ -165,10 +175,13 @@ WebUI 配置完成后，引导用户在 AI Hub 创建 QQ 频道：
 > 现在打开 AI Hub 的「通讯频道」页面，点击「新建频道」：
 > - 名称：随便起，比如「QQ Bot」
 > - 平台：选择 `qq`
-> - NapCat HTTP 地址：填 `http://localhost:3000`（或你自定义的端口）
+> - NapCat HTTP 地址：填 `http://<NapCat所在IP>:3055`（发消息用）
+> - NapCat WebSocket 地址：填 `ws://<NapCat所在IP>:3056`（收消息用）
 > - Token：填刚才在 WebUI 设置的 token
 > - 绑定会话：选择要接收 QQ 消息的会话（ID: {session_id}）
 > - 点击「创建」并启用频道
+>
+> 创建后 AI Hub 会自动通过 WebSocket 连接 NapCat 接收消息。
 
 ## 验证
 

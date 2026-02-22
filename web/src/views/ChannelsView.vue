@@ -21,7 +21,7 @@ const form = ref({ name: '', platform: 'feishu', session_id: 0, config: '{}' })
 const configFields = reactive({
   feishu: { app_id: '', app_secret: '', verification_token: '' },
   telegram: { bot_token: '' },
-  qq: { napcat_url: '', token: '' },
+  qq: { napcat_http_url: '', napcat_ws_url: '', token: '' },
 })
 
 function parseConfigToFields(platform: string, config: string) {
@@ -34,7 +34,8 @@ function parseConfigToFields(platform: string, config: string) {
     } else if (platform === 'telegram') {
       configFields.telegram.bot_token = obj.bot_token || ''
     } else if (platform === 'qq') {
-      configFields.qq.napcat_url = obj.napcat_url || ''
+      configFields.qq.napcat_http_url = obj.napcat_http_url || ''
+      configFields.qq.napcat_ws_url = obj.napcat_ws_url || ''
       configFields.qq.token = obj.token || ''
     }
   } catch {
@@ -51,7 +52,7 @@ function resetConfigFields(platform?: string) {
     configFields.telegram = { bot_token: '' }
   }
   if (!platform || platform === 'qq') {
-    configFields.qq = { napcat_url: '', token: '' }
+    configFields.qq = { napcat_http_url: '', napcat_ws_url: '', token: '' }
   }
 }
 
@@ -306,8 +307,9 @@ ${smartDesc.value.trim()}
               <input v-model="configFields.telegram.bot_token" placeholder="Bot Token" />
             </div>
             <div v-else-if="form.platform === 'qq'" class="config-fields">
-              <input v-model="configFields.qq.napcat_url" placeholder="NapCat HTTP 地址（如 http://127.0.0.1:3000）" />
-              <input v-model="configFields.qq.token" placeholder="Token（可选，与 NapCat 配置一致）" />
+              <input v-model="configFields.qq.napcat_http_url" placeholder="NapCat HTTP 地址（发消息用，如 http://129.204.22.176:3055）" />
+              <input v-model="configFields.qq.napcat_ws_url" placeholder="NapCat WebSocket 地址（收消息用，如 ws://129.204.22.176:3056）" />
+              <input v-model="configFields.qq.token" placeholder="Token（可选，HTTP 和 WS 共用）" />
             </div>
           </div>
           <div v-if="form.platform === 'feishu'" class="deploy-section">
@@ -375,8 +377,9 @@ ${smartDesc.value.trim()}
               <input v-model="configFields.telegram.bot_token" placeholder="Bot Token" />
             </div>
             <div v-else-if="form.platform === 'qq'" class="config-fields">
-              <input v-model="configFields.qq.napcat_url" placeholder="NapCat HTTP 地址（如 http://127.0.0.1:3000）" />
-              <input v-model="configFields.qq.token" placeholder="Token（可选，与 NapCat 配置一致）" />
+              <input v-model="configFields.qq.napcat_http_url" placeholder="NapCat HTTP 地址（发消息用，如 http://129.204.22.176:3055）" />
+              <input v-model="configFields.qq.napcat_ws_url" placeholder="NapCat WebSocket 地址（收消息用，如 ws://129.204.22.176:3056）" />
+              <input v-model="configFields.qq.token" placeholder="Token（可选，HTTP 和 WS 共用）" />
             </div>
           </div>
           <div v-if="form.platform === 'feishu'" class="deploy-section">
