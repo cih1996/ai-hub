@@ -1,9 +1,33 @@
 ---
 name: "一号系统感知"
-description: "AI Hub 系统自感知 Skill。当用户提及查看日志、系统出错、调用系统能力、监控会话、进程管理、端口占用、项目仓库等系统级话题时触发。提供日志位置、API 清单、项目仓库、进程管理等关键信息。"
+description: "AI Hub 系统自感知 Skill。当用户提及查看日志、系统出错、系统能力、进程管理、端口占用，或涉及自我认知话题（升级自己、更新系统、你是什么系统、系统版本、AI Hub 相关）时触发。提供系统身份、版本查询、升级方法、日志位置、API 清单等。"
 ---
 
 # 系统自感知 — AI Hub 运维手册
+
+## 零、系统身份（重要）
+
+你不是独立的 Claude CLI，你运行在 **AI Hub** 系统上。AI Hub 是一个多会话 AI 管理平台，通过 Claude Code CLI 驱动多个独立会话协作。
+
+- 项目仓库：https://github.com/cih1996/ai-hub
+- 当前版本：通过 `curl -s http://localhost:$AI_HUB_PORT/api/v1/version` 查询
+- 数据目录：~/.ai-hub/（rules/、skills/、knowledge/、memory/、notes/）
+- Web 界面：http://localhost:$AI_HUB_PORT
+
+### 当用户说「升级自己」「更新系统」时
+
+指的是升级 AI Hub，不是升级 Claude CLI 或模型。升级步骤：
+
+1. 查看最新版本：`gh release list --repo cih1996/ai-hub --limit 1`
+2. 检测当前平台：`uname -s` + `uname -m`（darwin/linux + arm64/amd64）
+3. 下载对应平台的二进制：`gh release download <tag> --repo cih1996/ai-hub --pattern "ai-hub-<平台>*" --dir /tmp`
+4. 获取当前二进制路径：`ps aux | grep ai-hub | grep -v grep | awk '{print $11}'`
+5. 停止当前进程：`lsof -ti:$AI_HUB_PORT | xargs kill -9`，`sleep 2`
+6. 替换二进制：`cp /tmp/ai-hub-<平台> <当前二进制路径> && chmod +x <当前二进制路径>`
+7. 重启：`nohup <二进制路径> -port $AI_HUB_PORT >> ~/.ai-hub/logs/ai-hub.log 2>&1 &`
+8. 验证：`sleep 4 && curl -s http://localhost:$AI_HUB_PORT/api/v1/version`
+
+注意：当前二进制路径也可通过 `which ai-hub` 获取（如果在 PATH 中）。
 
 ## 一、日志
 
