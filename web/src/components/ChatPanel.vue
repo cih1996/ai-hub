@@ -376,22 +376,22 @@ function formatToolInput(raw: string): string {
           <div class="quick-actions-title">快捷操作</div>
           <div class="quick-actions-grid">
             <div class="quick-card" @click="quickAction('请执行系统自检，检查所有组件状态并自动修复问题。')">
-              <span class="quick-card-icon">🔍</span>
+              <span class="quick-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
               <span class="quick-card-label">初始化系统</span>
               <span class="quick-card-desc">自检环境、修复依赖</span>
             </div>
             <div class="quick-card" @click="quickAction('请帮我部署 QQ 机器人，对接到 AI Hub。')">
-              <span class="quick-card-icon">🐧</span>
+              <span class="quick-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/><circle cx="9" cy="10" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="10" r="1" fill="currentColor" stroke="none"/></svg></span>
               <span class="quick-card-label">部署 QQ 机器人</span>
               <span class="quick-card-desc">安装 NapCat、扫码登录</span>
             </div>
             <div class="quick-card" @click="quickAction('请帮我部署飞书自建应用，对接到 AI Hub。')">
-              <span class="quick-card-icon">🐦</span>
+              <span class="quick-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l8 4 8-4"/><path d="M4 4v12l8 4V8z"/><path d="M20 4v12l-8 4V8z"/></svg></span>
               <span class="quick-card-label">部署飞书应用</span>
               <span class="quick-card-desc">创建应用、配置机器人</span>
             </div>
             <div class="quick-card" @click="quickAction('请查看当前系统状态，包括版本、进程、向量引擎、各会话运行情况。')">
-              <span class="quick-card-icon">📊</span>
+              <span class="quick-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="12" width="4" height="8" rx="1"/><rect x="10" y="8" width="4" height="12" rx="1"/><rect x="17" y="4" width="4" height="16" rx="1"/></svg></span>
               <span class="quick-card-label">查看系统状态</span>
               <span class="quick-card-desc">版本、进程、引擎状态</span>
             </div>
@@ -753,7 +753,8 @@ function formatToolInput(raw: string): string {
   transform: translateY(-1px);
   box-shadow: 0 2px 8px rgba(0,0,0,0.06);
 }
-.quick-card-icon { font-size: 24px; }
+.quick-card-icon { width: 28px; height: 28px; color: var(--accent); display: flex; align-items: center; justify-content: center; }
+.quick-card-icon svg { width: 100%; height: 100%; }
 .quick-card-label { font-size: 13px; font-weight: 600; color: var(--text-primary); }
 .quick-card-desc { font-size: 11px; color: var(--text-secondary); }
 /* Chat header */
