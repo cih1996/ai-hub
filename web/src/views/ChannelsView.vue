@@ -643,9 +643,9 @@ ${smartDesc.value.trim()}
 }
 .btn-add-rule:hover { opacity: 0.8; }
 .routing-hint { font-size: 11px; color: var(--text-muted); font-style: italic; }
-.routing-rule { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; }
+.routing-rule { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; flex-wrap: wrap; }
 .rule-type { width: 70px; padding: 4px 6px; font-size: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-primary); color: var(--text-primary); }
-.rule-ids { flex: 1; padding: 4px 6px; font-size: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-primary); color: var(--text-primary); }
+.rule-ids { flex: 1; min-width: 120px; padding: 4px 6px; font-size: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-primary); color: var(--text-primary); }
 .rule-session { width: 80px; padding: 4px 6px; font-size: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-primary); color: var(--text-primary); }
 .btn-del-rule {
   width: 20px; height: 20px; display: flex; align-items: center; justify-content: center;
