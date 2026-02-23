@@ -137,6 +137,15 @@ func (c *qqWSConn) matchRoute(msgType, groupID, userID string) int64 {
 	return c.sessionID // fallback to channel default
 }
 
+// qqChannelHasRoutes checks if a QQ channel config contains non-empty routing_rules.
+func qqChannelHasRoutes(config string) bool {
+	var cfg map[string]interface{}
+	if err := json.Unmarshal([]byte(config), &cfg); err != nil {
+		return false
+	}
+	return len(parseRoutingRules(cfg)) > 0
+}
+
 var QQWSMgr = &QQWSManager{
 	conns: make(map[int64]*qqWSConn),
 }
@@ -149,7 +158,7 @@ func (m *QQWSManager) StartAll() {
 		return
 	}
 	for _, ch := range channels {
-		if ch.Platform == "qq" && ch.Enabled && ch.SessionID > 0 {
+		if ch.Platform == "qq" && ch.Enabled && (ch.SessionID > 0 || qqChannelHasRoutes(ch.Config)) {
 			m.tryConnect(&ch)
 		}
 	}
@@ -168,7 +177,7 @@ func (m *QQWSManager) Shutdown() {
 
 // OnChannelCreated handles new channel creation.
 func (m *QQWSManager) OnChannelCreated(ch *model.Channel) {
-	if ch.Platform == "qq" && ch.Enabled && ch.SessionID > 0 {
+	if ch.Platform == "qq" && ch.Enabled && (ch.SessionID > 0 || qqChannelHasRoutes(ch.Config)) {
 		m.tryConnect(ch)
 	}
 }
@@ -186,7 +195,7 @@ func (m *QQWSManager) OnChannelUpdated(ch *model.Channel) {
 		m.mu.Unlock()
 	}
 
-	if ch.Platform == "qq" && ch.Enabled && ch.SessionID > 0 {
+	if ch.Platform == "qq" && ch.Enabled && (ch.SessionID > 0 || qqChannelHasRoutes(ch.Config)) {
 		m.tryConnect(ch)
 	}
 }
@@ -252,12 +261,20 @@ func (c *qqWSConn) stop() {
 }
 
 // isChannelActive checks if the channel is still enabled in the database.
+// A channel is active if enabled AND (has session binding OR has routing rules).
 func (c *qqWSConn) isChannelActive() bool {
 	ch, err := store.GetChannel(c.channelID)
 	if err != nil || ch == nil {
 		return false
 	}
-	return ch.Enabled && ch.SessionID > 0
+	if !ch.Enabled {
+		return false
+	}
+	if ch.SessionID > 0 {
+		return true
+	}
+	// SessionID=0 but has routing rules → still active
+	return len(c.routes) > 0
 }
 
 // connectLoop maintains the WS connection with exponential backoff reconnection.
@@ -422,6 +439,10 @@ func (c *qqWSConn) handleMessage(raw map[string]interface{}) {
 
 	// Route message to matched session or fallback to channel default
 	targetSession := c.matchRoute(msgType, groupID, userID)
+	if targetSession <= 0 {
+		log.Printf("[qq-ws] channel %d: no matching route and no default session, dropping message from %s", c.channelID, userID)
+		return
+	}
 	log.Printf("[qq-ws] channel %d: forwarding to session %d: %s", c.channelID, targetSession, message)
 	forwardToSession(targetSession, forwarded)
 }
