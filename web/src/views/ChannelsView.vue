@@ -18,6 +18,20 @@ const smartResult = ref('')
 
 const form = ref({ name: '', platform: 'feishu', session_id: 0, config: '{}' })
 
+interface RoutingRule {
+  type: 'group' | 'private'
+  ids: string
+  session_id: number
+}
+const routingRules = ref<RoutingRule[]>([])
+
+function addRoutingRule() {
+  routingRules.value.push({ type: 'group', ids: '', session_id: 0 })
+}
+function removeRoutingRule(i: number) {
+  routingRules.value.splice(i, 1)
+}
+
 const configFields = reactive({
   feishu: { app_id: '', app_secret: '', verification_token: '' },
   telegram: { bot_token: '' },
@@ -37,6 +51,16 @@ function parseConfigToFields(platform: string, config: string) {
       configFields.qq.napcat_http_url = obj.napcat_http_url || ''
       configFields.qq.napcat_ws_url = obj.napcat_ws_url || ''
       configFields.qq.token = obj.token || ''
+      // Parse routing rules
+      if (Array.isArray(obj.routing_rules)) {
+        routingRules.value = obj.routing_rules.map((r: any) => ({
+          type: r.type || 'group',
+          ids: Array.isArray(r.ids) ? r.ids.join(', ') : '',
+          session_id: r.session_id || 0,
+        }))
+      } else {
+        routingRules.value = []
+      }
     }
   } catch {
     // reset on parse error
@@ -53,13 +77,25 @@ function resetConfigFields(platform?: string) {
   }
   if (!platform || platform === 'qq') {
     configFields.qq = { napcat_http_url: '', napcat_ws_url: '', token: '' }
+    routingRules.value = []
   }
 }
 
 function serializeFieldsToConfig(platform: string): string {
   if (platform === 'feishu') return JSON.stringify(configFields.feishu)
   if (platform === 'telegram') return JSON.stringify(configFields.telegram)
-  if (platform === 'qq') return JSON.stringify(configFields.qq)
+  if (platform === 'qq') {
+    const cfg: any = { ...configFields.qq }
+    const rules = routingRules.value
+      .filter(r => r.ids.trim() && r.session_id > 0)
+      .map(r => ({
+        type: r.type,
+        ids: r.ids.split(/[,，\s]+/).map(s => s.trim()).filter(Boolean),
+        session_id: r.session_id,
+      }))
+    if (rules.length > 0) cfg.routing_rules = rules
+    return JSON.stringify(cfg)
+  }
   return '{}'
 }
 
@@ -329,6 +365,24 @@ ${smartDesc.value.trim()}
               <input v-model="configFields.qq.napcat_http_url" placeholder="NapCat HTTP 地址（发消息用，如 http://129.204.22.176:3055）" />
               <input v-model="configFields.qq.napcat_ws_url" placeholder="NapCat WebSocket 地址（收消息用，如 ws://129.204.22.176:3056）" />
               <input v-model="configFields.qq.token" placeholder="Token（可选，HTTP 和 WS 共用）" />
+              <div class="routing-section">
+                <div class="routing-header">
+                  <span class="routing-label">消息分流规则</span>
+                  <button class="btn-add-rule" type="button" @click="addRoutingRule">+ 添加规则</button>
+                </div>
+                <div v-if="routingRules.length === 0" class="routing-hint">所有消息默认进入频道绑定的会话</div>
+                <div v-for="(rule, i) in routingRules" :key="i" class="routing-rule">
+                  <select v-model="rule.type" class="rule-type">
+                    <option value="group">群聊</option>
+                    <option value="private">私聊</option>
+                  </select>
+                  <input v-model="rule.ids" class="rule-ids" :placeholder="rule.type === 'group' ? '群号（多个用逗号分隔）' : 'QQ号（多个用逗号分隔）'" />
+                  <input v-model.number="rule.session_id" class="rule-session" type="number" placeholder="目标会话ID" />
+                  <button class="btn-del-rule" type="button" @click="removeRoutingRule(i)" title="删除规则">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
           <div v-if="form.platform === 'feishu'" class="deploy-section">
@@ -407,6 +461,24 @@ ${smartDesc.value.trim()}
               <input v-model="configFields.qq.napcat_http_url" placeholder="NapCat HTTP 地址（发消息用，如 http://129.204.22.176:3055）" />
               <input v-model="configFields.qq.napcat_ws_url" placeholder="NapCat WebSocket 地址（收消息用，如 ws://129.204.22.176:3056）" />
               <input v-model="configFields.qq.token" placeholder="Token（可选，HTTP 和 WS 共用）" />
+              <div class="routing-section">
+                <div class="routing-header">
+                  <span class="routing-label">消息分流规则</span>
+                  <button class="btn-add-rule" type="button" @click="addRoutingRule">+ 添加规则</button>
+                </div>
+                <div v-if="routingRules.length === 0" class="routing-hint">所有消息默认进入频道绑定的会话</div>
+                <div v-for="(rule, i) in routingRules" :key="i" class="routing-rule">
+                  <select v-model="rule.type" class="rule-type">
+                    <option value="group">群聊</option>
+                    <option value="private">私聊</option>
+                  </select>
+                  <input v-model="rule.ids" class="rule-ids" :placeholder="rule.type === 'group' ? '群号（多个用逗号分隔）' : 'QQ号（多个用逗号分隔）'" />
+                  <input v-model.number="rule.session_id" class="rule-session" type="number" placeholder="目标会话ID" />
+                  <button class="btn-del-rule" type="button" @click="removeRoutingRule(i)" title="删除规则">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
           <div v-if="form.platform === 'feishu'" class="deploy-section">
@@ -561,4 +633,24 @@ ${smartDesc.value.trim()}
 .btn-smart-go .spinning { animation: spin 1s linear infinite; }
 .smart-result { font-size: 12px; color: var(--accent); }
 .config-fields { display: flex; flex-direction: column; gap: 6px; }
+.routing-section { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); }
+.routing-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.routing-label { font-size: 12px; font-weight: 500; color: var(--text-secondary); }
+.btn-add-rule {
+  font-size: 11px; padding: 2px 8px; border-radius: var(--radius-sm);
+  color: var(--accent); background: var(--accent-soft); border: none; cursor: pointer;
+  transition: opacity var(--transition);
+}
+.btn-add-rule:hover { opacity: 0.8; }
+.routing-hint { font-size: 11px; color: var(--text-muted); font-style: italic; }
+.routing-rule { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; }
+.rule-type { width: 70px; padding: 4px 6px; font-size: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-primary); color: var(--text-primary); }
+.rule-ids { flex: 1; padding: 4px 6px; font-size: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-primary); color: var(--text-primary); }
+.rule-session { width: 80px; padding: 4px 6px; font-size: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-primary); color: var(--text-primary); }
+.btn-del-rule {
+  width: 20px; height: 20px; display: flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-sm); color: var(--text-muted); border: none; background: none;
+  cursor: pointer; transition: all var(--transition); flex-shrink: 0;
+}
+.btn-del-rule:hover { color: var(--danger); background: rgba(239,68,68,0.1); }
 </style>
