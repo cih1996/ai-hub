@@ -192,6 +192,15 @@ func (c *qqWSConn) stop() {
 	log.Printf("[qq-ws] channel %d: stopped", c.channelID)
 }
 
+// isChannelActive checks if the channel is still enabled in the database.
+func (c *qqWSConn) isChannelActive() bool {
+	ch, err := store.GetChannel(c.channelID)
+	if err != nil || ch == nil {
+		return false
+	}
+	return ch.Enabled && ch.SessionID > 0
+}
+
 // connectLoop maintains the WS connection with exponential backoff reconnection.
 func (c *qqWSConn) connectLoop() {
 	backoff := time.Second
@@ -202,6 +211,12 @@ func (c *qqWSConn) connectLoop() {
 		case <-c.done:
 			return
 		default:
+		}
+
+		// Check channel status before reconnecting
+		if !c.isChannelActive() {
+			log.Printf("[qq-ws] channel %d: disabled or deleted, stopping reconnect", c.channelID)
+			return
 		}
 
 		err := c.dial()
@@ -297,6 +312,12 @@ func (c *qqWSConn) readLoop() {
 
 // handleMessage processes a single OneBot 11 message event and forwards to the bound session.
 func (c *qqWSConn) handleMessage(raw map[string]interface{}) {
+	// Check channel is still active before processing
+	if !c.isChannelActive() {
+		log.Printf("[qq-ws] channel %d: disabled, dropping message", c.channelID)
+		return
+	}
+
 	msgType, _ := raw["message_type"].(string)
 	userID := jsonNumber(raw["user_id"])
 	groupID := jsonNumber(raw["group_id"])
