@@ -321,23 +321,10 @@ func HandleQQWebhook(c *gin.Context) {
 	if ch == nil {
 		ch, _ = store.GetEnabledChannelByPlatform("qq")
 	}
-	if ch == nil || ch.SessionID == 0 {
-		log.Printf("[webhook/qq] no enabled qq channel with bound session")
+	if ch == nil || (ch.SessionID == 0 && !qqChannelHasRoutes(ch.Config)) {
+		log.Printf("[webhook/qq] no enabled qq channel with bound session or routing rules")
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 		return
-	}
-
-	// Token auth check
-	var cfg map[string]interface{}
-	if err := json.Unmarshal([]byte(ch.Config), &cfg); err == nil {
-		if token, _ := cfg["token"].(string); token != "" {
-			authHeader := c.GetHeader("Authorization")
-			if authHeader != "Bearer "+token && authHeader != token {
-				log.Printf("[webhook/qq] token mismatch for channel %d", ch.ID)
-				c.JSON(http.StatusForbidden, gin.H{"error": "token mismatch"})
-				return
-			}
-		}
 	}
 
 	// Extract message fields
@@ -356,6 +343,13 @@ func HandleQQWebhook(c *gin.Context) {
 		return
 	}
 
+	// Dedup: skip if this message_id was already processed (shared with WS path)
+	if qqGlobalDedup.isDuplicate(messageID) {
+		log.Printf("[webhook/qq] duplicate message_id %s, skipped", messageID)
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+		return
+	}
+
 	// Build forwarded message
 	typeLabel := "私聊"
 	if msgType == "group" {
@@ -368,8 +362,50 @@ func HandleQQWebhook(c *gin.Context) {
 	forwarded += fmt.Sprintf("\n消息ID: %s\n内容: %s\n---\n频道凭证（用于回复）:\n%s",
 		messageID, message, extractChannelCredentials(ch))
 
-	log.Printf("[webhook/qq] forwarding to session %d: %s", ch.SessionID, message)
-	forwardToSession(ch.SessionID, forwarded)
+	// Route message: use routing rules if available, fallback to channel default session
+	var targetSession int64
+	var cfg map[string]interface{}
+	if err := json.Unmarshal([]byte(ch.Config), &cfg); err == nil {
+		// Token auth check
+		if token, _ := cfg["token"].(string); token != "" {
+			authHeader := c.GetHeader("Authorization")
+			if authHeader != "Bearer "+token && authHeader != token {
+				log.Printf("[webhook/qq] token mismatch for channel %d", ch.ID)
+				c.JSON(http.StatusForbidden, gin.H{"error": "token mismatch"})
+				return
+			}
+		}
+		// Apply routing rules
+		routes := parseRoutingRules(cfg)
+		if len(routes) > 0 {
+			for _, r := range routes {
+				switch {
+				case r.Type == "group" && msgType == "group":
+					if _, ok := r.idSet[groupID]; ok {
+						targetSession = r.SessionID
+					}
+				case r.Type == "private" && msgType == "private":
+					if _, ok := r.idSet[userID]; ok {
+						targetSession = r.SessionID
+					}
+				}
+				if targetSession > 0 {
+					break
+				}
+			}
+		}
+	}
+	if targetSession <= 0 {
+		targetSession = ch.SessionID
+	}
+	if targetSession <= 0 {
+		log.Printf("[webhook/qq] channel %d: no matching route and no default session, dropping", ch.ID)
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+		return
+	}
+
+	log.Printf("[webhook/qq] forwarding to session %d: %s", targetSession, message)
+	forwardToSession(targetSession, forwarded)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 

@@ -81,7 +81,6 @@ type qqWSConn struct {
 	conn      *websocket.Conn
 	done      chan struct{}
 	stopped   bool
-	dedup     *msgDedup
 	routes    []routingRule
 }
 
@@ -145,6 +144,9 @@ func qqChannelHasRoutes(config string) bool {
 	}
 	return len(parseRoutingRules(cfg)) > 0
 }
+
+// qqGlobalDedup is a shared dedup cache across all WS connections and HTTP webhooks.
+var qqGlobalDedup = newMsgDedup(5000, 5*time.Minute)
 
 var QQWSMgr = &QQWSManager{
 	conns: make(map[int64]*qqWSConn),
@@ -231,7 +233,6 @@ func (m *QQWSManager) tryConnect(ch *model.Channel) {
 		sessionID: ch.SessionID,
 		httpURL:   httpURL,
 		done:      make(chan struct{}),
-		dedup:     newMsgDedup(1000, 5*time.Minute),
 		routes:    routes,
 	}
 
@@ -406,8 +407,8 @@ func (c *qqWSConn) handleMessage(raw map[string]interface{}) {
 		return
 	}
 
-	// Dedup: skip if this message_id was already processed
-	if c.dedup.isDuplicate(messageID) {
+	// Dedup: skip if this message_id was already processed (global shared cache)
+	if qqGlobalDedup.isDuplicate(messageID) {
 		log.Printf("[qq-ws] channel %d: duplicate message_id %s, skipped", c.channelID, messageID)
 		return
 	}
