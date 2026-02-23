@@ -397,7 +397,7 @@ func (v *VectorEngine) Embed(scope, docID, text string, metadata map[string]inte
 	return err
 }
 
-// Search performs semantic search
+// Search performs semantic search with automatic retry on transient errors.
 func (v *VectorEngine) Search(scope, query string, topK int) ([]map[string]interface{}, error) {
 	if !v.IsReady() {
 		return nil, fmt.Errorf("vector engine not ready")
@@ -407,18 +407,34 @@ func (v *VectorEngine) Search(scope, query string, topK int) ([]map[string]inter
 		"query": query,
 		"top_k": topK,
 	}
-	resp, err := v.post("/search", body)
-	if err != nil {
-		return nil, err
-	}
-	results, _ := resp["results"].([]interface{})
-	items := make([]map[string]interface{}, 0, len(results))
-	for _, r := range results {
-		if m, ok := r.(map[string]interface{}); ok {
-			items = append(items, m)
+
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			log.Printf("[vector] search retry %d/3 for scope=%s: %v", attempt+1, scope, lastErr)
+			time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
+			// If engine became not-ready (process crashed), try restart
+			if !v.IsReady() {
+				log.Println("[vector] engine not ready, attempting restart")
+				go v.Restart()
+				return nil, fmt.Errorf("vector engine restarting after failure: %w", lastErr)
+			}
 		}
+		resp, err := v.post("/search", body)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		results, _ := resp["results"].([]interface{})
+		items := make([]map[string]interface{}, 0, len(results))
+		for _, r := range results {
+			if m, ok := r.(map[string]interface{}); ok {
+				items = append(items, m)
+			}
+		}
+		return items, nil
 	}
-	return items, nil
+	return nil, fmt.Errorf("search failed after 3 attempts: %w", lastErr)
 }
 
 // Delete removes a vector record

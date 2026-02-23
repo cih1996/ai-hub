@@ -172,6 +172,12 @@ func UpdateSessionTitle(id int64, title string) error {
 	return err
 }
 
+// UpdateSessionProvider updates the provider_id for a session (used for fallback when original provider is deleted).
+func UpdateSessionProvider(id int64, providerID string) error {
+	_, err := DB.Exec(`UPDATE sessions SET provider_id=?, updated_at=? WHERE id=?`, providerID, time.Now(), id)
+	return err
+}
+
 // UpdateClaudeSessionID replaces the Claude CLI session UUID (used for context overflow recovery).
 func UpdateClaudeSessionID(id int64, newUUID string) error {
 	_, err := DB.Exec(`UPDATE sessions SET claude_session_id=?, updated_at=? WHERE id=?`, newUUID, time.Now(), id)

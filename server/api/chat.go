@@ -333,8 +333,17 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 
 	provider, err := store.GetProvider(session.ProviderID)
 	if err != nil {
-		stream.Send(WSMessage{Type: "error", SessionID: session.ID, Content: "provider not found: " + err.Error()})
-		return
+		// Provider deleted — fallback to default provider
+		log.Printf("[chat] session %d: provider %s not found, trying default", session.ID, session.ProviderID)
+		provider, err = store.GetDefaultProvider()
+		if err != nil {
+			errMsg := "provider not found and no default provider configured"
+			broadcast(WSMessage{Type: "error", SessionID: session.ID, Content: errMsg})
+			return
+		}
+		// Update session to use the default provider
+		log.Printf("[chat] session %d: falling back to default provider %s (%s)", session.ID, provider.Name, provider.ID)
+		_ = store.UpdateSessionProvider(session.ID, provider.ID)
 	}
 
 	var fullResponse string

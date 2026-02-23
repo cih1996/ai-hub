@@ -99,6 +99,9 @@ func main() {
 
 	// No longer render templates to ~/.claude/ — system prompt is built on-the-fly
 
+	// Clean up legacy ~/.claude/rules/ and ~/.claude/skills/ (migrated to ~/.ai-hub/ since v1.17.0)
+	cleanLegacyClaudeDirs()
+
 	// Install vector engine scripts and start engine
 	vectorScriptDir := installVectorEngine()
 	core.InitVectorEngine(vectorScriptDir)
@@ -352,6 +355,25 @@ func migrateNestedRules(dataDir string) {
 	// Remove empty nested dir
 	os.Remove(nested)
 	log.Println("[rules] migrated rules/rules/ → rules/")
+}
+
+// cleanLegacyClaudeDirs removes residual rules/ and skills/ directories under ~/.claude/
+// that were created by versions prior to v1.17.0 (data migrated to ~/.ai-hub/).
+func cleanLegacyClaudeDirs() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	for _, sub := range []string{"rules", "skills"} {
+		dir := filepath.Join(home, ".claude", sub)
+		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+			if err := os.RemoveAll(dir); err != nil {
+				log.Printf("[cleanup] failed to remove legacy %s: %v", dir, err)
+			} else {
+				log.Printf("[cleanup] removed legacy directory: %s", dir)
+			}
+		}
+	}
 }
 
 // installClaudeRules copies embedded claude/* to the rules directory (~/.ai-hub/rules/)
