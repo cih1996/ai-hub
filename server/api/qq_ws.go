@@ -82,6 +82,59 @@ type qqWSConn struct {
 	done      chan struct{}
 	stopped   bool
 	dedup     *msgDedup
+	routes    []routingRule
+}
+
+// routingRule defines a message routing rule for channel message dispatch.
+// Messages matching type + ids are forwarded to the specified session_id.
+type routingRule struct {
+	Type      string   `json:"type"`       // "group" or "private"
+	IDs       []string `json:"ids"`        // group_ids or user_ids
+	SessionID int64    `json:"session_id"` // target session
+	idSet     map[string]struct{}           // pre-built lookup set
+}
+
+// parseRoutingRules extracts routing_rules from channel config JSON.
+func parseRoutingRules(cfg map[string]interface{}) []routingRule {
+	rulesRaw, ok := cfg["routing_rules"]
+	if !ok {
+		return nil
+	}
+	data, err := json.Marshal(rulesRaw)
+	if err != nil {
+		return nil
+	}
+	var rules []routingRule
+	if err := json.Unmarshal(data, &rules); err != nil {
+		log.Printf("[qq-ws] failed to parse routing_rules: %v", err)
+		return nil
+	}
+	// Build lookup sets for fast matching
+	for i := range rules {
+		rules[i].idSet = make(map[string]struct{}, len(rules[i].IDs))
+		for _, id := range rules[i].IDs {
+			rules[i].idSet[id] = struct{}{}
+		}
+	}
+	return rules
+}
+
+// matchRoute finds the target session_id for a message based on routing rules.
+// Returns the matched session_id, or the default fallback if no rule matches.
+func (c *qqWSConn) matchRoute(msgType, groupID, userID string) int64 {
+	for _, r := range c.routes {
+		switch {
+		case r.Type == "group" && msgType == "group":
+			if _, ok := r.idSet[groupID]; ok {
+				return r.SessionID
+			}
+		case r.Type == "private" && msgType == "private":
+			if _, ok := r.idSet[userID]; ok {
+				return r.SessionID
+			}
+		}
+	}
+	return c.sessionID // fallback to channel default
 }
 
 var QQWSMgr = &QQWSManager{
@@ -160,6 +213,7 @@ func (m *QQWSManager) tryConnect(ch *model.Channel) {
 	}
 	token, _ := cfg["token"].(string)
 	httpURL, _ := cfg["napcat_http_url"].(string)
+	routes := parseRoutingRules(cfg)
 
 	c := &qqWSConn{
 		channelID: ch.ID,
@@ -169,6 +223,7 @@ func (m *QQWSManager) tryConnect(ch *model.Channel) {
 		httpURL:   httpURL,
 		done:      make(chan struct{}),
 		dedup:     newMsgDedup(1000, 5*time.Minute),
+		routes:    routes,
 	}
 
 	m.mu.Lock()
@@ -176,7 +231,11 @@ func (m *QQWSManager) tryConnect(ch *model.Channel) {
 	m.mu.Unlock()
 
 	go c.connectLoop()
-	log.Printf("[qq-ws] channel %d: starting connection to %s", ch.ID, wsURL)
+	if len(routes) > 0 {
+		log.Printf("[qq-ws] channel %d: starting connection to %s (%d routing rules)", ch.ID, wsURL, len(routes))
+	} else {
+		log.Printf("[qq-ws] channel %d: starting connection to %s", ch.ID, wsURL)
+	}
 }
 
 // stop signals the connection goroutine to exit and closes the WS.
@@ -361,6 +420,8 @@ func (c *qqWSConn) handleMessage(raw map[string]interface{}) {
 	forwarded += fmt.Sprintf("\n消息ID: %s\n内容: %s\n---\n频道凭证（用于回复）:\n%s",
 		messageID, message, creds)
 
-	log.Printf("[qq-ws] channel %d: forwarding to session %d: %s", c.channelID, c.sessionID, message)
-	forwardToSession(c.sessionID, forwarded)
+	// Route message to matched session or fallback to channel default
+	targetSession := c.matchRoute(msgType, groupID, userID)
+	log.Printf("[qq-ws] channel %d: forwarding to session %d: %s", c.channelID, targetSession, message)
+	forwardToSession(targetSession, forwarded)
 }
