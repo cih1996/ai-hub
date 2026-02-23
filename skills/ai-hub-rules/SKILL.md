@@ -100,13 +100,13 @@ curl "http://localhost:$AI_HUB_PORT/api/v1/files?scope=rules"
 ```bash
 curl -X POST http://localhost:$AI_HUB_PORT/api/v1/files \
   -H "Content-Type: application/json" \
-  -d '{"scope": "rules", "path": "rules/rule-描述.md", "content": "子规则内容"}'
+  -d '{"scope": "rules", "path": "rule-描述.md", "content": "子规则内容"}'
 ```
 
 ### 删除子规则
 
 ```bash
-curl -X DELETE "http://localhost:$AI_HUB_PORT/api/v1/files?scope=rules&path=rules/rule-描述.md"
+curl -X DELETE "http://localhost:$AI_HUB_PORT/api/v1/files?scope=rules&path=rule-描述.md"
 ```
 
 ### 查看可用模板变量
