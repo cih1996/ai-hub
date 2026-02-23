@@ -14,6 +14,57 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// msgDedup is a bounded, TTL-based message ID deduplication cache.
+type msgDedup struct {
+	mu      sync.Mutex
+	cache   map[string]time.Time
+	maxSize int
+	ttl     time.Duration
+}
+
+func newMsgDedup(maxSize int, ttl time.Duration) *msgDedup {
+	return &msgDedup{
+		cache:   make(map[string]time.Time),
+		maxSize: maxSize,
+		ttl:     ttl,
+	}
+}
+
+// isDuplicate returns true if msgID was seen within TTL, otherwise records it.
+func (d *msgDedup) isDuplicate(msgID string) bool {
+	if msgID == "" {
+		return false
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	now := time.Now()
+	if t, ok := d.cache[msgID]; ok && now.Sub(t) < d.ttl {
+		return true
+	}
+	// Evict expired entries when at capacity
+	if len(d.cache) >= d.maxSize {
+		for k, t := range d.cache {
+			if now.Sub(t) >= d.ttl {
+				delete(d.cache, k)
+			}
+		}
+	}
+	// Still full → drop oldest
+	if len(d.cache) >= d.maxSize {
+		var oldK string
+		var oldT time.Time
+		for k, t := range d.cache {
+			if oldK == "" || t.Before(oldT) {
+				oldK, oldT = k, t
+			}
+		}
+		delete(d.cache, oldK)
+	}
+	d.cache[msgID] = now
+	return false
+}
+
 // QQWSManager manages WebSocket client connections to NapCat WS servers.
 // Each enabled QQ channel with a napcat_ws_url gets a persistent connection.
 type QQWSManager struct {
@@ -30,6 +81,7 @@ type qqWSConn struct {
 	conn      *websocket.Conn
 	done      chan struct{}
 	stopped   bool
+	dedup     *msgDedup
 }
 
 var QQWSMgr = &QQWSManager{
@@ -116,6 +168,7 @@ func (m *QQWSManager) tryConnect(ch *model.Channel) {
 		sessionID: ch.SessionID,
 		httpURL:   httpURL,
 		done:      make(chan struct{}),
+		dedup:     newMsgDedup(1000, 5*time.Minute),
 	}
 
 	m.mu.Lock()
@@ -253,6 +306,12 @@ func (c *qqWSConn) handleMessage(raw map[string]interface{}) {
 		message, _ = raw["raw_message"].(string)
 	}
 	if message == "" {
+		return
+	}
+
+	// Dedup: skip if this message_id was already processed
+	if c.dedup.isDuplicate(messageID) {
+		log.Printf("[qq-ws] channel %d: duplicate message_id %s, skipped", c.channelID, messageID)
 		return
 	}
 
