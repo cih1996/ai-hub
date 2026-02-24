@@ -42,6 +42,7 @@ const isSkills = computed(() => route.path.startsWith('/skills'))
 const isMcp = computed(() => route.path.startsWith('/mcp'))
 const isTriggers = computed(() => route.path.startsWith('/triggers'))
 const isChannels = computed(() => route.path.startsWith('/channels'))
+const isTokenUsage = computed(() => route.path.startsWith('/token-usage'))
 
 interface SessionGroup {
   key: string
@@ -97,6 +98,25 @@ function formatTime(dateStr: string) {
   }
   return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
 }
+
+function formatTokens(n: number): string {
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M'
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'K'
+  return String(n)
+}
+
+// Load session token totals on mount
+onMounted(async () => {
+  if (!store.sessionTokenTotals) store.sessionTokenTotals = {}
+  for (const s of store.sessions) {
+    try {
+      const data = await api.getSessionTokenUsage(s.id)
+      if (data.stats) {
+        store.sessionTokenTotals[s.id] = data.stats.total_input_tokens + data.stats.total_output_tokens
+      }
+    } catch { /* ignore */ }
+  }
+})
 </script>
 
 <template>
@@ -157,6 +177,14 @@ function formatTime(dateStr: string) {
         </svg>
         <span>通讯</span>
       </button>
+      <button class="nav-item" :class="{ active: isTokenUsage }" @click="router.push('/token-usage')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="4" y="4" width="16" height="16" rx="2"/>
+          <circle cx="9" cy="9" r="1.5"/><circle cx="15" cy="9" r="1.5"/>
+          <circle cx="9" cy="15" r="1.5"/><circle cx="15" cy="15" r="1.5"/>
+        </svg>
+        <span>用量</span>
+      </button>
     </div>
 
     <div class="session-list">
@@ -186,7 +214,12 @@ function formatTime(dateStr: string) {
               <span class="session-id">#{{ s.id }}</span>
               <div class="session-title">{{ s.title }}</div>
             </div>
-            <div class="session-time">{{ formatTime(s.updated_at) }}</div>
+            <div class="session-time">
+              {{ formatTime(s.updated_at) }}
+              <span v-if="store.sessionTokenTotals?.[s.id]" class="session-token-tag" :title="(store.sessionTokenTotals![s.id] ?? 0).toLocaleString() + ' tokens'">
+                {{ formatTokens(store.sessionTokenTotals![s.id] ?? 0) }}
+              </span>
+            </div>
           </div>
           <button class="btn-delete" @click.stop="deleteTarget = s" title="Delete">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -362,6 +395,17 @@ function formatTime(dateStr: string) {
   font-size: 11px;
   color: var(--text-muted);
   margin-top: 2px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.session-token-tag {
+  font-size: 10px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 0 5px;
+  border-radius: 3px;
+  white-space: nowrap;
 }
 .btn-delete {
   opacity: 0;

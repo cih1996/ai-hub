@@ -193,3 +193,32 @@ export const getSystemTokenUsage = (start?: string, end?: string) => {
   const qs = params.toString()
   return request<TokenUsageStats>(`/token-usage/system${qs ? '?' + qs : ''}`)
 }
+
+export interface DailyTokenUsage {
+  date: string
+  input_tokens: number
+  output_tokens: number
+}
+export const getDailyTokenUsage = (start?: string, end?: string) => {
+  const params = new URLSearchParams()
+  if (start) params.set('start', start)
+  if (end) params.set('end', end)
+  const qs = params.toString()
+  return request<DailyTokenUsage[]>(`/token-usage/daily${qs ? '?' + qs : ''}`)
+}
+
+export interface SessionTokenRanking {
+  session_id: number
+  title: string
+  input_tokens: number
+  output_tokens: number
+  total: number
+}
+export const getTokenUsageRanking = (start?: string, end?: string, limit = 10) => {
+  const params = new URLSearchParams()
+  if (start) params.set('start', start)
+  if (end) params.set('end', end)
+  params.set('limit', String(limit))
+  const qs = params.toString()
+  return request<SessionTokenRanking[]>(`/token-usage/ranking${qs ? '?' + qs : ''}`)
+}

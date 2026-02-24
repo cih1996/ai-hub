@@ -209,6 +209,8 @@ func main() {
 		v1.GET("/token-usage/message/:id", api.GetMessageTokenUsage)
 		v1.GET("/token-usage/session/:id", api.GetSessionTokenUsage)
 		v1.GET("/token-usage/system", api.GetSystemTokenUsage)
+		v1.GET("/token-usage/daily", api.GetDailyTokenUsage)
+		v1.GET("/token-usage/ranking", api.GetTokenUsageRanking)
 	}
 
 	// WebSocket

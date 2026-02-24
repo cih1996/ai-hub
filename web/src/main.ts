@@ -25,6 +25,7 @@ const router = createRouter({
         { path: 'mcp', name: 'mcp', component: () => import('./views/McpView.vue') },
         { path: 'triggers', name: 'triggers', component: () => import('./views/TriggersView.vue') },
         { path: 'channels', name: 'channels', component: () => import('./views/ChannelsView.vue') },
+        { path: 'token-usage', name: 'token-usage', component: () => import('./views/TokenUsageView.vue') },
       ],
     },
     { path: '/settings', name: 'settings', component: () => import('./views/SettingsView.vue') },

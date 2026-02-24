@@ -14,6 +14,7 @@ export const useChatStore = defineStore('chat', () => {
   const toolCalls = ref<ToolCall[]>([])
   const tokenUsageMap = ref<Record<number, TokenUsage>>({})
   const latestTokenUsage = ref<TokenUsage | null>(null)
+  const sessionTokenTotals = ref<Record<number, number>>() // session_id -> total tokens
   const ws = ref<WebSocket | null>(null)
   const wsConnected = ref(false)
   let wsReconnectDelay = 1000 // exponential backoff: 1s → 2s → 4s → ... → 30s
@@ -145,6 +146,10 @@ export const useChatStore = defineStore('chat', () => {
           if (msg.session_id === currentSessionId.value) {
             latestTokenUsage.value = usage
           }
+          // Update session totals cache
+          if (!sessionTokenTotals.value) sessionTokenTotals.value = {}
+          const prev = sessionTokenTotals.value[msg.session_id] || 0
+          sessionTokenTotals.value[msg.session_id] = prev + (usage.input_tokens || 0) + (usage.output_tokens || 0)
         } catch { /* ignore parse errors */ }
         return
       }
@@ -417,6 +422,7 @@ export const useChatStore = defineStore('chat', () => {
     toolCalls,
     tokenUsageMap,
     latestTokenUsage,
+    sessionTokenTotals,
     workDir,
     wsConnected,
     connectWS,

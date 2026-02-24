@@ -54,3 +54,37 @@ func GetSystemTokenUsage(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, stats)
 }
+
+// GetDailyTokenUsage GET /api/v1/token-usage/daily?start=&end=
+func GetDailyTokenUsage(c *gin.Context) {
+	start := c.Query("start")
+	end := c.Query("end")
+	list, err := store.GetDailyTokenUsage(start, end)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if list == nil {
+		list = []store.DailyTokenUsage{}
+	}
+	c.JSON(http.StatusOK, list)
+}
+
+// GetTokenUsageRanking GET /api/v1/token-usage/ranking?start=&end=&limit=10
+func GetTokenUsageRanking(c *gin.Context) {
+	start := c.Query("start")
+	end := c.Query("end")
+	limit := 10
+	if l, err := strconv.Atoi(c.Query("limit")); err == nil && l > 0 {
+		limit = l
+	}
+	list, err := store.GetTokenUsageRanking(start, end, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if list == nil {
+		list = []store.SessionTokenRanking{}
+	}
+	c.JSON(http.StatusOK, list)
+}

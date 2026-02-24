@@ -184,17 +184,37 @@ watch(() => store.streamingContent, scrollToBottom)
 watch(() => store.thinkingContent, scrollToBottom)
 watch(() => store.toolCalls.length, scrollToBottom)
 
+// Session token stats
+const sessionTokenStats = ref<{ total_input_tokens: number; total_output_tokens: number; count: number } | null>(null)
+
 // Load token usage when session changes
 watch(() => store.currentSessionId, async (id) => {
+  sessionTokenStats.value = null
   if (id > 0) {
     try {
       const data = await api.getSessionTokenUsage(id)
+      sessionTokenStats.value = data.stats
       for (const r of data.records) {
         if (r.message_id) store.tokenUsageMap[r.message_id] = r
       }
     } catch { /* ignore */ }
   }
 }, { immediate: true })
+
+// Update session stats when new token_usage arrives via WS
+watch(() => store.latestTokenUsage, (usage) => {
+  if (usage && usage.session_id === store.currentSessionId && sessionTokenStats.value) {
+    sessionTokenStats.value.total_input_tokens += usage.input_tokens
+    sessionTokenStats.value.total_output_tokens += usage.output_tokens
+    sessionTokenStats.value.count++
+  }
+})
+
+function formatTokenNum(n: number): string {
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M'
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'K'
+  return String(n)
+}
 
 function send() {
   const text = input.value.trim()
@@ -339,6 +359,10 @@ function formatToolInput(raw: string): string {
         <div class="header-workdir">{{ displayWorkDir }}</div>
       </div>
       <div class="header-right">
+        <span v-if="sessionTokenStats" class="header-token-stats" title="本会话累计 Token 用量">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><circle cx="9" cy="9" r="1.5"/><circle cx="15" cy="9" r="1.5"/><circle cx="9" cy="15" r="1.5"/><circle cx="15" cy="15" r="1.5"/></svg>
+          {{ formatTokenNum(sessionTokenStats.total_input_tokens + sessionTokenStats.total_output_tokens) }}
+        </span>
         <span class="header-context">{{ contextCount }} 条上下文</span>
         <button
           class="btn-compress"
@@ -470,7 +494,7 @@ function formatToolInput(raw: string): string {
             />
             <div v-else class="message-content">{{ msg.content }}</div>
             <div v-if="msg.role === 'assistant' && store.tokenUsageMap[msg.id]" class="token-usage">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><circle cx="9" cy="9" r="1.5"/><circle cx="15" cy="9" r="1.5"/><circle cx="9" cy="15" r="1.5"/><circle cx="15" cy="15" r="1.5"/></svg>
               <span>{{ store.tokenUsageMap[msg.id]?.input_tokens?.toLocaleString() }} in / {{ store.tokenUsageMap[msg.id]?.output_tokens?.toLocaleString() }} out</span>
             </div>
           </div>
@@ -828,6 +852,12 @@ function formatToolInput(raw: string): string {
 .header-context {
   font-size: 12px;
   color: var(--text-muted);
+}
+.header-token-stats {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 12px; color: var(--accent);
+  background: var(--accent-soft); padding: 2px 8px;
+  border-radius: var(--radius-sm); white-space: nowrap;
 }
 .btn-rules {
   display: flex;
