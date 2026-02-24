@@ -199,6 +199,42 @@ PUT 接口支持 partial update，可更新的字段：`content`、`trigger_time
 
 会话列表接口返回 `has_triggers` 字段标识该会话是否关联了触发器。
 
+### 频道管理
+
+支持 QQ、飞书等平台的消息接入，每个频道绑定一个会话，支持消息分流规则。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/channels` | 获取所有频道 |
+| POST | `/channels` | 创建频道 |
+| PUT | `/channels/:id` | 更新频道 |
+| DELETE | `/channels/:id` | 删除频道 |
+
+频道 `config` 字段为 JSON 字符串，QQ 平台示例：
+
+```json
+{
+  "napcat_http_url": "http://host:3055",
+  "napcat_ws_url": "ws://host:3056",
+  "token": "your-token",
+  "routing_rules": [
+    {"type": "group", "source_id": "群号", "session_id": 28},
+    {"type": "private", "source_id": "QQ号", "session_id": 29}
+  ]
+}
+```
+
+- `routing_rules`：消息分流规则，按群号/QQ号将消息路由到不同会话
+- `session_id`（频道级）：全局默认会话，无匹配规则时 fallback
+- `session_id = 0` + 有分流规则：仅处理匹配规则的消息，其余丢弃
+
+### QQ Webhook
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/qq/webhook` | 接收 NapCat HTTP 上报（自动匹配频道） |
+| POST | `/qq/webhook/:channel_id` | 接收指定频道的 NapCat HTTP 上报 |
+
 ## WebSocket
 
 连接地址：`ws://localhost:8080/ws/chat`
@@ -237,3 +273,7 @@ WebSocket 用于接收实时推送，不用于发送消息。
 - **后端**：Go、Gin、SQLite、gorilla/websocket
 - **前端**：Vue 3、TypeScript、Vite、Pinia、vue-router
 - **AI 引擎**：Claude Code CLI（自动安装）、OpenAI 兼容 API
+
+## 交流群
+
+QQ群：250892941
