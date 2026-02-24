@@ -557,7 +557,20 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 					Text        string `json:"text"`
 					Thinking    string `json:"thinking"`
 					PartialJSON string `json:"partial_json"`
+					Usage       struct {
+						OutputTokens int64 `json:"output_tokens"`
+					} `json:"usage"`
 				} `json:"delta"`
+				Usage struct {
+					InputTokens  int64 `json:"input_tokens"`
+					OutputTokens int64 `json:"output_tokens"`
+				} `json:"usage"`
+				Message struct {
+					Usage struct {
+						InputTokens  int64 `json:"input_tokens"`
+						OutputTokens int64 `json:"output_tokens"`
+					} `json:"usage"`
+				} `json:"message"`
 			}
 			if err := json.Unmarshal(wrapper.Event, &inner); err != nil {
 				return
@@ -620,6 +633,29 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 					delete(toolNames, inner.Index)
 					delete(toolInputs, inner.Index)
 				}
+			case "message_delta":
+				// Capture per-turn usage from message_delta (output_tokens in delta.usage)
+				if inner.Delta.Usage.OutputTokens > 0 {
+					usageOutput += inner.Delta.Usage.OutputTokens
+				}
+				// Some models put usage at top level of message_delta
+				if inner.Usage.OutputTokens > 0 {
+					usageOutput += inner.Usage.OutputTokens
+				}
+			case "message_stop":
+				// Capture per-turn usage from message_stop
+				if inner.Usage.InputTokens > 0 || inner.Usage.OutputTokens > 0 {
+					usageInput += inner.Usage.InputTokens
+					usageOutput += inner.Usage.OutputTokens
+				}
+			case "message_start":
+				// Capture input_tokens from message_start (reported once per turn)
+				if inner.Message.Usage.InputTokens > 0 {
+					usageInput += inner.Message.Usage.InputTokens
+				}
+				if inner.Message.Usage.OutputTokens > 0 {
+					usageOutput += inner.Message.Usage.OutputTokens
+				}
 			}
 
 		case "result":
@@ -642,11 +678,11 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 			} else if wrapper.Subtype == "error" && wrapper.Result != "" {
 				send(WSMessage{Type: "error", SessionID: sessID, Content: wrapper.Result})
 			}
-			// Capture token usage
+			// Capture token usage (accumulate, not overwrite)
 			if wrapper.Usage.InputTokens > 0 || wrapper.Usage.OutputTokens > 0 {
-				usageInput = wrapper.Usage.InputTokens
-				usageOutput = wrapper.Usage.OutputTokens
-				log.Printf("[claude] session %d: usage input=%d output=%d", sessID, usageInput, usageOutput)
+				usageInput += wrapper.Usage.InputTokens
+				usageOutput += wrapper.Usage.OutputTokens
+				log.Printf("[claude] session %d: result usage +input=%d +output=%d (total: input=%d output=%d)", sessID, wrapper.Usage.InputTokens, wrapper.Usage.OutputTokens, usageInput, usageOutput)
 			}
 
 		case "assistant":
