@@ -3,6 +3,8 @@ package api
 import (
 	"ai-hub/server/model"
 	"ai-hub/server/store"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -147,6 +149,22 @@ func qqChannelHasRoutes(config string) bool {
 
 // qqGlobalDedup is a shared dedup cache across all WS connections and HTTP webhooks.
 var qqGlobalDedup = newMsgDedup(5000, 5*time.Minute)
+
+// qqContentDedup is a content-based dedup cache to catch messages with different IDs but same content.
+// Key = sha256(sessionID + content), TTL = 30s.
+var qqContentDedup = newMsgDedup(2000, 30*time.Second)
+
+// contentDedupKey builds a dedup key from session ID and message content.
+func contentDedupKey(sessionID int64, content string) string {
+	h := sha256.Sum256([]byte(fmt.Sprintf("%d:%s", sessionID, content)))
+	return hex.EncodeToString(h[:16]) // 128-bit, collision-safe
+}
+
+// LogQQDedupConfig logs the dedup configuration at startup.
+func LogQQDedupConfig() {
+	log.Printf("[qq-dedup] msgID dedup: maxSize=%d ttl=%v | content dedup: maxSize=%d ttl=%v",
+		qqGlobalDedup.maxSize, qqGlobalDedup.ttl, qqContentDedup.maxSize, qqContentDedup.ttl)
+}
 
 var QQWSMgr = &QQWSManager{
 	conns: make(map[int64]*qqWSConn),
@@ -409,7 +427,7 @@ func (c *qqWSConn) handleMessage(raw map[string]interface{}) {
 
 	// Dedup: skip if this message_id was already processed (global shared cache)
 	if qqGlobalDedup.isDuplicate(messageID) {
-		log.Printf("[qq-ws] channel %d: duplicate message_id %s, skipped", c.channelID, messageID)
+		log.Printf("[qq-ws] channel %d: duplicate message_id %s (source=WS), skipped", c.channelID, messageID)
 		return
 	}
 
@@ -442,6 +460,11 @@ func (c *qqWSConn) handleMessage(raw map[string]interface{}) {
 	targetSession := c.matchRoute(msgType, groupID, userID)
 	if targetSession <= 0 {
 		log.Printf("[qq-ws] channel %d: no matching route and no default session, dropping message from %s", c.channelID, userID)
+		return
+	}
+	// Content-based dedup: same content to same session within 30s → skip
+	if qqContentDedup.isDuplicate(contentDedupKey(targetSession, message)) {
+		log.Printf("[qq-ws] channel %d: duplicate content to session %d (source=WS), skipped", c.channelID, targetSession)
 		return
 	}
 	log.Printf("[qq-ws] channel %d: forwarding to session %d: %s", c.channelID, targetSession, message)

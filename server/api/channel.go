@@ -345,7 +345,7 @@ func HandleQQWebhook(c *gin.Context) {
 
 	// Dedup: skip if this message_id was already processed (shared with WS path)
 	if qqGlobalDedup.isDuplicate(messageID) {
-		log.Printf("[webhook/qq] duplicate message_id %s, skipped", messageID)
+		log.Printf("[webhook/qq] duplicate message_id %s (source=HTTP), skipped", messageID)
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 		return
 	}
@@ -405,6 +405,12 @@ func HandleQQWebhook(c *gin.Context) {
 	}
 
 	log.Printf("[webhook/qq] forwarding to session %d: %s", targetSession, message)
+	// Content-based dedup: same content to same session within 30s → skip
+	if qqContentDedup.isDuplicate(contentDedupKey(targetSession, message)) {
+		log.Printf("[webhook/qq] duplicate content to session %d (source=HTTP), skipped", targetSession)
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+		return
+	}
 	forwardToSession(targetSession, forwarded)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }

@@ -241,6 +241,7 @@ func main() {
 	core.StartTriggerLoop(*port)
 
 	// Start QQ WebSocket client connections for enabled channels
+	api.LogQQDedupConfig()
 	api.QQWSMgr.StartAll()
 
 	// Signal handling: ensure cleanup on SIGINT/SIGTERM
