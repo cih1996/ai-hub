@@ -51,11 +51,11 @@ func GetSystemTokenStats(startTime, endTime string) (*model.TokenUsageStats, err
 	query := `SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_creation_input_tokens),0), COALESCE(SUM(cache_read_input_tokens),0), COUNT(*) FROM token_usage WHERE 1=1`
 	var args []interface{}
 	if startTime != "" {
-		query += ` AND datetime(created_at, '+8 hours') >= ?`
+		query += ` AND DATE(created_at, '+8 hours') >= ?`
 		args = append(args, startTime)
 	}
 	if endTime != "" {
-		query += ` AND datetime(created_at, '+8 hours') <= ?`
+		query += ` AND DATE(created_at, '+8 hours') <= ?`
 		args = append(args, endTime)
 	}
 	err := DB.QueryRow(query, args...).Scan(&s.TotalInput, &s.TotalOutput, &s.TotalCacheCreation, &s.TotalCacheRead, &s.Count)
@@ -105,11 +105,11 @@ func GetDailyTokenUsage(start, end string) ([]DailyTokenUsage, error) {
 	query := `SELECT DATE(created_at, '+8 hours') as date, COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_creation_input_tokens),0), COALESCE(SUM(cache_read_input_tokens),0) FROM token_usage WHERE 1=1`
 	var args []interface{}
 	if start != "" {
-		query += ` AND datetime(created_at, '+8 hours') >= ?`
+		query += ` AND DATE(created_at, '+8 hours') >= ?`
 		args = append(args, start)
 	}
 	if end != "" {
-		query += ` AND datetime(created_at, '+8 hours') <= ?`
+		query += ` AND DATE(created_at, '+8 hours') <= ?`
 		args = append(args, end)
 	}
 	query += ` GROUP BY DATE(created_at, '+8 hours') ORDER BY date`
@@ -148,11 +148,11 @@ func GetTokenUsageRanking(start, end string, limit int) ([]SessionTokenRanking, 
 	query := `SELECT t.session_id, COALESCE(s.title,''), COALESCE(SUM(t.input_tokens),0), COALESCE(SUM(t.output_tokens),0), COALESCE(SUM(t.cache_creation_input_tokens),0), COALESCE(SUM(t.cache_read_input_tokens),0), COALESCE(SUM(t.input_tokens)+SUM(t.output_tokens)+SUM(t.cache_creation_input_tokens)+SUM(t.cache_read_input_tokens),0) as total FROM token_usage t LEFT JOIN sessions s ON t.session_id = s.id WHERE 1=1`
 	var args []interface{}
 	if start != "" {
-		query += ` AND datetime(t.created_at, '+8 hours') >= ?`
+		query += ` AND DATE(t.created_at, '+8 hours') >= ?`
 		args = append(args, start)
 	}
 	if end != "" {
-		query += ` AND datetime(t.created_at, '+8 hours') <= ?`
+		query += ` AND DATE(t.created_at, '+8 hours') <= ?`
 		args = append(args, end)
 	}
 	query += ` GROUP BY t.session_id ORDER BY total DESC LIMIT ?`
