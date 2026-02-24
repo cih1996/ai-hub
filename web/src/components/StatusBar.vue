@@ -121,7 +121,7 @@ onUnmounted(() => {
 }
 .status-bar.warn {
   background: rgba(234, 179, 8, 0.08);
-  color: #eab308;
+  color: var(--warning);
   border-color: rgba(234, 179, 8, 0.15);
 }
 .status-bar.error {
@@ -145,9 +145,9 @@ onUnmounted(() => {
 .status-actions { display: flex; gap: 8px; flex-shrink: 0; margin-left: 12px; }
 .retry-btn, .link-btn {
   padding: 3px 10px; border-radius: 4px; font-size: 11px; font-weight: 600;
-  background: rgba(255,255,255,0.1); color: inherit; transition: background 0.15s;
+  background: var(--glass); color: inherit; transition: background 0.15s;
 }
-.retry-btn:hover, .link-btn:hover { background: rgba(255,255,255,0.18); }
+.retry-btn:hover, .link-btn:hover { background: var(--bg-hover); }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .slide-enter-active, .slide-leave-active { transition: all 0.3s ease; }

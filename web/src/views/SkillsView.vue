@@ -93,7 +93,7 @@ onMounted(load)
 .tag { font-size: 11px; padding: 2px 8px; border-radius: 9999px; }
 .tag-user { background: var(--accent-soft); color: var(--accent); }
 .tag-plugin { background: rgba(168,85,247,0.15); color: #a855f7; }
-.tag-command { background: rgba(34,197,94,0.15); color: #22c55e; }
+.tag-command { background: rgba(34,197,94,0.15); color: var(--success); }
 .toggle { position: relative; display: inline-block; width: 36px; height: 20px; flex-shrink: 0; cursor: pointer; }
 .toggle input { opacity: 0; width: 0; height: 0; }
 .toggle-slider {
@@ -105,6 +105,6 @@ onMounted(load)
   background: var(--text-muted); border-radius: 50%; transition: transform 0.2s, background 0.2s;
 }
 .toggle input:checked + .toggle-slider { background: var(--accent); border-color: var(--accent); }
-.toggle input:checked + .toggle-slider::before { transform: translateX(16px); background: white; }
+.toggle input:checked + .toggle-slider::before { transform: translateX(16px); background: var(--btn-text); }
 </style>
 

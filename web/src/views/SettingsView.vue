@@ -4,6 +4,15 @@ import { useRouter } from 'vue-router'
 import { useChatStore } from '../stores/chat'
 import type { Provider } from '../types'
 import * as api from '../composables/api'
+import { useTheme, type ThemeMode } from '../composables/theme'
+
+const { mode: themeMode, setMode } = useTheme()
+const themeModeLabel: Record<string, string> = { system: '跟随系统', light: '亮色', dark: '暗色' }
+function toggleTheme() {
+  const order: ThemeMode[] = ['system', 'light', 'dark']
+  const next = order[(order.indexOf(themeMode.value) + 1) % 3] ?? 'system'
+  setMode(next)
+}
 
 const router = useRouter()
 const store = useChatStore()
@@ -61,6 +70,11 @@ onMounted(() => store.loadProviders())
 
 <template>
   <div class="settings-page">
+    <button class="floating-theme-btn" @click="toggleTheme" :title="'主题: ' + themeModeLabel[themeMode]">
+      <svg v-if="themeMode === 'dark'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
+      <svg v-else-if="themeMode === 'light'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+      <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+    </button>
     <div class="settings-container">
       <div class="settings-header">
         <button class="btn-back" @click="router.push('/chat')">
@@ -188,7 +202,7 @@ onMounted(() => store.loadProviders())
 .section-desc { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
 .btn-add {
   display: flex; align-items: center; gap: 6px;
-  padding: 8px 14px; background: var(--accent); color: white;
+  padding: 8px 14px; background: var(--accent); color: var(--btn-text);
   border-radius: var(--radius); font-size: 13px; font-weight: 500;
   transition: background var(--transition); flex-shrink: 0;
 }
@@ -228,7 +242,7 @@ onMounted(() => store.loadProviders())
 
 /* Modal */
 .form-overlay {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+  position: fixed; inset: 0; background: var(--overlay);
   display: flex; align-items: center; justify-content: center;
   z-index: 100; backdrop-filter: blur(4px);
 }
@@ -268,8 +282,29 @@ onMounted(() => store.loadProviders())
 .btn-cancel:hover { background: var(--bg-hover); }
 .btn-save {
   padding: 8px 20px; border-radius: var(--radius); font-size: 13px; font-weight: 500;
-  background: var(--accent); color: white; transition: background var(--transition);
+  background: var(--accent); color: var(--btn-text); transition: background var(--transition);
 }
 .btn-save:hover:not(:disabled) { background: var(--accent-hover); }
 .btn-save:disabled { opacity: 0.4; cursor: not-allowed; }
+.floating-theme-btn {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  transition: all var(--transition);
+  z-index: 50;
+  cursor: pointer;
+}
+.floating-theme-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
 </style>

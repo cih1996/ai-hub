@@ -182,7 +182,7 @@ onMounted(load)
 .btn-create {
   display: flex; align-items: center; gap: 4px; padding: 6px 14px;
   border-radius: var(--radius); font-size: 13px; font-weight: 500;
-  background: var(--accent); color: #fff; transition: opacity var(--transition); flex-shrink: 0;
+  background: var(--accent); color: var(--btn-text); transition: opacity var(--transition); flex-shrink: 0;
 }
 .btn-create:hover { opacity: 0.9; }
 .empty-state { text-align: center; color: var(--text-muted); padding: 48px 16px; font-size: 14px; }
@@ -204,8 +204,8 @@ onMounted(load)
 .card-content { font-size: 14px; font-weight: 500; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .status-tag { font-size: 11px; padding: 2px 8px; border-radius: 9999px; flex-shrink: 0; }
 .status-active { background: var(--accent-soft); color: var(--accent); }
-.status-failed { background: rgba(239,68,68,0.15); color: #ef4444; }
-.status-completed { background: rgba(34,197,94,0.15); color: #22c55e; }
+.status-failed { background: rgba(239,68,68,0.15); color: var(--danger); }
+.status-completed { background: rgba(34,197,94,0.15); color: var(--success); }
 .status-disabled { background: var(--bg-tertiary); color: var(--text-muted); }
 .card-meta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 6px; }
 .meta-item { font-size: 11px; color: var(--text-muted); }
@@ -226,10 +226,10 @@ onMounted(load)
   background: var(--text-muted); border-radius: 50%; transition: transform 0.2s, background 0.2s;
 }
 .toggle input:checked + .toggle-slider { background: var(--accent); border-color: var(--accent); }
-.toggle input:checked + .toggle-slider::before { transform: translateX(16px); background: white; }
+.toggle input:checked + .toggle-slider::before { transform: translateX(16px); background: var(--btn-text); }
 /* Modal */
 .modal-overlay {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+  position: fixed; inset: 0; background: var(--overlay);
   display: flex; align-items: center; justify-content: center; z-index: 1000;
 }
 .modal-box {
@@ -250,6 +250,6 @@ onMounted(load)
 .modal-btn { padding: 6px 16px; border-radius: var(--radius); font-size: 13px; font-weight: 500; cursor: pointer; transition: all var(--transition); }
 .modal-btn.cancel { color: var(--text-secondary); background: var(--bg-hover); }
 .modal-btn.cancel:hover { color: var(--text-primary); }
-.modal-btn.confirm { color: #fff; background: var(--accent); }
+.modal-btn.confirm { color: var(--btn-text); background: var(--accent); }
 .modal-btn.confirm:hover { opacity: 0.9; }
 </style>

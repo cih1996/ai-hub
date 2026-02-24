@@ -529,7 +529,7 @@ ${smartDesc.value.trim()}
 .btn-create {
   display: flex; align-items: center; gap: 4px; padding: 6px 14px;
   border-radius: var(--radius); font-size: 13px; font-weight: 500;
-  background: var(--accent); color: #fff; transition: opacity var(--transition); flex-shrink: 0;
+  background: var(--accent); color: var(--btn-text); transition: opacity var(--transition); flex-shrink: 0;
 }
 .btn-create:hover { opacity: 0.9; }
 .empty-state { text-align: center; color: var(--text-muted); padding: 48px 16px; font-size: 14px; }
@@ -544,8 +544,8 @@ ${smartDesc.value.trim()}
 .card-top { display: flex; align-items: center; gap: 8px; }
 .card-name { font-size: 14px; font-weight: 500; color: var(--text-primary); }
 .platform-tag { font-size: 11px; padding: 2px 8px; border-radius: 9999px; flex-shrink: 0; }
-.platform-feishu { background: rgba(59,130,246,0.15); color: #3b82f6; }
-.platform-telegram { background: rgba(34,197,94,0.15); color: #22c55e; }
+.platform-feishu { background: rgba(59,130,246,0.15); color: var(--info); }
+.platform-telegram { background: rgba(34,197,94,0.15); color: var(--success); }
 .platform-qq { background: rgba(168,85,247,0.15); color: #a855f7; }
 .status-tag { font-size: 11px; padding: 2px 8px; border-radius: 9999px; flex-shrink: 0; }
 .status-disabled { background: var(--bg-tertiary); color: var(--text-muted); }
@@ -570,9 +570,9 @@ ${smartDesc.value.trim()}
   background: var(--text-muted); border-radius: 50%; transition: transform 0.2s, background 0.2s;
 }
 .toggle input:checked + .toggle-slider { background: var(--accent); border-color: var(--accent); }
-.toggle input:checked + .toggle-slider::before { transform: translateX(16px); background: white; }
+.toggle input:checked + .toggle-slider::before { transform: translateX(16px); background: var(--btn-text); }
 .modal-overlay {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+  position: fixed; inset: 0; background: var(--overlay);
   display: flex; align-items: center; justify-content: center; z-index: 1000;
 }
 .modal-box {
@@ -593,7 +593,7 @@ ${smartDesc.value.trim()}
 .modal-btn { padding: 6px 16px; border-radius: var(--radius); font-size: 13px; font-weight: 500; cursor: pointer; transition: all var(--transition); }
 .modal-btn.cancel { color: var(--text-secondary); background: var(--bg-hover); }
 .modal-btn.cancel:hover { color: var(--text-primary); }
-.modal-btn.confirm { color: #fff; background: var(--accent); }
+.modal-btn.confirm { color: var(--btn-text); background: var(--accent); }
 .modal-btn.confirm:hover { opacity: 0.9; }
 .deploy-section { margin-bottom: 14px; display: flex; flex-direction: column; gap: 6px; }
 .btn-deploy {
@@ -626,7 +626,7 @@ ${smartDesc.value.trim()}
 .btn-smart-go {
   display: flex; align-items: center; gap: 4px; padding: 5px 12px;
   border-radius: var(--radius); font-size: 12px; font-weight: 500;
-  background: var(--accent); color: #fff; transition: opacity var(--transition); cursor: pointer;
+  background: var(--accent); color: var(--btn-text); transition: opacity var(--transition); cursor: pointer;
 }
 .btn-smart-go:hover:not(:disabled) { opacity: 0.9; }
 .btn-smart-go:disabled { opacity: 0.5; cursor: not-allowed; }

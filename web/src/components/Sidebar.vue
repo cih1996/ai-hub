@@ -4,6 +4,17 @@ import type { Session } from '../types'
 import { useChatStore } from '../stores/chat'
 import { useRouter, useRoute } from 'vue-router'
 import * as api from '../composables/api'
+import { useTheme, type ThemeMode } from '../composables/theme'
+
+const { mode: themeMode, setMode } = useTheme()
+
+const themeModeLabel: Record<string, string> = { system: '跟随系统', light: '亮色', dark: '暗色' }
+
+function toggleTheme() {
+  const order: ThemeMode[] = ['system', 'light', 'dark']
+  const next = order[(order.indexOf(themeMode.value) + 1) % 3] ?? 'system'
+  setMode(next)
+}
 
 const store = useChatStore()
 const router = useRouter()
@@ -190,13 +201,20 @@ function formatTime(dateStr: string) {
     </div>
 
     <div class="sidebar-footer">
-      <button class="footer-btn" @click="router.push('/settings')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="12" cy="12" r="3"/>
-          <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
-        </svg>
-        <span>设置</span>
-      </button>
+      <div class="footer-row">
+        <button class="footer-btn" @click="router.push('/settings')">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+          </svg>
+          <span>设置</span>
+        </button>
+        <button class="theme-btn" @click="toggleTheme" :title="'主题: ' + themeModeLabel[themeMode]">
+          <svg v-if="themeMode === 'dark'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
+          <svg v-else-if="themeMode === 'light'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+          <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        </button>
+      </div>
       <div v-if="version" class="version-text">{{ version }}</div>
     </div>
 
@@ -334,10 +352,10 @@ function formatTime(dateStr: string) {
   background: var(--text-muted);
 }
 .process-dot.busy {
-  background: #22c55e;
+  background: var(--success);
 }
 .process-dot.idle {
-  background: #eab308;
+  background: var(--warning);
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 .session-time {
@@ -372,8 +390,13 @@ function formatTime(dateStr: string) {
   padding: 8px;
   border-top: 1px solid var(--border);
 }
+.footer-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
 .footer-btn {
-  width: 100%;
+  flex: 1;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -387,6 +410,21 @@ function formatTime(dateStr: string) {
   background: var(--bg-hover);
   color: var(--text-primary);
 }
+.theme-btn {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  transition: all var(--transition);
+  flex-shrink: 0;
+}
+.theme-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
 .version-text {
   text-align: center;
   font-size: 11px;
@@ -396,7 +434,7 @@ function formatTime(dateStr: string) {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -444,7 +482,7 @@ function formatTime(dateStr: string) {
   color: var(--text-primary);
 }
 .modal-btn.confirm {
-  color: #fff;
+  color: var(--btn-text);
   background: var(--danger, #ef4444);
 }
 .modal-btn.confirm:hover {

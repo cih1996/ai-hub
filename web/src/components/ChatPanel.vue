@@ -685,29 +685,29 @@ function formatToolInput(raw: string): string {
   align-items: center;
   gap: 8px;
   padding: 8px 24px;
-  background: #fef3cd;
-  border-bottom: 1px solid #ffc107;
+  background: var(--warning-bg);
+  border-bottom: 1px solid var(--warning-border);
   font-size: 13px;
-  color: #856404;
+  color: var(--warning-text);
 }
 .vector-banner-icon { font-size: 16px; }
 .vector-banner-text { flex: 1; }
 .vector-banner-btn {
   padding: 4px 12px;
-  border: 1px solid #ffc107;
+  border: 1px solid var(--warning-border);
   border-radius: 4px;
-  background: #fff;
-  color: #856404;
+  background: var(--bg-primary);
+  color: var(--warning-text);
   cursor: pointer;
   font-size: 12px;
   white-space: nowrap;
 }
-.vector-banner-btn:hover { background: #ffc107; color: #fff; }
+.vector-banner-btn:hover { background: var(--warning-border); color: var(--btn-text); }
 .vector-banner-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 .vector-banner-close {
   background: none;
   border: none;
-  color: #856404;
+  color: var(--warning-text);
   cursor: pointer;
   font-size: 16px;
   padding: 0 4px;
@@ -925,19 +925,19 @@ function formatToolInput(raw: string): string {
   display: flex; align-items: center; gap: 8px; font-size: 13px;
 }
 .tool-status { display: flex; align-items: center; flex-shrink: 0; }
-.tool-status.running { color: #3b82f6; }
-.tool-status.done { color: #22c55e; }
+.tool-status.running { color: var(--info); }
+.tool-status.done { color: var(--success); }
 .tool-name {
   font-weight: 600; color: var(--text-primary); font-size: 13px;
 }
 /* Step color categories */
 .step-thinking { color: #8b5cf6; }
-.step-file { color: #22c55e; }
-.step-bash { color: #f59e0b; }
+.step-file { color: var(--success); }
+.step-bash { color: var(--warning); }
 .step-search { color: #06b6d4; }
 .step-default { color: var(--text-primary); }
 /* History steps: done check icon */
-.done-check { color: #22c55e; }
+.done-check { color: var(--success); }
 .history-steps { margin-bottom: 8px; }
 .tool-input {
   margin-top: 4px; padding: 6px 8px;
@@ -999,7 +999,7 @@ function formatToolInput(raw: string): string {
 /* Rules modal */
 .modal-overlay {
   position: fixed; inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--overlay);
   display: flex; align-items: center; justify-content: center;
   z-index: 1000;
 }
@@ -1071,7 +1071,7 @@ function formatToolInput(raw: string): string {
 .btn-save-rule {
   padding: 6px 16px; border-radius: var(--radius);
   font-size: 13px; font-weight: 500;
-  background: var(--accent); color: #fff;
+  background: var(--accent); color: var(--btn-text);
   transition: opacity var(--transition);
 }
 .btn-save-rule:hover:not(:disabled) { opacity: 0.9; }
@@ -1108,12 +1108,12 @@ function formatToolInput(raw: string): string {
   animation: toast-in 0.2s ease;
 }
 .toast.success {
-  background: #22c55e;
-  color: #fff;
+  background: var(--success);
+  color: var(--btn-text);
 }
 .toast.error {
-  background: #ef4444;
-  color: #fff;
+  background: var(--danger);
+  color: var(--btn-text);
 }
 @keyframes toast-in {
   from { opacity: 0; transform: translateX(-50%) translateY(-10px); }

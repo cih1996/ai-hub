@@ -364,7 +364,7 @@ onMounted(async () => {
 .btn-default:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-save {
   padding: 6px 16px; font-size: 12px; border-radius: var(--radius-sm);
-  background: var(--accent); color: white; transition: all var(--transition);
+  background: var(--accent); color: var(--btn-text); transition: all var(--transition);
 }
 .btn-save:hover { background: var(--accent-hover); }
 .btn-save:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -404,7 +404,7 @@ onMounted(async () => {
 .btn-search {
   display: flex; align-items: center; gap: 4px; padding: 6px 12px;
   border-radius: var(--radius); font-size: 12px; font-weight: 500;
-  background: var(--accent); color: #fff; transition: opacity var(--transition);
+  background: var(--accent); color: var(--btn-text); transition: opacity var(--transition);
   cursor: pointer; white-space: nowrap; flex-shrink: 0;
 }
 .btn-search:hover:not(:disabled) { opacity: 0.9; }
@@ -422,7 +422,7 @@ onMounted(async () => {
 .result-scope {
   font-size: 10px; padding: 1px 6px; border-radius: 9999px; flex-shrink: 0;
 }
-.scope-knowledge { background: rgba(59,130,246,0.15); color: #3b82f6; }
+.scope-knowledge { background: rgba(59,130,246,0.15); color: var(--info); }
 .scope-memory { background: rgba(168,85,247,0.15); color: #a855f7; }
 .result-filename {
   font-size: 12px; color: var(--text-primary); font-weight: 500;
