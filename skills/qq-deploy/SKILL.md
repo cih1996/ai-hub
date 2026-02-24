@@ -196,6 +196,28 @@ curl -s -X POST "http://localhost:${AI_HUB_PORT:-8080}/api/v1/channels" \
 
 创建后 AI Hub 会自动通过 WebSocket 连接 NapCat。
 
+### 分流规则配置（可选）
+
+如果需要将不同群/用户的消息分流到不同会话，在 config 中添加 `routing_rules`：
+
+```bash
+curl -s -X POST "http://localhost:${AI_HUB_PORT:-8080}/api/v1/channels" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "QQ Bot",
+    "platform": "qq",
+    "enabled": true,
+    "session_id": 0,
+    "config": "{\"napcat_http_url\":\"http://<NapCat地址>:3055\",\"napcat_ws_url\":\"ws://<NapCat地址>:3056\",\"token\":\"<token>\",\"routing_rules\":[{\"type\":\"group\",\"ids\":[\"群号1\",\"群号2\"],\"session_id\":10},{\"type\":\"private\",\"ids\":[\"QQ号\"],\"session_id\":20}]}"
+  }'
+```
+
+说明：
+- `session_id` 可设为 0（不绑定全局会话），仅靠分流规则路由消息
+- `routing_rules` 中 `type` 为 `"group"` 或 `"private"`，`ids` 为群号/QQ号数组
+- 匹配规则的消息转发到对应 session_id，未匹配则 fallback 到频道默认 session_id
+- 也可在 AI Hub 前端「频道管理」页面通过 UI 配置分流规则
+
 ## 验证
 
 AI 自动验证连接状态：

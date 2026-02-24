@@ -83,6 +83,35 @@ curl -s -X POST 'http://127.0.0.1:3000/send_group_msg' \
   -d '{"group_id": 123456, "message": "你的回复内容"}'
 ```
 
+## 频道分流规则（routing_rules）
+
+频道支持按群号/QQ号将消息分流到不同会话，在频道 config JSON 中配置 `routing_rules` 字段：
+
+```json
+{
+  "napcat_http_url": "http://127.0.0.1:3055",
+  "napcat_ws_url": "ws://127.0.0.1:3056",
+  "token": "mytoken",
+  "routing_rules": [
+    {"type": "group", "ids": ["123456", "789012"], "session_id": 10},
+    {"type": "private", "ids": ["111111"], "session_id": 20}
+  ]
+}
+```
+
+字段说明：
+- `type`：`"group"`（群聊）或 `"private"`（私聊）
+- `ids`：群号或QQ号数组（字符串格式）
+- `session_id`：匹配后转发到的目标会话 ID
+
+匹配逻辑：
+1. 收到消息后按 routing_rules 顺序匹配 type + ids
+2. 命中规则 → 转发到该规则的 session_id
+3. 未命中 → fallback 到频道默认 session_id
+4. 频道 session_id=0 且无匹配规则 → 丢弃消息
+
+频道可以不绑定全局会话（session_id=0），仅靠分流规则工作。
+
 ## 注意事项
 
 - `user_id` 和 `group_id` 是数字类型，不要加引号
