@@ -350,6 +350,9 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 	var metadataJSON string
 	var usageInput, usageOutput, usageCacheCreation, usageCacheRead int64
 
+	// Reset proxy usage accumulator at stream start (Issue #72)
+	ResetProxyUsage(session.ID)
+
 	log.Printf("[chat] session=%d provider=%s mode=%s model=%s base_url=%s",
 		session.ID, provider.Name, provider.Mode, provider.ModelID, provider.BaseURL)
 
@@ -366,6 +369,13 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 
 	if err != nil {
 		log.Printf("[chat] error: %v", err)
+		// Prefer proxy-captured usage on error path too (Issue #72)
+		if pu := ConsumeProxyUsage(session.ID); pu != nil {
+			usageInput = pu.InputTokens
+			usageOutput = pu.OutputTokens
+			usageCacheCreation = pu.CacheCreationInputTokens
+			usageCacheRead = pu.CacheReadInputTokens
+		}
 		// Save partial response before reporting error — don't lose already-received content
 		if fullResponse != "" || metadataJSON != "" {
 			content := fullResponse
@@ -389,6 +399,16 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 		}
 		broadcast(WSMessage{Type: "error", SessionID: session.ID, Content: err.Error()})
 		return
+	}
+
+	// Prefer proxy-captured usage (has accurate cache tokens) over stream-json fallback (Issue #72)
+	if pu := ConsumeProxyUsage(session.ID); pu != nil {
+		log.Printf("[chat] session=%d using proxy usage: input=%d output=%d cache_create=%d cache_read=%d",
+			session.ID, pu.InputTokens, pu.OutputTokens, pu.CacheCreationInputTokens, pu.CacheReadInputTokens)
+		usageInput = pu.InputTokens
+		usageOutput = pu.OutputTokens
+		usageCacheCreation = pu.CacheCreationInputTokens
+		usageCacheRead = pu.CacheReadInputTokens
 	}
 
 	if fullResponse != "" || metadataJSON != "" {
