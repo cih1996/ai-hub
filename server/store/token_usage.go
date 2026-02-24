@@ -194,11 +194,11 @@ func GetHourlyTokenUsage(start, end string, sessionID int64) ([]HourlyTokenUsage
 		args = append(args, sessionID)
 	}
 	if start != "" {
-		query += ` AND datetime(created_at, '+8 hours') >= ?`
+		query += ` AND strftime('%Y-%m-%d %H:00', created_at, '+8 hours') >= ?`
 		args = append(args, start)
 	}
 	if end != "" {
-		query += ` AND datetime(created_at, '+8 hours') <= ?`
+		query += ` AND strftime('%Y-%m-%d %H:00', created_at, '+8 hours') <= ?`
 		args = append(args, end)
 	}
 	query += ` GROUP BY strftime('%Y-%m-%d %H:00', created_at, '+8 hours') ORDER BY hour`

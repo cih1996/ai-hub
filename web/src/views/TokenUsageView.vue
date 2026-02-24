@@ -15,6 +15,22 @@ const sessions = ref<{ id: number; title: string }[]>([])
 const selectedSessionId = ref(0)
 const loading = ref(true)
 
+// Hourly chart independent time range
+type HourlyRangeKey = '12h' | '24h' | '48h' | '7d'
+const hourlyRangeKey = ref<HourlyRangeKey>('24h')
+
+function getHourlyRange(): { start: string; end: string } {
+  const now = new Date()
+  // Use Beijing time (UTC+8) for hour-level formatting
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const fmtHour = (d: Date) => {
+    const bj = new Date(d.getTime() + 8 * 3600000)
+    return `${bj.getUTCFullYear()}-${pad(bj.getUTCMonth() + 1)}-${pad(bj.getUTCDate())} ${pad(bj.getUTCHours())}:00`
+  }
+  const hours = hourlyRangeKey.value === '12h' ? 12 : hourlyRangeKey.value === '24h' ? 24 : hourlyRangeKey.value === '48h' ? 48 : 168
+  return { start: fmtHour(new Date(now.getTime() - hours * 3600000)), end: fmtHour(new Date(now.getTime() + 3600000)) }
+}
+
 // Time range
 type RangeKey = 'today' | '7d' | '30d' | 'custom'
 const rangeKey = ref<RangeKey>('30d')
@@ -54,12 +70,13 @@ const totalPages = computed(() => Math.max(1, Math.ceil(daily.value.length / pag
 async function loadData() {
   loading.value = true
   const { start, end } = getRange()
+  const hr = getHourlyRange()
   try {
     const [s, d, r, h, sess] = await Promise.all([
       api.getSystemTokenUsage(start, end),
       api.getDailyTokenUsage(start, end),
       api.getTokenUsageRanking(start, end, 10),
-      api.getHourlyTokenUsage(start, end, selectedSessionId.value),
+      api.getHourlyTokenUsage(hr.start, hr.end, selectedSessionId.value),
       api.listSessions(),
     ])
     stats.value = s
@@ -104,8 +121,15 @@ function renderHourlyChart() {
 }
 
 async function onSessionChange() {
-  const { start, end } = getRange()
-  hourly.value = await api.getHourlyTokenUsage(start, end, selectedSessionId.value)
+  const hr = getHourlyRange()
+  hourly.value = await api.getHourlyTokenUsage(hr.start, hr.end, selectedSessionId.value)
+  await nextTick()
+  renderHourlyChart()
+}
+
+async function onHourlyRangeChange() {
+  const hr = getHourlyRange()
+  hourly.value = await api.getHourlyTokenUsage(hr.start, hr.end, selectedSessionId.value)
   await nextTick()
   renderHourlyChart()
 }
@@ -236,10 +260,17 @@ onUnmounted(() => { areaChart?.destroy(); barChart?.destroy(); pieChart?.destroy
       <div class="chart-box full">
         <div class="chart-header">
           <div class="chart-title">小时用量趋势</div>
-          <select class="session-select" v-model="selectedSessionId" @change="onSessionChange">
-            <option :value="0">全部会话</option>
-            <option v-for="s in sessions" :key="s.id" :value="s.id">{{ s.title }}</option>
-          </select>
+          <div class="hourly-controls">
+            <div class="hourly-range-selector">
+              <button v-for="r in (['12h','24h','48h','7d'] as HourlyRangeKey[])" :key="r" class="range-btn sm" :class="{ active: hourlyRangeKey === r }" @click="hourlyRangeKey = r; onHourlyRangeChange()">
+                {{ r }}
+              </button>
+            </div>
+            <select class="session-select" v-model="selectedSessionId" @change="onSessionChange">
+              <option :value="0">全部会话</option>
+              <option v-for="s in sessions" :key="s.id" :value="s.id">{{ s.title }}</option>
+            </select>
+          </div>
         </div>
         <div class="chart-wrap bar-wrap"><canvas ref="hourlyCanvas"></canvas></div>
       </div>
@@ -318,6 +349,9 @@ onUnmounted(() => { areaChart?.destroy(); barChart?.destroy(); pieChart?.destroy
   padding: 4px 8px; border-radius: var(--radius-sm); border: 1px solid var(--border);
   background: var(--bg-tertiary); color: var(--text-primary); font-size: 12px; max-width: 200px;
 }
+.hourly-controls { display: flex; align-items: center; gap: 8px; }
+.hourly-range-selector { display: flex; gap: 4px; }
+.range-btn.sm { padding: 3px 10px; font-size: 11px; }
 .chart-wrap { position: relative; height: 220px; }
 .pie-wrap { height: 200px; }
 .bar-wrap { height: 260px; }
