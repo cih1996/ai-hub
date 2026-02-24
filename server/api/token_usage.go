@@ -88,3 +88,24 @@ func GetTokenUsageRanking(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, list)
 }
+
+// GetHourlyTokenUsage GET /api/v1/token-usage/hourly?start=&end=&session_id=
+func GetHourlyTokenUsage(c *gin.Context) {
+	start := c.Query("start")
+	end := c.Query("end")
+	var sessionID int64
+	if sid := c.Query("session_id"); sid != "" {
+		if id, err := strconv.ParseInt(sid, 10, 64); err == nil {
+			sessionID = id
+		}
+	}
+	list, err := store.GetHourlyTokenUsage(start, end, sessionID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if list == nil {
+		list = []store.HourlyTokenUsage{}
+	}
+	c.JSON(http.StatusOK, list)
+}

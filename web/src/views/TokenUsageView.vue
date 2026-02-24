@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch, nextTick, onUnmounted } from 'vue'
 import * as api from '../composables/api'
-import type { DailyTokenUsage, SessionTokenRanking } from '../composables/api'
+import type { DailyTokenUsage, SessionTokenRanking, HourlyTokenUsage } from '../composables/api'
 import type { TokenUsageStats } from '../types'
 import { Chart, registerables } from 'chart.js'
 
@@ -10,6 +10,9 @@ Chart.register(...registerables)
 const stats = ref<TokenUsageStats>({ total_input_tokens: 0, total_output_tokens: 0, total_cache_creation_tokens: 0, total_cache_read_tokens: 0, count: 0 })
 const daily = ref<DailyTokenUsage[]>([])
 const ranking = ref<SessionTokenRanking[]>([])
+const hourly = ref<HourlyTokenUsage[]>([])
+const sessions = ref<{ id: number; title: string }[]>([])
+const selectedSessionId = ref(0)
 const loading = ref(true)
 
 // Time range
@@ -33,9 +36,11 @@ const totalTokens = computed(() => stats.value.total_input_tokens + stats.value.
 const areaCanvas = ref<HTMLCanvasElement>()
 const barCanvas = ref<HTMLCanvasElement>()
 const pieCanvas = ref<HTMLCanvasElement>()
+const hourlyCanvas = ref<HTMLCanvasElement>()
 let areaChart: Chart | null = null
 let barChart: Chart | null = null
 let pieChart: Chart | null = null
+let hourlyChart: Chart | null = null
 
 // Detail table pagination
 const page = ref(1)
@@ -50,14 +55,18 @@ async function loadData() {
   loading.value = true
   const { start, end } = getRange()
   try {
-    const [s, d, r] = await Promise.all([
+    const [s, d, r, h, sess] = await Promise.all([
       api.getSystemTokenUsage(start, end),
       api.getDailyTokenUsage(start, end),
       api.getTokenUsageRanking(start, end, 10),
+      api.getHourlyTokenUsage(start, end, selectedSessionId.value),
+      api.listSessions(),
     ])
     stats.value = s
     daily.value = d
     ranking.value = r
+    hourly.value = h
+    sessions.value = sess.map(x => ({ id: x.id, title: x.title || `#${x.id}` }))
     page.value = 1
   } catch (e) {
     console.error('Failed to load token usage data', e)
@@ -72,6 +81,33 @@ function renderCharts() {
   renderAreaChart()
   renderBarChart()
   renderPieChart()
+  renderHourlyChart()
+}
+
+function renderHourlyChart() {
+  if (hourlyChart) hourlyChart.destroy()
+  if (!hourlyCanvas.value) return
+  const labels = hourly.value.map(h => h.hour.slice(5))
+  hourlyChart = new Chart(hourlyCanvas.value, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Input', data: hourly.value.map(h => h.input_tokens), backgroundColor: 'rgba(124,106,239,0.7)' },
+        { label: 'Output', data: hourly.value.map(h => h.output_tokens), backgroundColor: 'rgba(34,197,94,0.7)' },
+        { label: 'Cache Write', data: hourly.value.map(h => h.cache_creation_input_tokens), backgroundColor: 'rgba(245,158,11,0.7)' },
+        { label: 'Cache Read', data: hourly.value.map(h => h.cache_read_input_tokens), backgroundColor: 'rgba(6,182,212,0.7)' },
+      ],
+    },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top' } }, scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } } },
+  })
+}
+
+async function onSessionChange() {
+  const { start, end } = getRange()
+  hourly.value = await api.getHourlyTokenUsage(start, end, selectedSessionId.value)
+  await nextTick()
+  renderHourlyChart()
 }
 
 function renderAreaChart() {
@@ -130,7 +166,7 @@ function formatNum(n: number): string {
 
 onMounted(loadData)
 watch(rangeKey, loadData)
-onUnmounted(() => { areaChart?.destroy(); barChart?.destroy(); pieChart?.destroy() })
+onUnmounted(() => { areaChart?.destroy(); barChart?.destroy(); pieChart?.destroy(); hourlyChart?.destroy() })
 
 // __CONTINUE_HERE__
 </script>
@@ -195,6 +231,17 @@ onUnmounted(() => { areaChart?.destroy(); barChart?.destroy(); pieChart?.destroy
       <div class="chart-box full">
         <div class="chart-title">会话消耗排行 Top 10</div>
         <div class="chart-wrap bar-wrap"><canvas ref="barCanvas"></canvas></div>
+      </div>
+
+      <div class="chart-box full">
+        <div class="chart-header">
+          <div class="chart-title">小时用量趋势</div>
+          <select class="session-select" v-model="selectedSessionId" @change="onSessionChange">
+            <option :value="0">全部会话</option>
+            <option v-for="s in sessions" :key="s.id" :value="s.id">{{ s.title }}</option>
+          </select>
+        </div>
+        <div class="chart-wrap bar-wrap"><canvas ref="hourlyCanvas"></canvas></div>
       </div>
 
       <div class="detail-section">
@@ -265,6 +312,12 @@ onUnmounted(() => { areaChart?.destroy(); barChart?.destroy(); pieChart?.destroy
 .chart-box.narrow { flex: 1; }
 .chart-box.full { margin-bottom: 16px; }
 .chart-title { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 12px; }
+.chart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.chart-header .chart-title { margin-bottom: 0; }
+.session-select {
+  padding: 4px 8px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+  background: var(--bg-tertiary); color: var(--text-primary); font-size: 12px; max-width: 200px;
+}
 .chart-wrap { position: relative; height: 220px; }
 .pie-wrap { height: 200px; }
 .bar-wrap { height: 260px; }

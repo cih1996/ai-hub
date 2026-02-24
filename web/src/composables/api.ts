@@ -226,3 +226,19 @@ export const getTokenUsageRanking = (start?: string, end?: string, limit = 10) =
   const qs = params.toString()
   return request<SessionTokenRanking[]>(`/token-usage/ranking${qs ? '?' + qs : ''}`)
 }
+
+export interface HourlyTokenUsage {
+  hour: string
+  input_tokens: number
+  output_tokens: number
+  cache_creation_input_tokens: number
+  cache_read_input_tokens: number
+}
+export const getHourlyTokenUsage = (start?: string, end?: string, sessionId?: number) => {
+  const params = new URLSearchParams()
+  if (start) params.set('start', start)
+  if (end) params.set('end', end)
+  if (sessionId && sessionId > 0) params.set('session_id', String(sessionId))
+  const qs = params.toString()
+  return request<HourlyTokenUsage[]>(`/token-usage/hourly${qs ? '?' + qs : ''}`)
+}

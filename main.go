@@ -211,6 +211,7 @@ func main() {
 		v1.GET("/token-usage/system", api.GetSystemTokenUsage)
 		v1.GET("/token-usage/daily", api.GetDailyTokenUsage)
 		v1.GET("/token-usage/ranking", api.GetTokenUsageRanking)
+		v1.GET("/token-usage/hourly", api.GetHourlyTokenUsage)
 
 		// Anthropic API reverse proxy for precise token metering (Issue #72)
 		v1.Any("/proxy/anthropic/*path", api.HandleAnthropicProxy)
