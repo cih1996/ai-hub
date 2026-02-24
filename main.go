@@ -204,6 +204,11 @@ func main() {
 		v1.GET("/vector/status", api.VectorStatus)
 		v1.GET("/vector/health", api.VectorHealth)
 		v1.POST("/vector/restart", api.RestartVector)
+
+		// Token usage
+		v1.GET("/token-usage/message/:id", api.GetMessageTokenUsage)
+		v1.GET("/token-usage/session/:id", api.GetSessionTokenUsage)
+		v1.GET("/token-usage/system", api.GetSystemTokenUsage)
 	}
 
 	// WebSocket

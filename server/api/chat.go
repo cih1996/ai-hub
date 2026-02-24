@@ -348,6 +348,7 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 
 	var fullResponse string
 	var metadataJSON string
+	var usageInput, usageOutput int64
 
 	log.Printf("[chat] session=%d provider=%s mode=%s model=%s base_url=%s",
 		session.ID, provider.Name, provider.Mode, provider.ModelID, provider.BaseURL)
@@ -355,7 +356,7 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 	switch provider.Mode {
 	case "claude-code":
 		isResume := !isNewSession
-		fullResponse, metadataJSON, err = streamClaudeCode(ctx, provider, query, session.ClaudeSessionID, isResume, stream.Send, session.ID, session.WorkDir)
+		fullResponse, metadataJSON, usageInput, usageOutput, err = streamClaudeCode(ctx, provider, query, session.ClaudeSessionID, isResume, stream.Send, session.ID, session.WorkDir)
 	default:
 		err = streamOpenAI(ctx, provider, session.ID, func(chunk string) {
 			fullResponse += chunk
@@ -378,6 +379,13 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 				Metadata:  metadataJSON,
 			}
 			store.AddMessage(assistantMsg)
+			// Save token usage even on error (partial response)
+			if usageInput > 0 || usageOutput > 0 {
+				tu := &model.TokenUsage{SessionID: session.ID, MessageID: assistantMsg.ID, InputTokens: usageInput, OutputTokens: usageOutput}
+				store.AddTokenUsage(tu)
+				usageJSON, _ := json.Marshal(tu)
+				broadcast(WSMessage{Type: "token_usage", SessionID: session.ID, Content: string(usageJSON)})
+			}
 		}
 		broadcast(WSMessage{Type: "error", SessionID: session.ID, Content: err.Error()})
 		return
@@ -395,6 +403,13 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 			Metadata:  metadataJSON,
 		}
 		store.AddMessage(assistantMsg)
+		// Save and broadcast token usage
+		if usageInput > 0 || usageOutput > 0 {
+			tu := &model.TokenUsage{SessionID: session.ID, MessageID: assistantMsg.ID, InputTokens: usageInput, OutputTokens: usageOutput}
+			store.AddTokenUsage(tu)
+			usageJSON, _ := json.Marshal(tu)
+			broadcast(WSMessage{Type: "token_usage", SessionID: session.ID, Content: string(usageJSON)})
+		}
 	}
 
 	// Broadcast done so even reconnected/new WS clients receive it (stream.Send is single-client)
@@ -449,7 +464,7 @@ type StepsMetadata struct {
 	Thinking string     `json:"thinking,omitempty"` // truncated thinking summary
 }
 
-func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID string, resume bool, send func(WSMessage), sessID int64, workDir string) (string, string, error) {
+func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID string, resume bool, send func(WSMessage), sessID int64, workDir string) (string, string, int64, int64, error) {
 	req := core.ClaudeCodeRequest{
 		Query:        query,
 		SessionID:    sessionID,
@@ -483,6 +498,7 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 	toolInputs := make(map[int]string)
 	// Full text from assistant message (preserves newlines, used as fallback)
 	var assistantFullText string
+	var usageInput, usageOutput int64
 
 	err := claudeClient.StreamPersistent(ctx, req, func(line string) {
 		// First parse the top-level wrapper
@@ -493,6 +509,10 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 			Event            json.RawMessage `json:"event"`
 			ConversationName string          `json:"conversation_name"`
 			Error json.RawMessage `json:"error"`
+			Usage struct {
+				InputTokens  int64 `json:"input_tokens"`
+				OutputTokens int64 `json:"output_tokens"`
+			} `json:"usage"`
 		}
 		if err := json.Unmarshal([]byte(line), &wrapper); err != nil {
 			log.Printf("[claude] json parse error: %v, line: %.200s", err, line)
@@ -622,6 +642,12 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 			} else if wrapper.Subtype == "error" && wrapper.Result != "" {
 				send(WSMessage{Type: "error", SessionID: sessID, Content: wrapper.Result})
 			}
+			// Capture token usage
+			if wrapper.Usage.InputTokens > 0 || wrapper.Usage.OutputTokens > 0 {
+				usageInput = wrapper.Usage.InputTokens
+				usageOutput = wrapper.Usage.OutputTokens
+				log.Printf("[claude] session %d: usage input=%d output=%d", sessID, usageInput, usageOutput)
+			}
 
 		case "assistant":
 			// Parse assistant message to capture full text with formatting (newlines preserved)
@@ -661,7 +687,7 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 		}
 	}
 
-	return fullResponse, metadataJSON, err
+	return fullResponse, metadataJSON, usageInput, usageOutput, err
 }
 
 func streamOpenAI(ctx context.Context, p *model.Provider, sessionID int64, onChunk func(string)) error {

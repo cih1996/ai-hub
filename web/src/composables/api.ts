@@ -1,4 +1,4 @@
-import type { Provider, Session, Message, Trigger, Channel } from '../types'
+import type { Provider, Session, Message, Trigger, Channel, TokenUsage, TokenUsageStats } from '../types'
 
 const BASE = '/api/v1'
 
@@ -180,3 +180,16 @@ export const updateChannel = (id: number, ch: Partial<Channel>) =>
   request<Channel>(`/channels/${id}`, { method: 'PUT', body: JSON.stringify(ch) })
 export const deleteChannel = (id: number) =>
   request<{ ok: boolean }>(`/channels/${id}`, { method: 'DELETE' })
+
+// Token usage
+export const getMessageTokenUsage = (messageId: number) =>
+  request<TokenUsage>(`/token-usage/message/${messageId}`)
+export const getSessionTokenUsage = (sessionId: number) =>
+  request<{ stats: TokenUsageStats; records: TokenUsage[] }>(`/token-usage/session/${sessionId}`)
+export const getSystemTokenUsage = (start?: string, end?: string) => {
+  const params = new URLSearchParams()
+  if (start) params.set('start', start)
+  if (end) params.set('end', end)
+  const qs = params.toString()
+  return request<TokenUsageStats>(`/token-usage/system${qs ? '?' + qs : ''}`)
+}

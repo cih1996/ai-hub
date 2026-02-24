@@ -73,6 +73,7 @@ func DeleteSession(id int64) error {
 	if err != nil {
 		return err
 	}
+	DB.Exec(`DELETE FROM token_usage WHERE session_id = ?`, id)
 	_, err = DB.Exec(`DELETE FROM sessions WHERE id = ?`, id)
 	return err
 }

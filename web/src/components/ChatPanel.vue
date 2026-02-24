@@ -184,6 +184,18 @@ watch(() => store.streamingContent, scrollToBottom)
 watch(() => store.thinkingContent, scrollToBottom)
 watch(() => store.toolCalls.length, scrollToBottom)
 
+// Load token usage when session changes
+watch(() => store.currentSessionId, async (id) => {
+  if (id > 0) {
+    try {
+      const data = await api.getSessionTokenUsage(id)
+      for (const r of data.records) {
+        if (r.message_id) store.tokenUsageMap[r.message_id] = r
+      }
+    } catch { /* ignore */ }
+  }
+}, { immediate: true })
+
 function send() {
   const text = input.value.trim()
   if (!text || store.streaming) return
@@ -457,6 +469,10 @@ function formatToolInput(raw: string): string {
               v-html="renderMd(msg.content)"
             />
             <div v-else class="message-content">{{ msg.content }}</div>
+            <div v-if="msg.role === 'assistant' && store.tokenUsageMap[msg.id]" class="token-usage">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+              <span>{{ store.tokenUsageMap[msg.id]?.input_tokens?.toLocaleString() }} in / {{ store.tokenUsageMap[msg.id]?.output_tokens?.toLocaleString() }} out</span>
+            </div>
           </div>
         </div>
 
@@ -879,6 +895,11 @@ function formatToolInput(raw: string): string {
   font-size: 14px; line-height: 1.7; color: var(--text-primary); word-break: break-word;
 }
 .message.user .message-content { white-space: pre-wrap; }
+.token-usage {
+  display: flex; align-items: center; gap: 4px; margin-top: 6px;
+  font-size: 11px; color: var(--text-muted); user-select: none;
+}
+.token-usage svg { opacity: 0.6; }
 /* Activity block */
 .activity-block {
   background: var(--bg-tertiary);

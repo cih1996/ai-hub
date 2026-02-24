@@ -46,7 +46,7 @@ export interface StepsMetadata {
 }
 
 export interface WSMessage {
-  type: 'chat' | 'stop' | 'subscribe' | 'error' | 'chunk' | 'thinking' | 'tool_start' | 'tool_input' | 'tool_result' | 'done' | 'session_created' | 'streaming_status' | 'session_update' | 'session_title_update' | 'process_update' | 'message_queued'
+  type: 'chat' | 'stop' | 'subscribe' | 'error' | 'chunk' | 'thinking' | 'tool_start' | 'tool_input' | 'tool_result' | 'done' | 'session_created' | 'streaming_status' | 'session_update' | 'session_title_update' | 'process_update' | 'message_queued' | 'token_usage'
   session_id: number
   content: string
   tool_id?: string
@@ -84,4 +84,19 @@ export interface Channel {
   enabled: boolean
   created_at: string
   updated_at: string
+}
+
+export interface TokenUsage {
+  id: number
+  session_id: number
+  message_id: number
+  input_tokens: number
+  output_tokens: number
+  created_at: string
+}
+
+export interface TokenUsageStats {
+  total_input_tokens: number
+  total_output_tokens: number
+  count: number
 }

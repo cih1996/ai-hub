@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Session, Message, Provider, WSMessage, ToolCall, StepsMetadata } from '../types'
+import type { Session, Message, Provider, WSMessage, ToolCall, StepsMetadata, TokenUsage } from '../types'
 import * as api from '../composables/api'
 
 export const useChatStore = defineStore('chat', () => {
@@ -12,6 +12,8 @@ export const useChatStore = defineStore('chat', () => {
   const streamingContent = ref('')
   const thinkingContent = ref('')
   const toolCalls = ref<ToolCall[]>([])
+  const tokenUsageMap = ref<Record<number, TokenUsage>>({})
+  const latestTokenUsage = ref<TokenUsage | null>(null)
   const ws = ref<WebSocket | null>(null)
   const wsConnected = ref(false)
   let wsReconnectDelay = 1000 // exponential backoff: 1s → 2s → 4s → ... → 30s
@@ -130,6 +132,20 @@ export const useChatStore = defineStore('chat', () => {
             created_at: new Date().toISOString(),
           })
         }
+        return
+      }
+
+      // token_usage: store token usage for a message
+      if (msg.type === 'token_usage') {
+        try {
+          const usage: TokenUsage = JSON.parse(msg.content)
+          if (usage.message_id) {
+            tokenUsageMap.value[usage.message_id] = usage
+          }
+          if (msg.session_id === currentSessionId.value) {
+            latestTokenUsage.value = usage
+          }
+        } catch { /* ignore parse errors */ }
         return
       }
 
@@ -278,6 +294,7 @@ export const useChatStore = defineStore('chat', () => {
     streamingContent.value = ''
     thinkingContent.value = ''
     toolCalls.value = []
+    latestTokenUsage.value = null
     if (id === 0) {
       messages.value = []
       workDir.value = ''
@@ -285,6 +302,13 @@ export const useChatStore = defineStore('chat', () => {
       const s = sessions.value.find((s) => s.id === id)
       workDir.value = s?.work_dir || ''
       messages.value = await api.getMessages(id)
+      // Load token usage for this session's messages
+      try {
+        const resp = await api.getSessionTokenUsage(id)
+        for (const r of resp.records) {
+          if (r.message_id) tokenUsageMap.value[r.message_id] = r
+        }
+      } catch { /* ignore if no usage data */ }
       // Subscribe to check if this session is still streaming
       if (ws.value && ws.value.readyState === WebSocket.OPEN) {
         ws.value.send(JSON.stringify({ type: 'subscribe', session_id: id }))
@@ -300,6 +324,7 @@ export const useChatStore = defineStore('chat', () => {
     thinkingContent.value = ''
     toolCalls.value = []
     workDir.value = ''
+    latestTokenUsage.value = null
   }
 
   async function deleteSessionById(id: number) {
@@ -390,6 +415,8 @@ export const useChatStore = defineStore('chat', () => {
     streamingContent,
     thinkingContent,
     toolCalls,
+    tokenUsageMap,
+    latestTokenUsage,
     workDir,
     wsConnected,
     connectWS,

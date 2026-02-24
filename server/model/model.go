@@ -67,6 +67,23 @@ type Trigger struct {
 	UpdatedAt   string `json:"updated_at"`
 }
 
+// TokenUsage Token 用量记录
+type TokenUsage struct {
+	ID           int64     `json:"id"`
+	SessionID    int64     `json:"session_id"`
+	MessageID    int64     `json:"message_id"`
+	InputTokens  int64     `json:"input_tokens"`
+	OutputTokens int64     `json:"output_tokens"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+// TokenUsageStats 用量统计汇总
+type TokenUsageStats struct {
+	TotalInput  int64 `json:"total_input_tokens"`
+	TotalOutput int64 `json:"total_output_tokens"`
+	Count       int64 `json:"count"`
+}
+
 // Channel 通讯频道（IM 网关）
 type Channel struct {
 	ID        int64     `json:"id"`
