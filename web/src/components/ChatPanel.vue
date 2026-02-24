@@ -185,7 +185,7 @@ watch(() => store.thinkingContent, scrollToBottom)
 watch(() => store.toolCalls.length, scrollToBottom)
 
 // Session token stats
-const sessionTokenStats = ref<{ total_input_tokens: number; total_output_tokens: number; count: number } | null>(null)
+const sessionTokenStats = ref<{ total_input_tokens: number; total_output_tokens: number; total_cache_creation_tokens: number; total_cache_read_tokens: number; count: number } | null>(null)
 
 // Load token usage when session changes
 watch(() => store.currentSessionId, async (id) => {
@@ -206,6 +206,8 @@ watch(() => store.latestTokenUsage, (usage) => {
   if (usage && usage.session_id === store.currentSessionId && sessionTokenStats.value) {
     sessionTokenStats.value.total_input_tokens += usage.input_tokens
     sessionTokenStats.value.total_output_tokens += usage.output_tokens
+    sessionTokenStats.value.total_cache_creation_tokens = (sessionTokenStats.value.total_cache_creation_tokens || 0) + (usage.cache_creation_input_tokens || 0)
+    sessionTokenStats.value.total_cache_read_tokens = (sessionTokenStats.value.total_cache_read_tokens || 0) + (usage.cache_read_input_tokens || 0)
     sessionTokenStats.value.count++
   }
 })
@@ -214,6 +216,14 @@ function formatTokenNum(n: number): string {
   if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M'
   if (n >= 1000) return (n / 1000).toFixed(1) + 'K'
   return String(n)
+}
+
+function formatUsageLine(u: { input_tokens: number; output_tokens: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number }): string {
+  let parts = [`${u.input_tokens.toLocaleString()} in`]
+  if (u.cache_creation_input_tokens) parts.push(`${formatTokenNum(u.cache_creation_input_tokens)} cache_w`)
+  if (u.cache_read_input_tokens) parts.push(`${formatTokenNum(u.cache_read_input_tokens)} cache_r`)
+  parts.push(`${u.output_tokens.toLocaleString()} out`)
+  return parts.join(' / ')
 }
 
 function send() {
@@ -361,7 +371,7 @@ function formatToolInput(raw: string): string {
       <div class="header-right">
         <span v-if="sessionTokenStats" class="header-token-stats" title="本会话累计 Token 用量">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><circle cx="9" cy="9" r="1.5"/><circle cx="15" cy="9" r="1.5"/><circle cx="9" cy="15" r="1.5"/><circle cx="15" cy="15" r="1.5"/></svg>
-          {{ formatTokenNum(sessionTokenStats.total_input_tokens + sessionTokenStats.total_output_tokens) }}
+          {{ formatTokenNum(sessionTokenStats.total_input_tokens + sessionTokenStats.total_output_tokens + (sessionTokenStats.total_cache_creation_tokens || 0) + (sessionTokenStats.total_cache_read_tokens || 0)) }}
         </span>
         <span class="header-context">{{ contextCount }} 条上下文</span>
         <button
@@ -495,7 +505,7 @@ function formatToolInput(raw: string): string {
             <div v-else class="message-content">{{ msg.content }}</div>
             <div v-if="msg.role === 'assistant' && store.tokenUsageMap[msg.id]" class="token-usage">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><circle cx="9" cy="9" r="1.5"/><circle cx="15" cy="9" r="1.5"/><circle cx="9" cy="15" r="1.5"/><circle cx="15" cy="15" r="1.5"/></svg>
-              <span>{{ store.tokenUsageMap[msg.id]?.input_tokens?.toLocaleString() }} in / {{ store.tokenUsageMap[msg.id]?.output_tokens?.toLocaleString() }} out</span>
+              <span>{{ formatUsageLine(store.tokenUsageMap[msg.id]!) }}</span>
             </div>
           </div>
         </div>

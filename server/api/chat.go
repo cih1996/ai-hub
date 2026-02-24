@@ -348,7 +348,7 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 
 	var fullResponse string
 	var metadataJSON string
-	var usageInput, usageOutput int64
+	var usageInput, usageOutput, usageCacheCreation, usageCacheRead int64
 
 	log.Printf("[chat] session=%d provider=%s mode=%s model=%s base_url=%s",
 		session.ID, provider.Name, provider.Mode, provider.ModelID, provider.BaseURL)
@@ -380,8 +380,8 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 			}
 			store.AddMessage(assistantMsg)
 			// Save token usage even on error (partial response)
-			if usageInput > 0 || usageOutput > 0 {
-				tu := &model.TokenUsage{SessionID: session.ID, MessageID: assistantMsg.ID, InputTokens: usageInput, OutputTokens: usageOutput}
+			if usageInput > 0 || usageOutput > 0 || usageCacheCreation > 0 || usageCacheRead > 0 {
+				tu := &model.TokenUsage{SessionID: session.ID, MessageID: assistantMsg.ID, InputTokens: usageInput, OutputTokens: usageOutput, CacheCreationInputTokens: usageCacheCreation, CacheReadInputTokens: usageCacheRead}
 				store.AddTokenUsage(tu)
 				usageJSON, _ := json.Marshal(tu)
 				broadcast(WSMessage{Type: "token_usage", SessionID: session.ID, Content: string(usageJSON)})
@@ -404,8 +404,8 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 		}
 		store.AddMessage(assistantMsg)
 		// Save and broadcast token usage
-		if usageInput > 0 || usageOutput > 0 {
-			tu := &model.TokenUsage{SessionID: session.ID, MessageID: assistantMsg.ID, InputTokens: usageInput, OutputTokens: usageOutput}
+		if usageInput > 0 || usageOutput > 0 || usageCacheCreation > 0 || usageCacheRead > 0 {
+			tu := &model.TokenUsage{SessionID: session.ID, MessageID: assistantMsg.ID, InputTokens: usageInput, OutputTokens: usageOutput, CacheCreationInputTokens: usageCacheCreation, CacheReadInputTokens: usageCacheRead}
 			store.AddTokenUsage(tu)
 			usageJSON, _ := json.Marshal(tu)
 			broadcast(WSMessage{Type: "token_usage", SessionID: session.ID, Content: string(usageJSON)})
@@ -498,9 +498,17 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 	toolInputs := make(map[int]string)
 	// Full text from assistant message (preserves newlines, used as fallback)
 	var assistantFullText string
-	var usageInput, usageOutput int64
+	var usageInput, usageOutput, usageCacheCreation, usageCacheRead int64
 
 	err := claudeClient.StreamPersistent(ctx, req, func(line string) {
+		// Debug: log raw line type for troubleshooting (especially Windows)
+		if len(line) > 0 {
+			typeEnd := len(line)
+			if typeEnd > 80 {
+				typeEnd = 80
+			}
+			log.Printf("[claude-debug] session %d: raw line (len=%d): %.80s", sessID, len(line), line[:typeEnd])
+		}
 		// First parse the top-level wrapper
 		var wrapper struct {
 			Type             string          `json:"type"`
@@ -510,8 +518,10 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 			ConversationName string          `json:"conversation_name"`
 			Error json.RawMessage `json:"error"`
 			Usage struct {
-				InputTokens  int64 `json:"input_tokens"`
-				OutputTokens int64 `json:"output_tokens"`
+				InputTokens              int64 `json:"input_tokens"`
+				OutputTokens             int64 `json:"output_tokens"`
+				CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+				CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
 			} `json:"usage"`
 		}
 		if err := json.Unmarshal([]byte(line), &wrapper); err != nil {
@@ -562,13 +572,17 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 					} `json:"usage"`
 				} `json:"delta"`
 				Usage struct {
-					InputTokens  int64 `json:"input_tokens"`
-					OutputTokens int64 `json:"output_tokens"`
+					InputTokens              int64 `json:"input_tokens"`
+					OutputTokens             int64 `json:"output_tokens"`
+					CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+					CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
 				} `json:"usage"`
 				Message struct {
 					Usage struct {
-						InputTokens  int64 `json:"input_tokens"`
-						OutputTokens int64 `json:"output_tokens"`
+						InputTokens              int64 `json:"input_tokens"`
+						OutputTokens             int64 `json:"output_tokens"`
+						CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+						CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
 					} `json:"usage"`
 				} `json:"message"`
 			}
@@ -642,20 +656,20 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 				if inner.Usage.OutputTokens > 0 {
 					usageOutput += inner.Usage.OutputTokens
 				}
+				usageCacheCreation += inner.Usage.CacheCreationInputTokens
+				usageCacheRead += inner.Usage.CacheReadInputTokens
 			case "message_stop":
 				// Capture per-turn usage from message_stop
-				if inner.Usage.InputTokens > 0 || inner.Usage.OutputTokens > 0 {
-					usageInput += inner.Usage.InputTokens
-					usageOutput += inner.Usage.OutputTokens
-				}
+				usageInput += inner.Usage.InputTokens
+				usageOutput += inner.Usage.OutputTokens
+				usageCacheCreation += inner.Usage.CacheCreationInputTokens
+				usageCacheRead += inner.Usage.CacheReadInputTokens
 			case "message_start":
 				// Capture input_tokens from message_start (reported once per turn)
-				if inner.Message.Usage.InputTokens > 0 {
-					usageInput += inner.Message.Usage.InputTokens
-				}
-				if inner.Message.Usage.OutputTokens > 0 {
-					usageOutput += inner.Message.Usage.OutputTokens
-				}
+				usageInput += inner.Message.Usage.InputTokens
+				usageOutput += inner.Message.Usage.OutputTokens
+				usageCacheCreation += inner.Message.Usage.CacheCreationInputTokens
+				usageCacheRead += inner.Message.Usage.CacheReadInputTokens
 			}
 
 		case "result":
@@ -679,10 +693,12 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 				send(WSMessage{Type: "error", SessionID: sessID, Content: wrapper.Result})
 			}
 			// Capture token usage (accumulate, not overwrite)
-			if wrapper.Usage.InputTokens > 0 || wrapper.Usage.OutputTokens > 0 {
+			if wrapper.Usage.InputTokens > 0 || wrapper.Usage.OutputTokens > 0 || wrapper.Usage.CacheCreationInputTokens > 0 || wrapper.Usage.CacheReadInputTokens > 0 {
 				usageInput += wrapper.Usage.InputTokens
 				usageOutput += wrapper.Usage.OutputTokens
-				log.Printf("[claude] session %d: result usage +input=%d +output=%d (total: input=%d output=%d)", sessID, wrapper.Usage.InputTokens, wrapper.Usage.OutputTokens, usageInput, usageOutput)
+				usageCacheCreation += wrapper.Usage.CacheCreationInputTokens
+				usageCacheRead += wrapper.Usage.CacheReadInputTokens
+				log.Printf("[claude] session %d: result usage +input=%d +output=%d +cache_create=%d +cache_read=%d (total: input=%d output=%d cache_create=%d cache_read=%d)", sessID, wrapper.Usage.InputTokens, wrapper.Usage.OutputTokens, wrapper.Usage.CacheCreationInputTokens, wrapper.Usage.CacheReadInputTokens, usageInput, usageOutput, usageCacheCreation, usageCacheRead)
 			}
 
 		case "assistant":

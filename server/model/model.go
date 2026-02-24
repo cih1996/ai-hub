@@ -69,19 +69,23 @@ type Trigger struct {
 
 // TokenUsage Token 用量记录
 type TokenUsage struct {
-	ID           int64     `json:"id"`
-	SessionID    int64     `json:"session_id"`
-	MessageID    int64     `json:"message_id"`
-	InputTokens  int64     `json:"input_tokens"`
-	OutputTokens int64     `json:"output_tokens"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID                       int64     `json:"id"`
+	SessionID                int64     `json:"session_id"`
+	MessageID                int64     `json:"message_id"`
+	InputTokens              int64     `json:"input_tokens"`
+	OutputTokens             int64     `json:"output_tokens"`
+	CacheCreationInputTokens int64     `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int64     `json:"cache_read_input_tokens"`
+	CreatedAt                time.Time `json:"created_at"`
 }
 
 // TokenUsageStats 用量统计汇总
 type TokenUsageStats struct {
-	TotalInput  int64 `json:"total_input_tokens"`
-	TotalOutput int64 `json:"total_output_tokens"`
-	Count       int64 `json:"count"`
+	TotalInput        int64 `json:"total_input_tokens"`
+	TotalOutput       int64 `json:"total_output_tokens"`
+	TotalCacheCreation int64 `json:"total_cache_creation_tokens"`
+	TotalCacheRead    int64 `json:"total_cache_read_tokens"`
+	Count             int64 `json:"count"`
 }
 
 // Channel 通讯频道（IM 网关）

@@ -112,7 +112,7 @@ onMounted(async () => {
     try {
       const data = await api.getSessionTokenUsage(s.id)
       if (data.stats) {
-        store.sessionTokenTotals[s.id] = data.stats.total_input_tokens + data.stats.total_output_tokens
+        store.sessionTokenTotals[s.id] = data.stats.total_input_tokens + data.stats.total_output_tokens + (data.stats.total_cache_creation_tokens || 0) + (data.stats.total_cache_read_tokens || 0)
       }
     } catch { /* ignore */ }
   }

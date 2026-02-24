@@ -198,6 +198,8 @@ export interface DailyTokenUsage {
   date: string
   input_tokens: number
   output_tokens: number
+  cache_creation_input_tokens: number
+  cache_read_input_tokens: number
 }
 export const getDailyTokenUsage = (start?: string, end?: string) => {
   const params = new URLSearchParams()
@@ -212,6 +214,8 @@ export interface SessionTokenRanking {
   title: string
   input_tokens: number
   output_tokens: number
+  cache_creation_input_tokens: number
+  cache_read_input_tokens: number
   total: number
 }
 export const getTokenUsageRanking = (start?: string, end?: string, limit = 10) => {

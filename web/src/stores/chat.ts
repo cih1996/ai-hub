@@ -149,7 +149,7 @@ export const useChatStore = defineStore('chat', () => {
           // Update session totals cache
           if (!sessionTokenTotals.value) sessionTokenTotals.value = {}
           const prev = sessionTokenTotals.value[msg.session_id] || 0
-          sessionTokenTotals.value[msg.session_id] = prev + (usage.input_tokens || 0) + (usage.output_tokens || 0)
+          sessionTokenTotals.value[msg.session_id] = prev + (usage.input_tokens || 0) + (usage.output_tokens || 0) + (usage.cache_creation_input_tokens || 0) + (usage.cache_read_input_tokens || 0)
         } catch { /* ignore parse errors */ }
         return
       }

@@ -100,6 +100,10 @@ func migrate() error {
 	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_token_usage_session ON token_usage(session_id)`)
 	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_token_usage_created ON token_usage(created_at)`)
 
+	// Safe column migration: add cache token columns
+	DB.Exec(`ALTER TABLE token_usage ADD COLUMN cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0`)
+	DB.Exec(`ALTER TABLE token_usage ADD COLUMN cache_read_input_tokens INTEGER NOT NULL DEFAULT 0`)
+
 	// Channels table (IM gateway)
 	DB.Exec(`CREATE TABLE IF NOT EXISTS channels (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,

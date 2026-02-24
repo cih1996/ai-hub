@@ -7,7 +7,7 @@ import { Chart, registerables } from 'chart.js'
 
 Chart.register(...registerables)
 
-const stats = ref<TokenUsageStats>({ total_input_tokens: 0, total_output_tokens: 0, count: 0 })
+const stats = ref<TokenUsageStats>({ total_input_tokens: 0, total_output_tokens: 0, total_cache_creation_tokens: 0, total_cache_read_tokens: 0, count: 0 })
 const daily = ref<DailyTokenUsage[]>([])
 const ranking = ref<SessionTokenRanking[]>([])
 const loading = ref(true)
@@ -27,7 +27,7 @@ function getRange(): { start: string; end: string } {
   return { start: customStart.value, end: customEnd.value }
 }
 
-const totalTokens = computed(() => stats.value.total_input_tokens + stats.value.total_output_tokens)
+const totalTokens = computed(() => stats.value.total_input_tokens + stats.value.total_output_tokens + (stats.value.total_cache_creation_tokens || 0) + (stats.value.total_cache_read_tokens || 0))
 
 // Chart refs
 const areaCanvas = ref<HTMLCanvasElement>()
@@ -85,6 +85,8 @@ function renderAreaChart() {
       datasets: [
         { label: 'Input', data: daily.value.map(d => d.input_tokens), borderColor: '#7c6aef', backgroundColor: 'rgba(124,106,239,0.15)', fill: true, tension: 0.3 },
         { label: 'Output', data: daily.value.map(d => d.output_tokens), borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.15)', fill: true, tension: 0.3 },
+        { label: 'Cache Write', data: daily.value.map(d => d.cache_creation_input_tokens), borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.15)', fill: true, tension: 0.3 },
+        { label: 'Cache Read', data: daily.value.map(d => d.cache_read_input_tokens), borderColor: '#06b6d4', backgroundColor: 'rgba(6,182,212,0.15)', fill: true, tension: 0.3 },
       ],
     },
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top' } }, scales: { y: { beginAtZero: true } } },
@@ -113,8 +115,8 @@ function renderPieChart() {
   pieChart = new Chart(pieCanvas.value, {
     type: 'doughnut',
     data: {
-      labels: ['Input', 'Output'],
-      datasets: [{ data: [stats.value.total_input_tokens, stats.value.total_output_tokens], backgroundColor: ['rgba(124,106,239,0.8)', 'rgba(34,197,94,0.8)'] }],
+      labels: ['Input', 'Output', 'Cache Write', 'Cache Read'],
+      datasets: [{ data: [stats.value.total_input_tokens, stats.value.total_output_tokens, stats.value.total_cache_creation_tokens || 0, stats.value.total_cache_read_tokens || 0], backgroundColor: ['rgba(124,106,239,0.8)', 'rgba(34,197,94,0.8)', 'rgba(245,158,11,0.8)', 'rgba(6,182,212,0.8)'] }],
     },
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } },
   })
@@ -162,6 +164,14 @@ onUnmounted(() => { areaChart?.destroy(); barChart?.destroy(); pieChart?.destroy
           <div class="stat-value output">{{ formatNum(stats.total_output_tokens) }}</div>
         </div>
         <div class="stat-card">
+          <div class="stat-label">Cache Write</div>
+          <div class="stat-value cache-w">{{ formatNum(stats.total_cache_creation_tokens || 0) }}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Cache Read</div>
+          <div class="stat-value cache-r">{{ formatNum(stats.total_cache_read_tokens || 0) }}</div>
+        </div>
+        <div class="stat-card">
           <div class="stat-label">总计</div>
           <div class="stat-value">{{ formatNum(totalTokens) }}</div>
         </div>
@@ -191,16 +201,18 @@ onUnmounted(() => { areaChart?.destroy(); barChart?.destroy(); pieChart?.destroy
         <div class="chart-title">每日明细</div>
         <table class="detail-table">
           <thead>
-            <tr><th>日期</th><th>Input Tokens</th><th>Output Tokens</th><th>合计</th></tr>
+            <tr><th>日期</th><th>Input</th><th>Output</th><th>Cache Write</th><th>Cache Read</th><th>合计</th></tr>
           </thead>
           <tbody>
             <tr v-for="d in pagedRecords" :key="d.date">
               <td>{{ d.date }}</td>
               <td>{{ d.input_tokens.toLocaleString() }}</td>
               <td>{{ d.output_tokens.toLocaleString() }}</td>
-              <td>{{ (d.input_tokens + d.output_tokens).toLocaleString() }}</td>
+              <td>{{ (d.cache_creation_input_tokens || 0).toLocaleString() }}</td>
+              <td>{{ (d.cache_read_input_tokens || 0).toLocaleString() }}</td>
+              <td>{{ (d.input_tokens + d.output_tokens + (d.cache_creation_input_tokens || 0) + (d.cache_read_input_tokens || 0)).toLocaleString() }}</td>
             </tr>
-            <tr v-if="daily.length === 0"><td colspan="4" class="empty-row">暂无数据</td></tr>
+            <tr v-if="daily.length === 0"><td colspan="6" class="empty-row">暂无数据</td></tr>
           </tbody>
         </table>
         <div v-if="totalPages > 1" class="pagination">
@@ -216,7 +228,7 @@ onUnmounted(() => { areaChart?.destroy(); barChart?.destroy(); pieChart?.destroy
 </template>
 
 <style scoped>
-.token-usage-page { padding: 24px; max-width: 960px; margin: 0 auto; overflow-y: auto; height: 100vh; }
+.token-usage-page { padding: 24px; overflow-y: auto; height: 100vh; }
 .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
 .page-title { font-size: 18px; font-weight: 600; color: var(--text-primary); margin: 0; }
 .range-selector { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -232,7 +244,7 @@ onUnmounted(() => { areaChart?.destroy(); barChart?.destroy(); pieChart?.destroy
 }
 .date-sep { color: var(--text-muted); font-size: 12px; }
 .loading-text { text-align: center; color: var(--text-muted); padding: 60px 0; font-size: 14px; }
-.overview-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+.overview-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px; }
 .stat-card {
   background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius);
   padding: 16px; text-align: center;
@@ -241,6 +253,8 @@ onUnmounted(() => { areaChart?.destroy(); barChart?.destroy(); pieChart?.destroy
 .stat-value { font-size: 22px; font-weight: 700; color: var(--text-primary); }
 .stat-value.input { color: #7c6aef; }
 .stat-value.output { color: #22c55e; }
+.stat-value.cache-w { color: #f59e0b; }
+.stat-value.cache-r { color: #06b6d4; }
 /* __CONTINUE_STYLE__ */
 .charts-row { display: flex; gap: 12px; margin-bottom: 16px; }
 .chart-box {

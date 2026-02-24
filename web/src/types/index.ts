@@ -92,11 +92,15 @@ export interface TokenUsage {
   message_id: number
   input_tokens: number
   output_tokens: number
+  cache_creation_input_tokens: number
+  cache_read_input_tokens: number
   created_at: string
 }
 
 export interface TokenUsageStats {
   total_input_tokens: number
   total_output_tokens: number
+  total_cache_creation_tokens: number
+  total_cache_read_tokens: number
   count: number
 }
