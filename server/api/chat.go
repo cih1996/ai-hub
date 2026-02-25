@@ -368,7 +368,7 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 	}
 
 	if err != nil {
-		log.Printf("[chat] error: %v", err)
+		log.Printf("[chat] session=%d provider=%s error: %v", session.ID, provider.Name, err)
 		// Prefer proxy-captured usage on error path too (Issue #72)
 		if pu := ConsumeProxyUsage(session.ID); pu != nil {
 			usageInput = pu.InputTokens
@@ -524,11 +524,18 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 	err := claudeClient.StreamPersistent(ctx, req, func(line string) {
 		// Debug: log raw line type for troubleshooting (especially Windows)
 		if len(line) > 0 {
-			typeEnd := len(line)
-			if typeEnd > 80 {
-				typeEnd = 80
+			// Parse type first to decide log level
+			var peek struct {
+				Type   string `json:"type"`
+				Result string `json:"result"`
 			}
-			log.Printf("[claude-debug] session %d: raw line (len=%d): %.80s", sessID, len(line), line[:typeEnd])
+			if json.Unmarshal([]byte(line), &peek) == nil && (peek.Type == "result" || peek.Result == "error_during_execution" || peek.Result == "error") {
+				log.Printf("[claude-debug] session %d: RESULT line (len=%d): %s", sessID, len(line), line)
+			} else if len(line) > 200 {
+				log.Printf("[claude-debug] session %d: raw line (len=%d): %.200s...", sessID, len(line), line)
+			} else {
+				log.Printf("[claude-debug] session %d: raw line (len=%d): %s", sessID, len(line), line)
+			}
 		}
 		// First parse the top-level wrapper
 		var wrapper struct {

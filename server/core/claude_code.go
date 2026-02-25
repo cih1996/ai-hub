@@ -207,7 +207,7 @@ func (c *ClaudeCodeClient) StreamPersistent(ctx context.Context, req ClaudeCodeR
 
 	// CLI returned error_during_execution — session state corrupted, skip resume, start fresh
 	if strings.HasPrefix(err.Error(), "cli_error:") {
-		log.Printf("[pool] session %d: CLI error (%v), clearing session and rebuilding", req.HubSessionID, err)
+		log.Printf("[pool] session %d: CLI error detected (%v), killing process and rebuilding fresh session", req.HubSessionID, err)
 		Pool.Kill(req.HubSessionID)
 		req.Resume = false
 		req.SessionID = "" // force new CLI session
