@@ -136,3 +136,10 @@ a { color: var(--accent); text-decoration: none; }
   text-align: left;
 }
 .md-content th { background: var(--bg-tertiary); font-weight: 600; }
+
+/* Mobile global styles */
+@media (max-width: 768px) {
+  html { touch-action: manipulation; -webkit-text-size-adjust: 100%; }
+  body { padding-bottom: env(safe-area-inset-bottom); }
+  ::-webkit-scrollbar { width: 0; display: none; }
+}

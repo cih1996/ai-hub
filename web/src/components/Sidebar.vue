@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, inject, onMounted } from 'vue'
+import type { Ref } from 'vue'
 import type { Session } from '../types'
 import { useChatStore } from '../stores/chat'
 import { useRouter, useRoute } from 'vue-router'
 import * as api from '../composables/api'
 import { useTheme, type ThemeMode } from '../composables/theme'
+
+const isMobile = inject<Ref<boolean>>('isMobile', ref(false))
+const closeSidebar = inject<() => void>('closeSidebar', () => {})
 
 const { mode: themeMode, setMode } = useTheme()
 
@@ -78,11 +82,18 @@ const groupedSessions = computed<SessionGroup[]>(() => {
 function newChat() {
   store.newChat()
   router.push('/chat')
+  if (isMobile.value) closeSidebar()
 }
 
 function selectSession(id: number) {
   store.selectSession(id)
   router.push(`/chat/${id}`)
+  if (isMobile.value) closeSidebar()
+}
+
+function navTo(path: string) {
+  router.push(path)
+  if (isMobile.value) closeSidebar()
 }
 
 function formatTime(dateStr: string) {
@@ -139,7 +150,7 @@ onMounted(async () => {
         </svg>
         <span>新会话</span>
       </button>
-      <button class="nav-item" :class="{ active: isManage }" @click="router.push('/manage')">
+      <button class="nav-item" :class="{ active: isManage }" @click="navTo('/manage')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
           <polyline points="14 2 14 8 20 8"/>
@@ -148,14 +159,14 @@ onMounted(async () => {
         </svg>
         <span>管理</span>
       </button>
-      <button class="nav-item" :class="{ active: isSkills }" @click="router.push('/skills')">
+      <button class="nav-item" :class="{ active: isSkills }" @click="navTo('/skills')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M22 11.08V12a10 10 0 11-5.93-9.14"/>
           <polyline points="22 4 12 14.01 9 11.01"/>
         </svg>
         <span>技能</span>
       </button>
-      <button class="nav-item" :class="{ active: isMcp }" @click="router.push('/mcp')">
+      <button class="nav-item" :class="{ active: isMcp }" @click="navTo('/mcp')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/>
           <rect x="2" y="14" width="20" height="8" rx="2" ry="2"/>
@@ -164,20 +175,20 @@ onMounted(async () => {
         </svg>
         <span>MCP</span>
       </button>
-      <button class="nav-item" :class="{ active: isTriggers }" @click="router.push('/triggers')">
+      <button class="nav-item" :class="{ active: isTriggers }" @click="navTo('/triggers')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="12" cy="12" r="10"/>
           <polyline points="12 6 12 12 16 14"/>
         </svg>
         <span>定时</span>
       </button>
-      <button class="nav-item" :class="{ active: isChannels }" @click="router.push('/channels')">
+      <button class="nav-item" :class="{ active: isChannels }" @click="navTo('/channels')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
         </svg>
         <span>通讯</span>
       </button>
-      <button class="nav-item" :class="{ active: isTokenUsage }" @click="router.push('/token-usage')">
+      <button class="nav-item" :class="{ active: isTokenUsage }" @click="navTo('/token-usage')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <rect x="4" y="4" width="16" height="16" rx="2"/>
           <circle cx="9" cy="9" r="1.5"/><circle cx="15" cy="9" r="1.5"/>
@@ -235,7 +246,7 @@ onMounted(async () => {
 
     <div class="sidebar-footer">
       <div class="footer-row">
-        <button class="footer-btn" @click="router.push('/settings')">
+        <button class="footer-btn" @click="navTo('/settings')">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="12" cy="12" r="3"/>
             <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
@@ -531,5 +542,10 @@ onMounted(async () => {
 }
 .modal-btn.confirm:hover {
   opacity: 0.9;
+}
+/* Mobile: show delete button always (no hover on touch) */
+@media (max-width: 768px) {
+  .btn-delete { opacity: 0.6; }
+  .session-item .btn-delete { opacity: 0.6; }
 }
 </style>

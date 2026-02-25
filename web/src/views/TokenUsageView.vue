@@ -381,5 +381,12 @@ onUnmounted(() => { areaChart?.destroy(); barChart?.destroy(); pieChart?.destroy
   .overview-cards { grid-template-columns: repeat(2, 1fr); }
   .charts-row { flex-direction: column; }
 }
+@media (max-width: 768px) {
+  .token-usage-page { padding: 12px; }
+  .controls { flex-wrap: wrap; gap: 6px; }
+  .overview-cards { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .ranking-table { font-size: 12px; }
+  .ranking-table th, .ranking-table td { padding: 6px 8px; }
+}
 </style>
 

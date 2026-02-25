@@ -252,4 +252,10 @@ onMounted(load)
 .modal-btn.cancel:hover { color: var(--text-primary); }
 .modal-btn.confirm { color: var(--btn-text); background: var(--accent); }
 .modal-btn.confirm:hover { opacity: 0.9; }
+@media (max-width: 768px) {
+  .triggers-page { padding: 12px; }
+  .trigger-card { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .trigger-actions { width: 100%; justify-content: flex-end; }
+  .form-overlay .form-modal { width: 100vw; max-width: 100vw; max-height: 100vh; border-radius: 0; }
+}
 </style>

@@ -433,4 +433,18 @@ onMounted(async () => {
   font-size: 12px; color: var(--text-muted); line-height: 1.5;
   white-space: pre-wrap; word-break: break-all;
 }
+/* Mobile */
+@media (max-width: 768px) {
+  .manage-header { padding: 10px 12px; }
+  .tabs { flex-wrap: wrap; }
+  .search-inputs { flex-wrap: wrap; }
+  .search-input { min-width: 0; }
+  .manage-body { flex-direction: column; }
+  .file-list { width: 100%; min-width: 0; border-right: none; border-bottom: 1px solid var(--border); max-height: 180px; }
+  .editor-toolbar { flex-wrap: wrap; gap: 6px; padding: 8px 12px; }
+  .editor-filename { font-size: 11px; width: 100%; }
+  .editor-actions { width: 100%; justify-content: flex-end; }
+  .editor-textarea { padding: 12px; font-size: 12px; }
+  .vars-panel { padding: 6px 12px; }
+}
 </style>

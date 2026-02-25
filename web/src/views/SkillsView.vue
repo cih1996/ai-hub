@@ -106,5 +106,8 @@ onMounted(load)
 }
 .toggle input:checked + .toggle-slider { background: var(--accent); border-color: var(--accent); }
 .toggle input:checked + .toggle-slider::before { transform: translateX(16px); background: var(--btn-text); }
+@media (max-width: 768px) {
+  .skills-page { padding: 12px; }
+  .skill-card { flex-direction: column; align-items: flex-start; gap: 8px; }
+}
 </style>
-

@@ -653,4 +653,12 @@ ${smartDesc.value.trim()}
   cursor: pointer; transition: all var(--transition); flex-shrink: 0;
 }
 .btn-del-rule:hover { color: var(--danger); background: rgba(239,68,68,0.1); }
+@media (max-width: 768px) {
+  .channels-page { padding: 12px; }
+  .channel-card { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .channel-actions { width: 100%; justify-content: flex-end; }
+  .form-modal { width: 100vw; max-width: 100vw; max-height: 100vh; border-radius: 0; overflow-y: auto; }
+  .routing-rule { flex-direction: column; align-items: stretch; }
+  .rule-type, .rule-ids, .rule-session { width: 100%; }
+}
 </style>

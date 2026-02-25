@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import { ref, nextTick, watch, computed, onMounted } from 'vue'
+import { ref, nextTick, watch, computed, inject, onMounted } from 'vue'
+import type { Ref } from 'vue'
 import { marked } from 'marked'
 import { useChatStore } from '../stores/chat'
 import * as api from '../composables/api'
 import type { FileItem } from '../composables/api'
 import type { StepsMetadata } from '../types'
+
+const isMobile = inject<Ref<boolean>>('isMobile', ref(false))
+const openSidebar = inject<() => void>('openSidebar', () => {})
 
 const store = useChatStore()
 const input = ref('')
@@ -12,6 +16,7 @@ const messagesEl = ref<HTMLElement>()
 const textareaEl = ref<HTMLTextAreaElement>()
 const stepsExpanded = ref(false)
 const isComposing = ref(false)
+const moreMenuOpen = ref(false)
 // Track expanded state for historical message steps (by message id)
 const historyStepsExpanded = ref<Record<number, boolean>>({})
 
@@ -356,19 +361,26 @@ function formatToolInput(raw: string): string {
     <!-- Chat header bar -->
     <div v-if="store.currentSession" class="chat-header">
       <div class="header-left">
-        <input
-          v-if="editingTitle"
-          ref="titleInputEl"
-          v-model="titleInput"
-          class="header-title-input"
-          @keydown.enter="saveTitle"
-          @keydown.esc="cancelEditTitle"
-          @blur="saveTitle"
-        />
-        <div v-else class="header-title" @click="startEditTitle" title="点击编辑标题">{{ store.currentSession.title }}</div>
-        <div class="header-workdir">{{ displayWorkDir }}</div>
+        <button v-if="isMobile" class="btn-hamburger" @click="openSidebar" title="菜单">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+          </svg>
+        </button>
+        <div class="header-title-group">
+          <input
+            v-if="editingTitle"
+            ref="titleInputEl"
+            v-model="titleInput"
+            class="header-title-input"
+            @keydown.enter="saveTitle"
+            @keydown.esc="cancelEditTitle"
+            @blur="saveTitle"
+          />
+          <div v-else class="header-title" @click="startEditTitle" title="点击编辑标题">{{ store.currentSession.title }}</div>
+          <div class="header-workdir">{{ displayWorkDir }}</div>
+        </div>
       </div>
-      <div class="header-right">
+      <div class="header-right" v-if="!isMobile">
         <span v-if="sessionTokenStats" class="header-token-stats" title="本会话累计 Token 用量">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><circle cx="9" cy="9" r="1.5"/><circle cx="15" cy="9" r="1.5"/><circle cx="9" cy="15" r="1.5"/><circle cx="15" cy="15" r="1.5"/></svg>
           {{ formatTokenNum(sessionTokenStats.total_input_tokens + sessionTokenStats.total_output_tokens + (sessionTokenStats.total_cache_creation_tokens || 0) + (sessionTokenStats.total_cache_read_tokens || 0)) }}
@@ -411,6 +423,25 @@ function formatToolInput(raw: string): string {
           </svg>
           角色
         </button>
+      </div>
+      <!-- Mobile: more menu -->
+      <div v-if="isMobile" class="header-right-mobile">
+        <span v-if="sessionTokenStats" class="header-token-stats" title="Token">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><circle cx="9" cy="9" r="1.5"/><circle cx="15" cy="9" r="1.5"/><circle cx="9" cy="15" r="1.5"/><circle cx="15" cy="15" r="1.5"/></svg>
+          {{ formatTokenNum(sessionTokenStats.total_input_tokens + sessionTokenStats.total_output_tokens + (sessionTokenStats.total_cache_creation_tokens || 0) + (sessionTokenStats.total_cache_read_tokens || 0)) }}
+        </span>
+        <div class="more-menu-wrapper">
+          <button class="btn-more" @click="moreMenuOpen = !moreMenuOpen">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+              <circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/>
+            </svg>
+          </button>
+          <div v-if="moreMenuOpen" class="more-menu" @click="moreMenuOpen = false">
+            <button @click="store.compressContext()" :disabled="store.streaming">压缩上下文</button>
+            <button v-if="store.currentSession.work_dir" @click="openRulesModal">项目规则</button>
+            <button @click="openSessionRulesModal">会话角色</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -1179,5 +1210,55 @@ function formatToolInput(raw: string): string {
 @keyframes toast-in {
   from { opacity: 0; transform: translateX(-50%) translateY(-10px); }
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+/* Hamburger button */
+.btn-hamburger {
+  display: flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; border-radius: var(--radius);
+  color: var(--text-secondary); transition: all var(--transition); flex-shrink: 0;
+}
+.btn-hamburger:hover { background: var(--bg-hover); color: var(--text-primary); }
+.header-title-group { min-width: 0; flex: 1; }
+/* More menu */
+.header-right-mobile {
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+}
+.more-menu-wrapper { position: relative; }
+.btn-more {
+  display: flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; border-radius: var(--radius);
+  color: var(--text-secondary); transition: all var(--transition);
+}
+.btn-more:hover { background: var(--bg-hover); }
+.more-menu {
+  position: absolute; right: 0; top: 100%; margin-top: 4px;
+  background: var(--bg-secondary); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  min-width: 140px; z-index: 100; overflow: hidden;
+}
+.more-menu button {
+  display: block; width: 100%; text-align: left;
+  padding: 10px 14px; font-size: 13px; color: var(--text-secondary);
+  transition: all var(--transition);
+}
+.more-menu button:hover { background: var(--bg-hover); color: var(--text-primary); }
+.more-menu button:disabled { opacity: 0.4; cursor: not-allowed; }
+/* Mobile styles */
+@media (max-width: 768px) {
+  .chat-header { padding: 8px 12px; gap: 8px; }
+  .header-left { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+  .header-title { font-size: 13px; }
+  .header-workdir { display: none; }
+  .messages { padding: 12px 0; }
+  .messages-inner { padding: 0 12px; }
+  .quick-actions { padding: 32px 12px 12px; }
+  .quick-actions-grid { grid-template-columns: 1fr; max-width: 100%; }
+  .input-area { padding: 8px 12px 12px; padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+  .input-wrapper { border-radius: var(--radius); }
+  .rules-modal { width: 100vw; max-width: 100vw; height: 100vh; max-height: 100vh; border-radius: 0; }
+  .rules-modal-body { flex-direction: column; }
+  .rules-file-list { width: 100%; border-right: none; border-bottom: 1px solid var(--border); max-height: 120px; overflow-y: auto; display: flex; flex-wrap: wrap; padding: 6px; gap: 4px; }
+  .rules-file-item { white-space: nowrap; }
+  .message { gap: 8px; margin-bottom: 16px; }
 }
 </style>
