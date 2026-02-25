@@ -215,11 +215,20 @@ func (p *ProcessPool) spawnProcess(req ClaudeCodeRequest, isResume bool) (*Persi
 		cmd.Dir = home
 	}
 
-	// Filter out CLAUDECODE env var to avoid nested session detection
+	// Filter out env vars that interfere with subprocess behavior
 	for _, e := range os.Environ() {
-		if !strings.HasPrefix(e, "CLAUDECODE=") {
-			cmd.Env = append(cmd.Env, e)
+		if strings.HasPrefix(e, "CLAUDECODE=") {
+			continue
 		}
+		// OAuth mode: strip API key / auth token / base URL so CLI uses OAuth token exclusively
+		if req.AuthMode == "oauth" {
+			if strings.HasPrefix(e, "ANTHROPIC_API_KEY=") ||
+				strings.HasPrefix(e, "ANTHROPIC_AUTH_TOKEN=") ||
+				strings.HasPrefix(e, "ANTHROPIC_BASE_URL=") {
+				continue
+			}
+		}
+		cmd.Env = append(cmd.Env, e)
 	}
 	if req.AuthMode != "oauth" {
 		if req.APIKey != "" {
