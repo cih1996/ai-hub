@@ -205,3 +205,65 @@ func buildCondensedQuery(msgs []model.Message) string {
 	sb.WriteString("---\n请继续处理上面最后一条用户消息的请求。如果之前有未完成的任务，请继续完成。")
 	return sb.String()
 }
+
+// SwitchProvider handles PUT /api/v1/sessions/:id/provider
+// Switches the provider for a session: updates provider_id, kills pool process,
+// generates new claude_session_id, and saves a system message.
+func SwitchProvider(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid session id"})
+		return
+	}
+
+	if IsSessionStreaming(id) {
+		c.JSON(http.StatusConflict, gin.H{"error": "session is currently streaming"})
+		return
+	}
+
+	var body struct {
+		ProviderID string `json:"provider_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	session, err := store.GetSession(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return
+	}
+
+	// Verify provider exists
+	provider, err := store.GetProvider(body.ProviderID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "provider not found"})
+		return
+	}
+
+	// Update provider_id
+	session.ProviderID = body.ProviderID
+	if err := store.UpdateSession(session); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Kill existing process and generate new claude_session_id
+	core.Pool.Kill(id)
+	newUUID := uuid.New().String()
+	if err := store.UpdateClaudeSessionID(id, newUUID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Save system message
+	sysMsg := &model.Message{
+		SessionID: id,
+		Role:      "user",
+		Content:   fmt.Sprintf("【系统】模型已切换为 %s（%s），会话已重置。", provider.Name, provider.ModelID),
+	}
+	store.AddMessage(sysMsg)
+
+	c.JSON(http.StatusOK, gin.H{"ok": true, "provider_id": body.ProviderID, "provider_name": provider.Name})
+}

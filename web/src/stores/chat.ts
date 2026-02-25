@@ -402,6 +402,31 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  const currentProvider = computed(() => {
+    const s = currentSession.value
+    if (!s) return defaultProvider.value
+    return providers.value.find((p) => String(p.id) === String(s.provider_id)) || defaultProvider.value
+  })
+
+  async function switchProviderForSession(providerId: string) {
+    if (!currentSessionId.value || streaming.value) return
+    try {
+      await api.switchProvider(currentSessionId.value, providerId)
+      // Update local session's provider_id
+      const s = sessions.value.find((s) => s.id === currentSessionId.value)
+      if (s) s.provider_id = providerId
+      await selectSession(currentSessionId.value)
+    } catch (e: any) {
+      messages.value.push({
+        id: Date.now(),
+        session_id: currentSessionId.value,
+        role: 'assistant',
+        content: `切换失败: ${e.message}`,
+        created_at: new Date().toISOString(),
+      })
+    }
+  }
+
   return {
     sessions,
     currentSessionId,
@@ -427,5 +452,7 @@ export const useChatStore = defineStore('chat', () => {
     sendMessage,
     stopStreaming,
     compressContext,
+    currentProvider,
+    switchProviderForSession,
   }
 })

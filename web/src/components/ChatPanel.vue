@@ -17,6 +17,7 @@ const textareaEl = ref<HTMLTextAreaElement>()
 const stepsExpanded = ref(false)
 const isComposing = ref(false)
 const moreMenuOpen = ref(false)
+const providerDropdownOpen = ref(false)
 // Track expanded state for historical message steps (by message id)
 const historyStepsExpanded = ref<Record<number, boolean>>({})
 
@@ -240,6 +241,11 @@ function send() {
   autoResize()
 }
 
+async function onSwitchProvider(providerId: string) {
+  providerDropdownOpen.value = false
+  await store.switchProviderForSession(providerId)
+}
+
 function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter' && !e.shiftKey && !isComposing.value) {
     e.preventDefault()
@@ -390,7 +396,27 @@ function formatToolInput(raw: string): string {
             @blur="saveTitle"
           />
           <div v-else class="header-title" @click="startEditTitle" title="点击编辑标题">{{ store.currentSession.title }}</div>
-          <div class="header-workdir">{{ displayWorkDir }}</div>
+          <div class="header-sub-row">
+            <div class="header-workdir">{{ displayWorkDir }}</div>
+            <div class="provider-switcher" v-if="store.currentProvider">
+              <button class="provider-badge" @click="providerDropdownOpen = !providerDropdownOpen" :disabled="store.streaming" title="切换模型">
+                {{ store.currentProvider.name }} · {{ store.currentProvider.model_id }}
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+              </button>
+              <div v-if="providerDropdownOpen" class="provider-dropdown">
+                <button
+                  v-for="p in store.providers"
+                  :key="p.id"
+                  class="provider-option"
+                  :class="{ active: String(p.id) === String(store.currentSession.provider_id) }"
+                  @click="onSwitchProvider(String(p.id))"
+                >
+                  <span class="provider-option-name">{{ p.name }}</span>
+                  <span class="provider-option-model">{{ p.model_id }}</span>
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
       <div class="header-right" v-if="!isMobile">
@@ -453,6 +479,15 @@ function formatToolInput(raw: string): string {
             <button @click="store.compressContext()" :disabled="store.streaming">压缩上下文</button>
             <button v-if="store.currentSession.work_dir" @click="openRulesModal">项目规则</button>
             <button @click="openSessionRulesModal">会话角色</button>
+            <div class="more-menu-divider"></div>
+            <div class="more-menu-label">切换模型</div>
+            <button
+              v-for="p in store.providers"
+              :key="p.id"
+              :class="{ 'more-menu-active': String(p.id) === String(store.currentSession.provider_id) }"
+              :disabled="store.streaming"
+              @click.stop="onSwitchProvider(String(p.id)); moreMenuOpen = false"
+            >{{ p.name }} · {{ p.model_id }}</button>
           </div>
         </div>
       </div>
@@ -1224,6 +1259,36 @@ function formatToolInput(raw: string): string {
   from { opacity: 0; transform: translateX(-50%) translateY(-10px); }
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
+/* Provider switcher */
+.header-sub-row { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
+.provider-switcher { position: relative; }
+.provider-badge {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 11px; color: var(--accent); background: var(--accent-soft);
+  padding: 1px 8px; border-radius: var(--radius-sm); cursor: pointer;
+  transition: all var(--transition); white-space: nowrap;
+}
+.provider-badge:hover:not(:disabled) { opacity: 0.8; }
+.provider-badge:disabled { opacity: 0.5; cursor: not-allowed; }
+.provider-dropdown {
+  position: absolute; left: 0; top: 100%; margin-top: 4px;
+  background: var(--bg-secondary); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  min-width: 200px; z-index: 100; overflow: hidden;
+}
+.provider-option {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%; padding: 8px 12px; font-size: 12px; color: var(--text-secondary);
+  transition: all var(--transition); text-align: left;
+}
+.provider-option:hover { background: var(--bg-hover); color: var(--text-primary); }
+.provider-option.active { color: var(--accent); background: var(--accent-soft); }
+.provider-option-name { font-weight: 500; }
+.provider-option-model { font-size: 11px; color: var(--text-muted); }
+/* More menu extras */
+.more-menu-divider { height: 1px; background: var(--border); margin: 4px 0; }
+.more-menu-label { padding: 6px 14px; font-size: 11px; color: var(--text-muted); font-weight: 600; }
+.more-menu-active { color: var(--accent) !important; }
 /* Hamburger button */
 .btn-hamburger {
   display: flex; align-items: center; justify-content: center;
@@ -1262,6 +1327,8 @@ function formatToolInput(raw: string): string {
   .header-left { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
   .header-title { font-size: 13px; }
   .header-workdir { display: none; }
+  .provider-switcher { display: none; }
+  .header-sub-row { margin-top: 0; }
   .messages { padding: 12px 0; }
   .messages-inner { padding: 0 12px; }
   .quick-actions { padding: 32px 12px 12px; }

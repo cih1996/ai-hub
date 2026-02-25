@@ -45,6 +45,10 @@ export const getMessages = (sessionId: number) =>
 export const compressSession = (id: number) =>
   request<{ ok: boolean }>(`/sessions/${id}/compress`, { method: 'POST' })
 
+// Switch session provider
+export const switchProvider = (id: number, providerId: string) =>
+  request<{ ok: boolean; provider_id: string; provider_name: string }>(`/sessions/${id}/provider`, { method: 'PUT', body: JSON.stringify({ provider_id: providerId }) })
+
 // Chat
 export const sendChat = (sessionId: number, content: string, workDir?: string, sessionRules?: string) =>
   request<{ session_id: number; status: string }>('/chat/send', {
