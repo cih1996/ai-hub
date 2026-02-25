@@ -227,7 +227,7 @@ func (p *ProcessPool) spawnProcess(req ClaudeCodeRequest, isResume bool) (*Persi
 		}
 		// Route through local proxy for precise token metering (Issue #72)
 		if port := GetPort(); port != "" && req.HubSessionID > 0 {
-			proxyURL := fmt.Sprintf("http://localhost:%s/api/v1/proxy/anthropic?session_id=%d", port, req.HubSessionID)
+			proxyURL := fmt.Sprintf("http://localhost:%s/api/v1/proxy/s/%d/anthropic", port, req.HubSessionID)
 			cmd.Env = append(cmd.Env, "ANTHROPIC_BASE_URL="+proxyURL)
 		} else if req.BaseURL != "" {
 			cmd.Env = append(cmd.Env, "ANTHROPIC_BASE_URL="+req.BaseURL)

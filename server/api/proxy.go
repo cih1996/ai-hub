@@ -74,8 +74,11 @@ func ResetProxyUsage(sessionID int64) {
 // HandleAnthropicProxy handles /api/v1/proxy/anthropic/*path
 // It forwards requests to the real Anthropic API and captures usage from SSE responses.
 func HandleAnthropicProxy(c *gin.Context) {
-	// Extract session_id from query parameter
-	sidStr := c.Query("session_id")
+	// Extract session_id from path parameter (new) or query parameter (legacy)
+	sidStr := c.Param("session_id")
+	if sidStr == "" {
+		sidStr = c.Query("session_id")
+	}
 	sessionID, _ := strconv.ParseInt(sidStr, 10, 64)
 
 	// Get the sub-path after /api/v1/proxy/anthropic

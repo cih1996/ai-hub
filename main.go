@@ -215,7 +215,8 @@ func main() {
 		v1.GET("/token-usage/hourly", api.GetHourlyTokenUsage)
 
 		// Anthropic API reverse proxy for precise token metering (Issue #72)
-		v1.Any("/proxy/anthropic/*path", api.HandleAnthropicProxy)
+		v1.Any("/proxy/s/:session_id/anthropic/*path", api.HandleAnthropicProxy)
+		v1.Any("/proxy/anthropic/*path", api.HandleAnthropicProxy) // legacy compat
 	}
 
 	// WebSocket
