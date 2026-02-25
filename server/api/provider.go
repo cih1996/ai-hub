@@ -3,7 +3,9 @@ package api
 import (
 	"ai-hub/server/model"
 	"ai-hub/server/store"
+	"encoding/json"
 	"net/http"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -68,7 +70,14 @@ func DeleteProvider(c *gin.Context) {
 // GetClaudeAuthStatus GET /api/v1/claude/auth-status
 // Calls `claude auth status` and parses the output to return login state.
 func GetClaudeAuthStatus(c *gin.Context) {
-	out, err := exec.Command("claude", "auth", "status").CombinedOutput()
+	cmd := exec.Command("claude", "auth", "status")
+	// Filter out CLAUDECODE env var to avoid nested session detection
+	for _, e := range os.Environ() {
+		if !strings.HasPrefix(e, "CLAUDECODE=") {
+			cmd.Env = append(cmd.Env, e)
+		}
+	}
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"logged_in":   false,
@@ -77,37 +86,27 @@ func GetClaudeAuthStatus(c *gin.Context) {
 		})
 		return
 	}
-	output := string(out)
-	loggedIn := strings.Contains(output, "loggedIn") && strings.Contains(output, "true")
-	var authMethod, email string
-	for _, line := range strings.Split(output, "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "authMethod") || strings.Contains(line, "authMethod") {
-			parts := strings.SplitN(line, "=", 2)
-			if len(parts) == 2 {
-				authMethod = strings.TrimSpace(parts[1])
-			}
-			// Also try colon-separated
-			parts = strings.SplitN(line, ":", 2)
-			if len(parts) == 2 && authMethod == "" {
-				authMethod = strings.TrimSpace(parts[1])
-			}
-		}
-		if strings.HasPrefix(line, "email") || strings.Contains(line, "email") {
-			parts := strings.SplitN(line, "=", 2)
-			if len(parts) == 2 {
-				email = strings.TrimSpace(parts[1])
-			}
-			parts = strings.SplitN(line, ":", 2)
-			if len(parts) == 2 && email == "" {
-				email = strings.TrimSpace(parts[1])
-			}
-		}
+	// claude auth status outputs JSON: {"loggedIn":true,"authMethod":"oauth_token",...}
+	var parsed struct {
+		LoggedIn   bool   `json:"loggedIn"`
+		AuthMethod string `json:"authMethod"`
+		Email      string `json:"email"`
 	}
+	output := strings.TrimSpace(string(out))
+	if json.Unmarshal([]byte(output), &parsed) == nil {
+		c.JSON(http.StatusOK, gin.H{
+			"logged_in":   parsed.LoggedIn,
+			"auth_method": parsed.AuthMethod,
+			"email":       parsed.Email,
+			"raw":         output,
+		})
+		return
+	}
+	// Fallback: return raw output
 	c.JSON(http.StatusOK, gin.H{
-		"logged_in":   loggedIn,
-		"auth_method": authMethod,
-		"email":       email,
-		"raw":         strings.TrimSpace(output),
+		"logged_in":   strings.Contains(output, "true"),
+		"auth_method": "",
+		"email":       "",
+		"raw":         output,
 	})
 }
