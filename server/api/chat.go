@@ -358,7 +358,7 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 
 	switch provider.Mode {
 	case "claude-code":
-		isResume := !isNewSession
+		isResume := !isNewSession && core.Pool.HasProcess(session.ID)
 		fullResponse, metadataJSON, usageInput, usageOutput, usageCacheCreation, usageCacheRead, err = streamClaudeCode(ctx, provider, query, session.ClaudeSessionID, isResume, stream.Send, session.ID, session.WorkDir)
 	default:
 		err = streamOpenAI(ctx, provider, session.ID, func(chunk string) {

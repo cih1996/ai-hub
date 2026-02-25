@@ -120,6 +120,22 @@ func (p *ProcessPool) Kill(hubSessionID int64) {
 	}
 }
 
+// HasProcess returns true if a live (non-dead) process exists for the given hub session.
+func (p *ProcessPool) HasProcess(hubSessionID int64) bool {
+	if p == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	proc, ok := p.processes[hubSessionID]
+	if !ok {
+		return false
+	}
+	proc.mu.Lock()
+	defer proc.mu.Unlock()
+	return !proc.dead
+}
+
 // idleReaper periodically cleans up idle/dead processes
 func (p *ProcessPool) idleReaper() {
 	ticker := time.NewTicker(5 * time.Minute)
