@@ -201,6 +201,20 @@ func (c *ClaudeCodeClient) StreamPersistent(ctx context.Context, req ClaudeCodeR
 		return err
 	}
 
+	// CLI returned error_during_execution — session state corrupted, skip resume, start fresh
+	if strings.HasPrefix(err.Error(), "cli_error:") {
+		log.Printf("[pool] session %d: CLI error (%v), clearing session and rebuilding", req.HubSessionID, err)
+		Pool.Kill(req.HubSessionID)
+		req.Resume = false
+		req.SessionID = "" // force new CLI session
+		proc, err = Pool.GetOrCreate(req, false)
+		if err != nil {
+			log.Printf("[pool] new session failed, falling back: %v", err)
+			return c.Stream(ctx, req, onData)
+		}
+		return proc.SendAndStream(ctx, req.Query, onData)
+	}
+
 	// Process died unexpectedly — retry with resume, then fallback to new session
 	if proc.IsDead() {
 		Pool.Kill(req.HubSessionID)
@@ -213,6 +227,18 @@ func (c *ClaudeCodeClient) StreamPersistent(ctx context.Context, req ClaudeCodeR
 			err = proc.SendAndStream(ctx, req.Query, onData)
 			if err == nil {
 				return nil
+			}
+			// If resume returned cli_error, go straight to new session
+			if strings.HasPrefix(err.Error(), "cli_error:") {
+				log.Printf("[pool] session %d: resume returned CLI error, rebuilding fresh", req.HubSessionID)
+				Pool.Kill(req.HubSessionID)
+				req.Resume = false
+				req.SessionID = ""
+				proc, err = Pool.GetOrCreate(req, false)
+				if err != nil {
+					return c.Stream(ctx, req, onData)
+				}
+				return proc.SendAndStream(ctx, req.Query, onData)
 			}
 		}
 

@@ -26,6 +26,7 @@ type PersistentProcess struct {
 	lastActive     time.Time
 	startedAt      time.Time
 	dead           bool
+	pendingKill    bool          // deferred kill: set when Kill() called while busy
 	eventCh        chan string   // stdout NDJSON lines
 	doneCh         chan struct{} // process exit signal
 	promptFilePath string       // temp system prompt file, cleaned up on kill
@@ -91,20 +92,31 @@ func (p *ProcessPool) GetOrCreate(req ClaudeCodeRequest, isResume bool) (*Persis
 	return proc, nil
 }
 
-// Kill terminates the process for a given hub session ID
+// Kill terminates the process for a given hub session ID.
+// If the process is busy, it sets pendingKill and defers actual kill until SendAndStream completes.
 func (p *ProcessPool) Kill(hubSessionID int64) {
 	if p == nil {
 		return
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if proc, ok := p.processes[hubSessionID]; ok {
-		proc.kill()
-		delete(p.processes, hubSessionID)
-		log.Printf("[pool] killed process for session %d", hubSessionID)
-		if p.OnStateChange != nil {
-			go p.OnStateChange(hubSessionID, false, "")
-		}
+	proc, ok := p.processes[hubSessionID]
+	if !ok {
+		return
+	}
+	proc.mu.Lock()
+	if proc.state == "busy" && !proc.dead {
+		proc.pendingKill = true
+		proc.mu.Unlock()
+		log.Printf("[pool] session %d is busy, deferred kill (pendingKill=true)", hubSessionID)
+		return
+	}
+	proc.mu.Unlock()
+	proc.kill()
+	delete(p.processes, hubSessionID)
+	log.Printf("[pool] killed process for session %d", hubSessionID)
+	if p.OnStateChange != nil {
+		go p.OnStateChange(hubSessionID, false, "")
 	}
 }
 
@@ -123,7 +135,12 @@ func (p *ProcessPool) idleReaper() {
 				proc.mu.Lock()
 				idle := proc.state == "idle" && now.Sub(proc.lastActive) > 30*time.Minute
 				isDead := proc.dead
+				isBusy := proc.state == "busy"
 				proc.mu.Unlock()
+				if isBusy {
+					log.Printf("[pool] reaper: session %d is busy, skipping", id)
+					continue
+				}
 				if idle || isDead {
 					proc.kill()
 					delete(p.processes, id)
@@ -302,11 +319,23 @@ func (proc *PersistentProcess) SendAndStream(ctx context.Context, query string, 
 
 	defer func() {
 		proc.mu.Lock()
+		pending := proc.pendingKill
 		if !proc.dead {
 			proc.state = "idle"
 			proc.lastActive = time.Now()
 		}
 		proc.mu.Unlock()
+		// Execute deferred kill outside proc lock
+		if pending {
+			log.Printf("[pool] session %d: executing deferred kill after SendAndStream", proc.hubSessionID)
+			Pool.mu.Lock()
+			proc.kill()
+			delete(Pool.processes, proc.hubSessionID)
+			Pool.mu.Unlock()
+			if Pool.OnStateChange != nil {
+				go Pool.OnStateChange(proc.hubSessionID, false, "")
+			}
+		}
 	}()
 
 	// Write NDJSON message to stdin
@@ -354,9 +383,13 @@ drained:
 			}
 			onData(line)
 			var evt struct {
-				Type string `json:"type"`
+				Type   string `json:"type"`
+				Result string `json:"result"`
 			}
 			if json.Unmarshal([]byte(line), &evt) == nil && evt.Type == "result" {
+				if evt.Result == "error_during_execution" || evt.Result == "error" {
+					return fmt.Errorf("cli_error: %s", evt.Result)
+				}
 				return nil
 			}
 		case <-proc.doneCh:
