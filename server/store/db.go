@@ -116,6 +116,9 @@ func migrate() error {
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	)`)
 
+	// Provider: add auth_mode column (api_key | oauth)
+	DB.Exec(`ALTER TABLE providers ADD COLUMN auth_mode TEXT NOT NULL DEFAULT 'api_key'`)
+
 	return nil
 }
 

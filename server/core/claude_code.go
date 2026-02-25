@@ -46,6 +46,7 @@ type ClaudeCodeRequest struct {
 	MaxBudget    float64
 	BaseURL      string
 	APIKey       string
+	AuthMode     string // "api_key" | "oauth"
 	ModelID      string
 	WorkDir      string // 工作目录，空 = home
 	HubSessionID int64  // AI Hub 会话 ID，注入为环境变量
@@ -108,16 +109,19 @@ func (c *ClaudeCodeClient) Stream(ctx context.Context, req ClaudeCodeRequest, on
 
 	// Inject provider config as env vars
 	cmd.Env = os.Environ()
-	if req.APIKey != "" {
-		cmd.Env = append(cmd.Env, "ANTHROPIC_API_KEY="+req.APIKey)
+	if req.AuthMode != "oauth" {
+		if req.APIKey != "" {
+			cmd.Env = append(cmd.Env, "ANTHROPIC_API_KEY="+req.APIKey)
+		}
+		// Route through local proxy for precise token metering (Issue #72)
+		if port := GetPort(); port != "" && req.HubSessionID > 0 {
+			proxyURL := fmt.Sprintf("http://localhost:%s/api/v1/proxy/anthropic?session_id=%d", port, req.HubSessionID)
+			cmd.Env = append(cmd.Env, "ANTHROPIC_BASE_URL="+proxyURL)
+		} else if req.BaseURL != "" {
+			cmd.Env = append(cmd.Env, "ANTHROPIC_BASE_URL="+req.BaseURL)
+		}
 	}
-	// Route through local proxy for precise token metering (Issue #72)
-	if port := GetPort(); port != "" && req.HubSessionID > 0 {
-		proxyURL := fmt.Sprintf("http://localhost:%s/api/v1/proxy/anthropic?session_id=%d", port, req.HubSessionID)
-		cmd.Env = append(cmd.Env, "ANTHROPIC_BASE_URL="+proxyURL)
-	} else if req.BaseURL != "" {
-		cmd.Env = append(cmd.Env, "ANTHROPIC_BASE_URL="+req.BaseURL)
-	}
+	// OAuth mode: no API key or base URL injection, CLI uses local OAuth token
 	if req.HubSessionID > 0 {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("AI_HUB_SESSION_ID=%d", req.HubSessionID))
 	}

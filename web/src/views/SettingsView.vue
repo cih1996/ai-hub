@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useChatStore } from '../stores/chat'
 import type { Provider } from '../types'
 import * as api from '../composables/api'
+import type { ClaudeAuthStatus } from '../composables/api'
 import { useTheme, type ThemeMode } from '../composables/theme'
 
 const { mode: themeMode, setMode } = useTheme()
@@ -21,14 +22,26 @@ const editing = ref<Provider | null>(null)
 
 const form = ref({
   name: '',
+  auth_mode: 'api_key',
   base_url: '',
   api_key: '',
   model_id: '',
   is_default: false,
 })
 
+const authStatus = ref<ClaudeAuthStatus | null>(null)
+const authLoading = ref(false)
+
+async function loadAuthStatus() {
+  authLoading.value = true
+  try {
+    authStatus.value = await api.getClaudeAuthStatus()
+  } catch { authStatus.value = null }
+  finally { authLoading.value = false }
+}
+
 function resetForm() {
-  form.value = { name: '', base_url: '', api_key: '', model_id: '', is_default: false }
+  form.value = { name: '', auth_mode: 'api_key', base_url: '', api_key: '', model_id: '', is_default: false }
   editing.value = null
   showForm.value = false
 }
@@ -37,13 +50,19 @@ function editProvider(p: Provider) {
   editing.value = p
   form.value = {
     name: p.name,
+    auth_mode: p.auth_mode || 'api_key',
     base_url: p.base_url,
     api_key: p.api_key,
     model_id: p.model_id,
     is_default: p.is_default,
   }
   showForm.value = true
+  if (p.auth_mode === 'oauth') loadAuthStatus()
 }
+
+watch(() => form.value.auth_mode, (mode) => {
+  if (mode === 'oauth') loadAuthStatus()
+})
 
 async function saveProvider() {
   if (editing.value) {
@@ -107,6 +126,7 @@ onMounted(() => store.loadProviders())
                 {{ p.name }}
                 <span v-if="p.is_default" class="badge default">默认</span>
                 <span class="badge mode">{{ p.mode === 'claude-code' ? 'Claude Code' : '直连 API' }}</span>
+                <span v-if="p.auth_mode === 'oauth'" class="badge oauth">OAuth</span>
               </div>
               <div class="provider-meta">
                 {{ p.model_id }}
@@ -137,15 +157,39 @@ onMounted(() => store.loadProviders())
             </div>
 
             <div class="form-group">
-              <label>API 地址</label>
-              <input v-model="form.base_url" placeholder="https://api.example.com" />
-              <span class="hint">API 端点地址，留空则使用默认 Anthropic API。</span>
+              <label>认证模式</label>
+              <select v-model="form.auth_mode">
+                <option value="api_key">API Key</option>
+                <option value="oauth">订阅账号 (OAuth)</option>
+              </select>
+              <span class="hint">OAuth 模式使用本机已登录的 Claude 订阅账号，无需 API Key。</span>
             </div>
 
-            <div class="form-group">
-              <label>API 密钥</label>
-              <input v-model="form.api_key" type="password" placeholder="sk-..." />
-            </div>
+            <template v-if="form.auth_mode === 'oauth'">
+              <div class="form-group">
+                <label>登录状态</label>
+                <div v-if="authLoading" class="auth-status loading">检测中...</div>
+                <div v-else-if="authStatus?.logged_in" class="auth-status ok">
+                  ✓ 已登录 ({{ authStatus.auth_method }}<span v-if="authStatus.email">, {{ authStatus.email }}</span>)
+                </div>
+                <div v-else class="auth-status fail">
+                  ✗ 未登录，请在终端执行 <code>claude auth login</code>
+                </div>
+              </div>
+            </template>
+
+            <template v-if="form.auth_mode !== 'oauth'">
+              <div class="form-group">
+                <label>API 地址</label>
+                <input v-model="form.base_url" placeholder="https://api.example.com" />
+                <span class="hint">API 端点地址，留空则使用默认 Anthropic API。</span>
+              </div>
+
+              <div class="form-group">
+                <label>API 密钥</label>
+                <input v-model="form.api_key" type="password" placeholder="sk-..." />
+              </div>
+            </template>
 
             <div class="form-group">
               <label>模型 ID</label>
@@ -162,7 +206,7 @@ onMounted(() => store.loadProviders())
 
             <div class="form-actions">
               <button class="btn-cancel" @click="resetForm">取消</button>
-              <button class="btn-save" @click="saveProvider" :disabled="!form.name || !form.api_key || !form.model_id">
+              <button class="btn-save" @click="saveProvider" :disabled="!form.name || !form.model_id || (form.auth_mode !== 'oauth' && !form.api_key)">
                 保存
               </button>
             </div>
@@ -230,6 +274,12 @@ onMounted(() => store.loadProviders())
 }
 .badge.default { background: var(--accent-soft); color: var(--accent); }
 .badge.mode { background: var(--bg-tertiary); color: var(--text-secondary); }
+.badge.oauth { background: rgba(34,197,94,0.15); color: #22c55e; }
+.auth-status { font-size: 13px; padding: 8px 12px; border-radius: var(--radius); }
+.auth-status.loading { color: var(--text-muted); background: var(--bg-tertiary); }
+.auth-status.ok { color: #22c55e; background: rgba(34,197,94,0.1); }
+.auth-status.fail { color: var(--danger); background: rgba(239,68,68,0.1); }
+.auth-status code { font-size: 12px; background: var(--bg-tertiary); padding: 2px 6px; border-radius: 3px; }
 .provider-actions { display: flex; gap: 6px; flex-shrink: 0; margin-left: 12px; }
 .btn-sm {
   padding: 6px 12px; font-size: 12px; border-radius: var(--radius-sm);

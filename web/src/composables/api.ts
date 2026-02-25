@@ -22,6 +22,14 @@ export const updateProvider = (id: string, p: Partial<Provider>) =>
   request<Provider>(`/providers/${id}`, { method: 'PUT', body: JSON.stringify(p) })
 export const deleteProvider = (id: string) =>
   request<{ ok: boolean }>(`/providers/${id}`, { method: 'DELETE' })
+export interface ClaudeAuthStatus {
+  logged_in: boolean
+  auth_method: string
+  email: string
+  raw: string
+  error?: string
+}
+export const getClaudeAuthStatus = () => request<ClaudeAuthStatus>('/claude/auth-status')
 
 // Sessions
 export const listSessions = () => request<Session[]>('/sessions')

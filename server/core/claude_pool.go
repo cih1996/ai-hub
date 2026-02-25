@@ -205,16 +205,19 @@ func (p *ProcessPool) spawnProcess(req ClaudeCodeRequest, isResume bool) (*Persi
 			cmd.Env = append(cmd.Env, e)
 		}
 	}
-	if req.APIKey != "" {
-		cmd.Env = append(cmd.Env, "ANTHROPIC_API_KEY="+req.APIKey)
+	if req.AuthMode != "oauth" {
+		if req.APIKey != "" {
+			cmd.Env = append(cmd.Env, "ANTHROPIC_API_KEY="+req.APIKey)
+		}
+		// Route through local proxy for precise token metering (Issue #72)
+		if port := GetPort(); port != "" && req.HubSessionID > 0 {
+			proxyURL := fmt.Sprintf("http://localhost:%s/api/v1/proxy/anthropic?session_id=%d", port, req.HubSessionID)
+			cmd.Env = append(cmd.Env, "ANTHROPIC_BASE_URL="+proxyURL)
+		} else if req.BaseURL != "" {
+			cmd.Env = append(cmd.Env, "ANTHROPIC_BASE_URL="+req.BaseURL)
+		}
 	}
-	// Route through local proxy for precise token metering (Issue #72)
-	if port := GetPort(); port != "" && req.HubSessionID > 0 {
-		proxyURL := fmt.Sprintf("http://localhost:%s/api/v1/proxy/anthropic?session_id=%d", port, req.HubSessionID)
-		cmd.Env = append(cmd.Env, "ANTHROPIC_BASE_URL="+proxyURL)
-	} else if req.BaseURL != "" {
-		cmd.Env = append(cmd.Env, "ANTHROPIC_BASE_URL="+req.BaseURL)
-	}
+	// OAuth mode: no API key or base URL injection, CLI uses local OAuth token
 	if req.HubSessionID > 0 {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("AI_HUB_SESSION_ID=%d", req.HubSessionID))
 	}

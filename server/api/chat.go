@@ -491,6 +491,7 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 		Resume:       resume,
 		BaseURL:      p.BaseURL,
 		APIKey:       p.APIKey,
+		AuthMode:     p.AuthMode,
 		ModelID:      p.ModelID,
 		WorkDir:      workDir,
 		HubSessionID: sessID,

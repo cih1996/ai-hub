@@ -4,6 +4,8 @@ import (
 	"ai-hub/server/model"
 	"ai-hub/server/store"
 	"net/http"
+	"os/exec"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -61,4 +63,51 @@ func DeleteProvider(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// GetClaudeAuthStatus GET /api/v1/claude/auth-status
+// Calls `claude auth status` and parses the output to return login state.
+func GetClaudeAuthStatus(c *gin.Context) {
+	out, err := exec.Command("claude", "auth", "status").CombinedOutput()
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"logged_in":   false,
+			"auth_method": "",
+			"error":       strings.TrimSpace(string(out)),
+		})
+		return
+	}
+	output := string(out)
+	loggedIn := strings.Contains(output, "loggedIn") && strings.Contains(output, "true")
+	var authMethod, email string
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "authMethod") || strings.Contains(line, "authMethod") {
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				authMethod = strings.TrimSpace(parts[1])
+			}
+			// Also try colon-separated
+			parts = strings.SplitN(line, ":", 2)
+			if len(parts) == 2 && authMethod == "" {
+				authMethod = strings.TrimSpace(parts[1])
+			}
+		}
+		if strings.HasPrefix(line, "email") || strings.Contains(line, "email") {
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				email = strings.TrimSpace(parts[1])
+			}
+			parts = strings.SplitN(line, ":", 2)
+			if len(parts) == 2 && email == "" {
+				email = strings.TrimSpace(parts[1])
+			}
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"logged_in":   loggedIn,
+		"auth_method": authMethod,
+		"email":       email,
+		"raw":         strings.TrimSpace(output),
+	})
 }

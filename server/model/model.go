@@ -10,7 +10,8 @@ import (
 type Provider struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
-	Mode      string    `json:"mode"` // "claude-code" | "direct" (auto-detected, not set by user)
+	Mode      string    `json:"mode"`      // "claude-code" | "direct" (auto-detected, not set by user)
+	AuthMode  string    `json:"auth_mode"` // "api_key" (default) | "oauth" (Claude subscription)
 	BaseURL   string    `json:"base_url"`
 	APIKey    string    `json:"api_key"`
 	ModelID   string    `json:"model_id"`

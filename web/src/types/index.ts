@@ -2,6 +2,7 @@ export interface Provider {
   id: string
   name: string
   mode: string
+  auth_mode: string
   base_url: string
   api_key: string
   model_id: string
