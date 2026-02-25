@@ -387,18 +387,11 @@ export const useChatStore = defineStore('chat', () => {
 
   async function compressContext() {
     if (!currentSessionId.value || streaming.value) return
-    streaming.value = true
-    streamingContent.value = ''
-    thinkingContent.value = ''
-    toolCalls.value = []
     try {
       await api.compressSession(currentSessionId.value)
-      // Subscribe to receive the compressed stream response
-      if (ws.value && ws.value.readyState === WebSocket.OPEN) {
-        ws.value.send(JSON.stringify({ type: 'subscribe', session_id: currentSessionId.value }))
-      }
+      await selectSession(currentSessionId.value)
+      await loadSessions()
     } catch (e: any) {
-      streaming.value = false
       messages.value.push({
         id: Date.now(),
         session_id: currentSessionId.value,

@@ -156,14 +156,6 @@ func CompressSession(c *gin.Context) {
 		return
 	}
 
-	msgs, err := store.GetMessages(id)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get messages"})
-		return
-	}
-
-	condensedQuery := buildCondensedQuery(msgs)
-
 	newUUID := uuid.New().String()
 	core.Pool.Kill(id)
 	if err := store.UpdateClaudeSessionID(id, newUUID); err != nil {
@@ -180,11 +172,7 @@ func CompressSession(c *gin.Context) {
 	}
 	store.AddMessage(sysMsg)
 
-	// Kick off new stream with condensed query (new session, not resume)
-	triggerMsgID := store.GetLastUserMessageID(session.ID)
-	go runStream(session, condensedQuery, true, triggerMsgID)
-
-	c.JSON(http.StatusOK, gin.H{"ok": true, "message": "context compressed, new session started"})
+	c.JSON(http.StatusOK, gin.H{"ok": true, "message": "context compressed, session reset"})
 }
 
 // buildCondensedQuery takes recent messages and builds a condensed prompt for context recovery.
