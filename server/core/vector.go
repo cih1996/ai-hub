@@ -38,6 +38,9 @@ type VectorEngine struct {
 	disabled bool
 	err      string
 
+	// bootstrap lifecycle
+	bootstrapCancel context.CancelFunc
+
 	// paths
 	baseDir    string // ~/.ai-hub/vector-engine
 	venvDir    string
@@ -62,10 +65,16 @@ func InitVectorEngine(scriptDir string) {
 		scriptDir: scriptDir,
 	}
 
-	go Vector.bootstrap()
+	go func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		Vector.mu.Lock()
+		Vector.bootstrapCancel = cancel
+		Vector.mu.Unlock()
+		Vector.bootstrap(ctx)
+	}()
 }
 
-func (v *VectorEngine) bootstrap() {
+func (v *VectorEngine) bootstrap(ctx context.Context) {
 	log.Println("[vector] starting bootstrap...")
 
 	// Step 1: check python3 >= 3.10
@@ -76,12 +85,22 @@ func (v *VectorEngine) bootstrap() {
 	}
 	log.Printf("[vector] python: %s", pyPath)
 
+	if ctx.Err() != nil {
+		log.Println("[vector] bootstrap cancelled after step 1")
+		return
+	}
+
 	// Step 2: create/check venv
 	if err := v.ensureVenv(pyPath); err != nil {
 		v.setDisabled("venv setup failed: " + err.Error())
 		return
 	}
 	log.Printf("[vector] venv ready: %s", v.venvDir)
+
+	if ctx.Err() != nil {
+		log.Println("[vector] bootstrap cancelled after step 2")
+		return
+	}
 
 	// Step 3: install pip dependencies
 	if err := v.installDeps(); err != nil {
@@ -90,12 +109,22 @@ func (v *VectorEngine) bootstrap() {
 	}
 	log.Println("[vector] pip dependencies ready")
 
+	if ctx.Err() != nil {
+		log.Println("[vector] bootstrap cancelled after step 3")
+		return
+	}
+
 	// Step 4: download embedding model (may take minutes on first run)
 	if err := v.downloadModel(); err != nil {
 		v.setDisabled("model download failed: " + err.Error())
 		return
 	}
 	log.Println("[vector] embedding model ready")
+
+	if ctx.Err() != nil {
+		log.Println("[vector] bootstrap cancelled after step 4")
+		return
+	}
 
 	// Step 5: start FastAPI service
 	if err := v.startProcess(); err != nil {
@@ -111,8 +140,12 @@ func (v *VectorEngine) bootstrap() {
 		return
 	}
 
-	// Step 6: wait for health check (model already downloaded, only wait for server startup)
-	if err := v.waitHealthy(30 * time.Second); err != nil {
+	// Step 6: wait for health check (60s for slow Windows cold-start, Issue #83)
+	if err := v.waitHealthy(ctx, 60*time.Second); err != nil {
+		if ctx.Err() != nil {
+			log.Println("[vector] bootstrap cancelled during health check")
+			return
+		}
 		v.setDisabled("health check failed: " + err.Error())
 		v.Stop()
 		return
@@ -278,10 +311,13 @@ func (v *VectorEngine) startProcess() error {
 	return nil
 }
 
-func (v *VectorEngine) waitHealthy(timeout time.Duration) error {
+func (v *VectorEngine) waitHealthy(ctx context.Context, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	url := v.baseURL + "/health"
 	for time.Now().Before(deadline) {
+		if ctx.Err() != nil {
+			return fmt.Errorf("cancelled")
+		}
 		resp, err := http.Get(url)
 		if err == nil {
 			resp.Body.Close()
@@ -334,6 +370,15 @@ func (v *VectorEngine) Stop() {
 // Safe to call even when the engine is disabled or not ready.
 func (v *VectorEngine) Restart() {
 	log.Println("[vector] restart requested")
+
+	// Cancel any in-progress bootstrap to prevent state race
+	v.mu.Lock()
+	if v.bootstrapCancel != nil {
+		v.bootstrapCancel()
+		v.bootstrapCancel = nil
+	}
+	v.mu.Unlock()
+
 	v.Stop()
 
 	// Reset state
@@ -344,7 +389,12 @@ func (v *VectorEngine) Restart() {
 	v.cancel = nil
 	v.mu.Unlock()
 
-	v.bootstrap()
+	ctx, cancel := context.WithCancel(context.Background())
+	v.mu.Lock()
+	v.bootstrapCancel = cancel
+	v.mu.Unlock()
+
+	v.bootstrap(ctx)
 }
 
 // IsReady returns whether the vector engine is available

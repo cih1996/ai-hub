@@ -7,14 +7,24 @@ from embedding import EmbeddingModel, ChromaEmbeddingFunction
 
 
 class VectorDB:
+    # Shared singleton — avoids loading the model twice (saves ~25s on Windows)
+    _shared_model: EmbeddingModel | None = None
+    _shared_fn: ChromaEmbeddingFunction | None = None
+
+    @classmethod
+    def _get_shared_model(cls) -> tuple[EmbeddingModel, ChromaEmbeddingFunction]:
+        if cls._shared_model is None:
+            cls._shared_model = EmbeddingModel()
+            cls._shared_fn = ChromaEmbeddingFunction(cls._shared_model)
+        return cls._shared_model, cls._shared_fn
+
     def __init__(self, db_path: str = None, collection_name: str = "files"):
         self.db_path = db_path or os.getenv(
             "VECTOR_DB_PATH",
             os.path.expanduser("~/.ai-hub/vector-engine/data"),
         )
         os.makedirs(self.db_path, exist_ok=True)
-        self.embedding_model = EmbeddingModel()
-        self.embedding_fn = ChromaEmbeddingFunction(self.embedding_model)
+        self.embedding_model, self.embedding_fn = self._get_shared_model()
         self.client = chromadb.PersistentClient(path=self.db_path)
         self.collection = self.client.get_or_create_collection(
             name=collection_name, embedding_function=self.embedding_fn
