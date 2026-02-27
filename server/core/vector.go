@@ -407,6 +407,42 @@ func (v *VectorEngine) IsReady() bool {
 	return v.ready
 }
 
+// IsDisabled returns whether the vector engine is permanently disabled
+func (v *VectorEngine) IsDisabled() bool {
+	if v == nil {
+		return true
+	}
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	return v.disabled
+}
+
+// WaitReady blocks until the engine is ready, disabled, or timeout.
+// Returns true if ready, false otherwise.
+func (v *VectorEngine) WaitReady(timeout time.Duration) bool {
+	if v == nil {
+		return false
+	}
+	if v.IsReady() {
+		return true
+	}
+	if v.IsDisabled() {
+		return false
+	}
+	// Engine is bootstrapping — poll until ready, disabled, or timeout
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if v.IsReady() {
+			return true
+		}
+		if v.IsDisabled() {
+			return false
+		}
+		time.Sleep(1 * time.Second)
+	}
+	return v.IsReady()
+}
+
 // Status returns current engine status for API
 func (v *VectorEngine) Status() map[string]interface{} {
 	if v == nil {

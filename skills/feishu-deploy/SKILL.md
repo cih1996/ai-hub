@@ -11,11 +11,32 @@ description: "飞书自建应用全自动部署。当需要在飞书开放平台
 
 开始前必须确认以下条件，缺一不可：
 
-1. **浏览器登录状态**：用 `navigate_page` 打开 `https://open.larksuite.com/app?lang=zh-CN`，然后 `take_snapshot` 检查是否已登录
+1. **Chrome 调试模式**：执行以下命令检查 Chrome DevTools 协议是否可用
+   ```bash
+   curl -s --max-time 3 http://localhost:9222/json/version
+   ```
+   - 返回 JSON（含 `webSocketDebuggerUrl`）→ Chrome 调试模式正常，继续
+   - 连接失败或超时 → 自动启动 Chrome 调试模式：
+     - macOS：
+       ```bash
+       /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222 --user-data-dir="/tmp/chrome-debug" --no-first-run &
+       ```
+     - Windows：
+       ```bash
+       start chrome --remote-debugging-port=9222 --user-data-dir="%TEMP%\chrome-debug" --no-first-run
+       ```
+     - Linux：
+       ```bash
+       google-chrome --remote-debugging-port=9222 --user-data-dir="/tmp/chrome-debug" --no-first-run &
+       ```
+   - 启动后等待 3 秒，再次验证 `curl -s --max-time 3 http://localhost:9222/json/version`
+   - 仍然失败 → **停止**，告诉用户：「Chrome 调试模式启动失败，请手动执行上述命令后重试。」
+
+2. **浏览器登录状态**：用 `navigate_page` 打开 `https://open.larksuite.com/app?lang=zh-CN`，然后 `take_snapshot` 检查是否已登录
    - 如果看到登录页面或未登录提示，**立即停止**，告诉用户：「请先在浏览器中登录飞书开放平台（https://open.larksuite.com），登录完成后继续对话即可。」
    - 用户回复后重新检查登录状态，确认登录后再继续
 
-2. **必要参数**（由调用方提供）：
+3. **必要参数**（由调用方提供）：
    - `app_name`：应用名称
    - `app_desc`：应用描述
    - `webhook_url`（可选）：如果调用方提供了 webhook URL 则直接使用，否则在「网络环境检测」步骤自动获取

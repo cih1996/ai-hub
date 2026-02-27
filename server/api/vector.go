@@ -2,14 +2,39 @@ package api
 
 import (
 	"ai-hub/server/core"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
+
+// waitVectorReady waits for the vector engine to become ready during bootstrap.
+// Returns true if ready; returns false and writes 503 response if not.
+func waitVectorReady(c *gin.Context) bool {
+	if core.Vector == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "vector engine not initialized"})
+		return false
+	}
+	if core.Vector.IsReady() {
+		return true
+	}
+	if core.Vector.IsDisabled() {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "vector engine disabled"})
+		return false
+	}
+	// Engine is bootstrapping — wait up to 60s
+	log.Printf("[vector-api] engine not ready, waiting for bootstrap (request: %s)", c.Request.URL.Path)
+	if core.Vector.WaitReady(60 * time.Second) {
+		return true
+	}
+	c.JSON(http.StatusServiceUnavailable, gin.H{"error": "vector engine not ready (timeout waiting for bootstrap)"})
+	return false
+}
 
 // --- Vector MCP tool handlers ---
 // These are HTTP endpoints that Claude CLI calls via MCP configuration.
@@ -37,8 +62,7 @@ func SearchVector(c *gin.Context) {
 	if req.TopK <= 0 {
 		req.TopK = 5
 	}
-	if !core.Vector.IsReady() {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "vector engine not ready"})
+	if !waitVectorReady(c) {
 		return
 	}
 	results, err := core.Vector.Search(req.Scope, req.Query, req.TopK)
@@ -77,8 +101,7 @@ func vectorSearch(c *gin.Context, scope string) {
 	if req.TopK <= 0 {
 		req.TopK = 5
 	}
-	if !core.Vector.IsReady() {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "vector engine not ready"})
+	if !waitVectorReady(c) {
 		return
 	}
 	results, err := core.Vector.Search(scope, req.Query, req.TopK)
@@ -213,8 +236,7 @@ func vectorDelete(c *gin.Context, scope string) {
 // GET /api/v1/vector/stats?scope=knowledge
 func StatsVector(c *gin.Context) {
 	scope := c.DefaultQuery("scope", "knowledge")
-	if !core.Vector.IsReady() {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "vector engine not ready"})
+	if !waitVectorReady(c) {
 		return
 	}
 	stats, err := core.Vector.Stats(scope)
