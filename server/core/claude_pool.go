@@ -29,7 +29,7 @@ type PersistentProcess struct {
 	pendingKill    bool          // deferred kill: set when Kill() called while busy
 	eventCh        chan string   // stdout NDJSON lines
 	doneCh         chan struct{} // process exit signal
-	promptFilePath string       // temp system prompt file, cleaned up on kill
+	promptFilePath string        // temp system prompt file, cleaned up on kill
 }
 
 // ProcessPool manages persistent Claude CLI processes keyed by hub session ID
@@ -220,18 +220,19 @@ func (p *ProcessPool) spawnProcess(req ClaudeCodeRequest, isResume bool) (*Persi
 		if strings.HasPrefix(e, "CLAUDECODE=") {
 			continue
 		}
-		// OAuth mode: strip API key / auth token / base URL so CLI uses OAuth token exclusively
-		if req.AuthMode == "oauth" {
-			if strings.HasPrefix(e, "ANTHROPIC_API_KEY=") ||
-				strings.HasPrefix(e, "ANTHROPIC_AUTH_TOKEN=") ||
-				strings.HasPrefix(e, "ANTHROPIC_BASE_URL=") {
-				continue
-			}
+		// Always strip inherited ANTHROPIC_* and inject from provider config below.
+		if strings.HasPrefix(e, "ANTHROPIC_API_KEY=") ||
+			strings.HasPrefix(e, "ANTHROPIC_AUTH_TOKEN=") ||
+			strings.HasPrefix(e, "ANTHROPIC_BASE_URL=") {
+			continue
 		}
 		cmd.Env = append(cmd.Env, e)
 	}
 	if req.AuthMode != "oauth" {
-		if req.APIKey != "" {
+		if isOllamaBaseURL(req.BaseURL) {
+			cmd.Env = append(cmd.Env, "ANTHROPIC_AUTH_TOKEN=ollama")
+			cmd.Env = append(cmd.Env, "ANTHROPIC_API_KEY=")
+		} else if req.APIKey != "" {
 			cmd.Env = append(cmd.Env, "ANTHROPIC_API_KEY="+req.APIKey)
 		}
 		// Route through local proxy for precise token metering (Issue #72)

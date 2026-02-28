@@ -107,10 +107,14 @@ func (c *ClaudeCodeClient) Stream(ctx context.Context, req ClaudeCodeRequest, on
 		cmd.Dir = home
 	}
 
-	// Inject provider config as env vars
-	cmd.Env = os.Environ()
+	// Inject provider config as env vars (strip inherited ANTHROPIC_* first)
+	cmd.Env = filterAnthropicEnv(os.Environ())
 	if req.AuthMode != "oauth" {
-		if req.APIKey != "" {
+		if isOllamaBaseURL(req.BaseURL) {
+			// Ollama Anthropic-compatible mode requires auth token "ollama"
+			cmd.Env = append(cmd.Env, "ANTHROPIC_AUTH_TOKEN=ollama")
+			cmd.Env = append(cmd.Env, "ANTHROPIC_API_KEY=")
+		} else if req.APIKey != "" {
 			cmd.Env = append(cmd.Env, "ANTHROPIC_API_KEY="+req.APIKey)
 		}
 		// Route through local proxy for precise token metering (Issue #72)

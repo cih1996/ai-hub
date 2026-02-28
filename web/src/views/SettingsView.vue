@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { computed, ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useChatStore } from '../stores/chat'
 import type { Provider } from '../types'
@@ -62,6 +62,23 @@ function editProvider(p: Provider) {
 
 watch(() => form.value.auth_mode, (mode) => {
   if (mode === 'oauth') loadAuthStatus()
+})
+
+function isLikelyOllamaBaseURL(baseURL: string): boolean {
+  try {
+    const u = new URL(baseURL.trim())
+    const host = u.hostname.toLowerCase()
+    const port = u.port
+    if (host.includes('ollama')) return true
+    return (host === 'localhost' || host === '127.0.0.1') && port === '11434'
+  } catch {
+    return false
+  }
+}
+
+const needsApiKey = computed(() => {
+  if (form.value.auth_mode === 'oauth') return false
+  return !isLikelyOllamaBaseURL(form.value.base_url)
 })
 
 async function saveProvider() {
@@ -182,19 +199,20 @@ onMounted(() => store.loadProviders())
               <div class="form-group">
                 <label>API 地址</label>
                 <input v-model="form.base_url" placeholder="https://api.example.com" />
-                <span class="hint">API 端点地址，留空则使用默认 Anthropic API。</span>
+                <span class="hint">API 端点地址。Ollama 示例：`http://localhost:11434`。</span>
               </div>
 
               <div class="form-group">
                 <label>API 密钥</label>
                 <input v-model="form.api_key" type="password" placeholder="sk-..." />
+                <span class="hint">Ollama 可留空；其他供应商通常必填。</span>
               </div>
             </template>
 
             <div class="form-group">
               <label>模型 ID</label>
-              <input v-model="form.model_id" placeholder="claude-sonnet-4-20250514 / gpt-4o" />
-              <span class="hint">包含 "claude" 的模型自动通过 Claude Code CLI 路由。</span>
+              <input v-model="form.model_id" placeholder="claude-sonnet-4-20250514 / qwen3-coder / glm-4.7" />
+              <span class="hint">包含 `claude` 或使用 Ollama 端点时会自动通过 Claude Code CLI 路由。</span>
             </div>
 
             <div class="form-group checkbox">
@@ -206,7 +224,7 @@ onMounted(() => store.loadProviders())
 
             <div class="form-actions">
               <button class="btn-cancel" @click="resetForm">取消</button>
-              <button class="btn-save" @click="saveProvider" :disabled="!form.name || !form.model_id || (form.auth_mode !== 'oauth' && !form.api_key)">
+              <button class="btn-save" @click="saveProvider" :disabled="!form.name || !form.model_id || (needsApiKey && !form.api_key)">
                 保存
               </button>
             </div>

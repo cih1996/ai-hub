@@ -99,7 +99,12 @@ AI Hub 通过 go:embed 嵌入资源，启动时自动安装到 ~/.ai-hub/：
 - 注意上下文长度，单次验证完成后及时回复
 - 发布：验证通过 → `make release` → `gh release create` → `git push`
 
-## 6. 执行准则
+## 6. 脚本优先原则
+
+多步操作必须脚本化，详见「脚本引擎」Skill 手册（`~/.ai-hub/skills/ai-hub-scripts/SKILL.md`）。
+脚本仓库：`~/.ai-hub/scripts/`，索引：`~/.ai-hub/scripts/INDEX.md`。
+
+## 7. 执行准则
 
 - 任务前先读本文件 + `ls` 关键目录，确保认知最新
 - 上下文压缩后，第一步重新读本文件恢复认知

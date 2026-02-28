@@ -58,7 +58,9 @@ func (c *OpenAIClient) Stream(ctx context.Context, req OpenAIRequest, onData fun
 		return err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+req.APIKey)
+	if strings.TrimSpace(req.APIKey) != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+req.APIKey)
+	}
 
 	resp, err := http.DefaultClient.Do(httpReq)
 	if err != nil {

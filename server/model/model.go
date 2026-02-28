@@ -1,6 +1,7 @@
 package model
 
 import (
+	"net/url"
 	"strings"
 	"time"
 )
@@ -27,7 +28,26 @@ func (p *Provider) DetectMode() string {
 	if strings.Contains(lower, "claude") {
 		return "claude-code"
 	}
+	// Ollama 的 Anthropic 兼容端点也走 Claude Code CLI
+	if isOllamaBaseURL(p.BaseURL) {
+		return "claude-code"
+	}
 	return "direct"
+}
+
+func isOllamaBaseURL(raw string) bool {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	port := u.Port()
+
+	if strings.Contains(host, "ollama") {
+		return true
+	}
+	// Local Ollama default endpoint
+	return (host == "localhost" || host == "127.0.0.1") && port == "11434"
 }
 
 // Session 会话
@@ -36,8 +56,8 @@ type Session struct {
 	Title           string    `json:"title"`
 	ProviderID      string    `json:"provider_id"`
 	ClaudeSessionID string    `json:"claude_session_id"` // UUID for Claude Code CLI --session-id
-	WorkDir         string    `json:"work_dir"`           // 工作目录，空 = 系统默认(home)
-	GroupName       string    `json:"group_name"`         // 会话分组名称
+	WorkDir         string    `json:"work_dir"`          // 工作目录，空 = 系统默认(home)
+	GroupName       string    `json:"group_name"`        // 会话分组名称
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
 }
@@ -82,11 +102,11 @@ type TokenUsage struct {
 
 // TokenUsageStats 用量统计汇总
 type TokenUsageStats struct {
-	TotalInput        int64 `json:"total_input_tokens"`
-	TotalOutput       int64 `json:"total_output_tokens"`
+	TotalInput         int64 `json:"total_input_tokens"`
+	TotalOutput        int64 `json:"total_output_tokens"`
 	TotalCacheCreation int64 `json:"total_cache_creation_tokens"`
-	TotalCacheRead    int64 `json:"total_cache_read_tokens"`
-	Count             int64 `json:"count"`
+	TotalCacheRead     int64 `json:"total_cache_read_tokens"`
+	Count              int64 `json:"count"`
 }
 
 // Channel 通讯频道（IM 网关）

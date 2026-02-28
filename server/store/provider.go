@@ -37,6 +37,7 @@ func ListProviders() ([]model.Provider, error) {
 		if err := rows.Scan(&p.ID, &p.Name, &p.Mode, &p.BaseURL, &p.APIKey, &p.ModelID, &def, &p.AuthMode, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
+		p.Mode = p.DetectMode()
 		p.IsDefault = def == 1
 		list = append(list, p)
 	}
@@ -52,6 +53,7 @@ func GetProvider(id string) (*model.Provider, error) {
 	if err != nil {
 		return nil, err
 	}
+	p.Mode = p.DetectMode()
 	p.IsDefault = def == 1
 	return &p, nil
 }
@@ -85,6 +87,7 @@ func GetDefaultProvider() (*model.Provider, error) {
 	if err != nil {
 		return nil, err
 	}
+	p.Mode = p.DetectMode()
 	p.IsDefault = def == 1
 	return &p, nil
 }
