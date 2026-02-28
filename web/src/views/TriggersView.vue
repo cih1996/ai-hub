@@ -256,6 +256,6 @@ onMounted(load)
   .triggers-page { padding: 12px; }
   .trigger-card { flex-direction: column; align-items: flex-start; gap: 8px; }
   .trigger-actions { width: 100%; justify-content: flex-end; }
-  .form-overlay .form-modal { width: 100vw; max-width: 100vw; max-height: 100vh; border-radius: 0; }
+  .form-overlay .form-modal { width: 100vw; max-width: 100vw; max-height: 100vh; max-height: 100dvh; border-radius: 0; }
 }
 </style>

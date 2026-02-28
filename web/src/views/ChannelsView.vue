@@ -657,7 +657,7 @@ ${smartDesc.value.trim()}
   .channels-page { padding: 12px; }
   .channel-card { flex-direction: column; align-items: flex-start; gap: 8px; }
   .channel-actions { width: 100%; justify-content: flex-end; }
-  .form-modal { width: 100vw; max-width: 100vw; max-height: 100vh; border-radius: 0; overflow-y: auto; }
+  .form-modal { width: 100vw; max-width: 100vw; max-height: 100vh; max-height: 100dvh; border-radius: 0; overflow-y: auto; }
   .routing-rule { flex-direction: column; align-items: stretch; }
   .rule-type, .rule-ids, .rule-session { width: 100%; }
 }

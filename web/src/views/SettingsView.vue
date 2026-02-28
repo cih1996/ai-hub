@@ -220,6 +220,7 @@ onMounted(() => store.loadProviders())
 <style scoped>
 .settings-page {
   height: 100vh;
+  height: 100dvh;
   overflow-y: auto;
   background: var(--bg-primary);
 }
@@ -359,7 +360,7 @@ onMounted(() => store.loadProviders())
 }
 @media (max-width: 768px) {
   .settings-container { padding: 16px 12px; }
-  .form-modal { width: 100vw; max-width: 100vw; height: 100vh; max-height: 100vh; border-radius: 0; display: flex; flex-direction: column; }
+  .form-modal { width: 100vw; max-width: 100vw; height: 100vh; height: 100dvh; max-height: 100vh; max-height: 100dvh; border-radius: 0; display: flex; flex-direction: column; }
   .form-modal h3 { margin-bottom: 12px; }
   .provider-card { flex-direction: column; align-items: flex-start; gap: 10px; }
   .provider-actions { margin-left: 0; width: 100%; justify-content: flex-end; }

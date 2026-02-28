@@ -46,6 +46,7 @@ onUnmounted(() => {
 .layout {
   display: flex;
   height: 100vh;
+  height: 100dvh;
   width: 100vw;
   overflow: hidden;
 }
@@ -70,6 +71,7 @@ onUnmounted(() => {
   width: 280px !important;
   min-width: 280px !important;
   height: 100vh;
+  height: 100dvh;
   box-shadow: 4px 0 24px rgba(0, 0, 0, 0.3);
 }
 /* Transitions */

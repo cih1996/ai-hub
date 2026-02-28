@@ -306,7 +306,7 @@ onUnmounted(() => { areaChart?.destroy(); barChart?.destroy(); pieChart?.destroy
 </template>
 
 <style scoped>
-.token-usage-page { padding: 24px; overflow-y: auto; height: 100vh; }
+.token-usage-page { padding: 24px; overflow-y: auto; height: 100vh; height: 100dvh; }
 .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
 .page-title { font-size: 18px; font-weight: 600; color: var(--text-primary); margin: 0; }
 .range-selector { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }

@@ -283,6 +283,7 @@ onMounted(async () => {
   width: 260px;
   min-width: 260px;
   height: 100vh;
+  height: 100dvh;
   background: var(--bg-secondary);
   border-right: 1px solid var(--border);
   display: flex;

@@ -1335,7 +1335,8 @@ function formatToolInput(raw: string): string {
   .quick-actions-grid { grid-template-columns: 1fr; max-width: 100%; }
   .input-area { padding: 8px 12px 12px; padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
   .input-wrapper { border-radius: var(--radius); }
-  .rules-modal { width: 100vw; max-width: 100vw; height: 100vh; max-height: 100vh; border-radius: 0; }
+  .input-wrapper textarea { font-size: 16px; }
+  .rules-modal { width: 100vw; max-width: 100vw; height: 100vh; height: 100dvh; max-height: 100vh; max-height: 100dvh; border-radius: 0; }
   .rules-modal-body { flex-direction: column; }
   .rules-file-list { width: 100%; border-right: none; border-bottom: 1px solid var(--border); max-height: 120px; overflow-y: auto; display: flex; flex-wrap: wrap; padding: 6px; gap: 4px; }
   .rules-file-item { white-space: nowrap; }
