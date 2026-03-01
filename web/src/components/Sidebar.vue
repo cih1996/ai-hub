@@ -58,6 +58,11 @@ interface SessionGroup {
   sessions: Session[]
 }
 
+// Active group tab ('' = all sessions)
+const activeGroupTab = ref('')
+// Whether the session list is collapsed
+const sessionListCollapsed = ref(false)
+
 const groupedSessions = computed<SessionGroup[]>(() => {
   const groups = new Map<string, Session[]>()
   for (const s of store.sessions) {
@@ -81,6 +86,22 @@ const groupedSessions = computed<SessionGroup[]>(() => {
     result.push({ key, label, sessions: groups.get(key)! })
   }
   return result
+})
+
+// Unique named group tabs (only non-empty group_name, not work_dir paths)
+const namedGroupTabs = computed<string[]>(() => {
+  const names = new Set<string>()
+  for (const s of store.sessions) {
+    if (s.group_name) names.add(s.group_name)
+  }
+  return [...names].sort()
+})
+
+// Sessions filtered by the active group tab
+const displayGroupedSessions = computed<SessionGroup[]>(() => {
+  if (!activeGroupTab.value) return groupedSessions.value
+  const tab = activeGroupTab.value
+  return groupedSessions.value.filter((g) => g.key === tab)
 })
 
 function openNewChatDialog() {
@@ -209,9 +230,37 @@ onMounted(async () => {
       </button>
     </div>
 
-    <div class="session-list">
-      <template v-for="group in groupedSessions" :key="group.key">
-        <div v-if="groupedSessions.length > 1" class="group-label">{{ group.label }}</div>
+    <!-- Group tabs + collapse toggle -->
+    <div class="session-area-header">
+      <div v-if="namedGroupTabs.length > 0" class="group-tabs">
+        <button
+          class="group-tab"
+          :class="{ active: activeGroupTab === '' }"
+          @click="activeGroupTab = ''"
+        >全部</button>
+        <button
+          v-for="tab in namedGroupTabs"
+          :key="tab"
+          class="group-tab"
+          :class="{ active: activeGroupTab === tab }"
+          @click="activeGroupTab = tab"
+        >{{ tab }}</button>
+      </div>
+      <button
+        class="collapse-btn"
+        :title="sessionListCollapsed ? '展开会话列表' : '折叠会话列表'"
+        @click="sessionListCollapsed = !sessionListCollapsed"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline v-if="sessionListCollapsed" points="6 9 12 15 18 9"/>
+          <polyline v-else points="18 15 12 9 6 15"/>
+        </svg>
+      </button>
+    </div>
+
+    <div v-show="!sessionListCollapsed" class="session-list">
+      <template v-for="group in displayGroupedSessions" :key="group.key">
+        <div v-if="displayGroupedSessions.length > 1 || (activeGroupTab === '' && namedGroupTabs.length > 0)" class="group-label">{{ group.label }}</div>
         <div
           v-for="s in group.sessions"
           :key="s.id"
@@ -361,6 +410,57 @@ onMounted(async () => {
 .nav-item.active {
   background: var(--bg-active);
   color: var(--text-primary);
+}
+/* Session area header: group tabs + collapse btn */
+.session-area-header {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px 0;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.group-tabs {
+  display: flex;
+  flex: 1;
+  gap: 4px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.group-tab {
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+  transition: all var(--transition);
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+.group-tab:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+.group-tab.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.collapse-btn {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: all var(--transition);
+}
+.collapse-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
 }
 .session-list {
   flex: 1;

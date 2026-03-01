@@ -370,7 +370,11 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 	log.Printf("[chat] session=%d provider=%s mode=%s model=%s base_url=%s",
 		session.ID, provider.Name, provider.Mode, provider.ModelID, provider.BaseURL)
 
-	isResume := !isNewSession && core.Pool.HasProcess(session.ID)
+	// isResume: true when the persistent process is alive OR when the session has
+	// completed assistant messages in DB (i.e., we need to restore the conversation).
+	// For new sessions or sessions whose first turn was cancelled (no assistant messages),
+	// isResume stays false so the CLI starts fresh with --session-id instead of --resume.
+	isResume := !isNewSession && (core.Pool.HasProcess(session.ID) || store.HasAssistantMessages(session.ID))
 	fullResponse, metadataJSON, usageInput, usageOutput, usageCacheCreation, usageCacheRead, err = streamClaudeCode(ctx, provider, query, session.ClaudeSessionID, isResume, stream.Send, session.ID, session.WorkDir)
 
 	if err != nil {

@@ -47,6 +47,11 @@ export const getMessages = (sessionId: number) =>
 export const compressSession = (id: number) =>
   request<{ ok: boolean }>(`/sessions/${id}/compress`, { method: 'POST' })
 
+// Truncate messages from a given message ID inclusive (used for retry-message feature).
+// Deletes the user message itself AND all subsequent messages (AI reply etc.)
+export const truncateMessages = (sessionId: number, fromMsgId: number) =>
+  request<{ ok: boolean }>(`/sessions/${sessionId}/messages?from=${fromMsgId}`, { method: 'DELETE' })
+
 // Switch session provider
 export const switchProvider = (id: number, providerId: string) =>
   request<{ ok: boolean; provider_id: string; provider_name: string }>(`/sessions/${id}/provider`, { method: 'PUT', body: JSON.stringify({ provider_id: providerId }) })

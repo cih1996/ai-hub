@@ -76,9 +76,11 @@ func (p *ProcessPool) GetOrCreate(req ClaudeCodeRequest, isResume bool) (*Persis
 		if !proc.IsDead() {
 			return proc, nil
 		}
+		// Dead process found — clean up but don't override isResume.
+		// The caller (runStream) already decides whether to resume based on
+		// whether the session has completed assistant messages in DB.
 		proc.kill()
 		delete(p.processes, req.HubSessionID)
-		isResume = true
 	}
 
 	proc, err := p.spawnProcess(req, isResume)
