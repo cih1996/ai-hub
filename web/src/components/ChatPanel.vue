@@ -157,6 +157,17 @@ function renderMd(text: string): string {
 
 const allMessages = computed(() => [...store.messages])
 
+// ID of the last user message — retry button only shows on this one
+const lastUserMsgId = computed(() => {
+  const userMsgs = allMessages.value.filter((m) => m.role === 'user')
+  return userMsgs.length > 0 ? userMsgs[userMsgs.length - 1]!.id : -1
+})
+
+function retryMessage(content: string) {
+  if (store.streaming) return
+  store.sendMessage(content)
+}
+
 const stepCount = computed(() => {
   let n = store.toolCalls.length
   if (store.thinkingContent) n++
@@ -582,6 +593,19 @@ function formatToolInput(raw: string): string {
               v-html="renderMd(msg.content)"
             />
             <div v-else class="message-content">{{ msg.content }}</div>
+            <!-- Retry button: only for the last user message, hidden until hover -->
+            <button
+              v-if="msg.role === 'user' && msg.id === lastUserMsgId && !store.streaming"
+              class="btn-retry"
+              @click="retryMessage(msg.content)"
+              title="重新发送"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="1 4 1 10 7 10"/>
+                <path d="M3.51 15a9 9 0 1 0 .49-3.87"/>
+              </svg>
+              重新发送
+            </button>
             <div v-if="msg.role === 'assistant' && store.tokenUsageMap[msg.id]" class="token-usage">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><circle cx="9" cy="9" r="1.5"/><circle cx="15" cy="9" r="1.5"/><circle cx="9" cy="15" r="1.5"/><circle cx="15" cy="15" r="1.5"/></svg>
               <span>{{ formatUsageLine(store.tokenUsageMap[msg.id]!) }}</span>
@@ -1014,6 +1038,29 @@ function formatToolInput(raw: string): string {
   font-size: 14px; line-height: 1.7; color: var(--text-primary); word-break: break-word;
 }
 .message.user .message-content { white-space: pre-wrap; }
+/* Retry button on last user message */
+.btn-retry {
+  display: none;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.btn-retry:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.message.user:hover .btn-retry {
+  display: inline-flex;
+}
 .token-usage {
   display: flex; align-items: center; gap: 4px; margin-top: 6px;
   font-size: 11px; color: var(--text-muted); user-select: none;
