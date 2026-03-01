@@ -39,7 +39,7 @@ func waitVectorReady(c *gin.Context) bool {
 
 // isValidScope returns true if scope is one of the allowed forms:
 //   - "knowledge" or "memory" (global)
-//   - "<groupname>/knowledge" or "<groupname>/memory" (team-level)
+//   - "<groupname>/knowledge", "<groupname>/memory", or "<groupname>/rules" (team-level)
 //
 // groupname supports Unicode letters (including CJK/Chinese), digits, spaces,
 // hyphens and underscores. Path traversal sequences are rejected.
@@ -52,7 +52,7 @@ func isValidScope(scope string) bool {
 		return false
 	}
 	suffix := scope[idx+1:]
-	if suffix != "knowledge" && suffix != "memory" {
+	if suffix != "knowledge" && suffix != "memory" && suffix != "rules" {
 		return false
 	}
 	prefix := scope[:idx]
@@ -352,4 +352,73 @@ func VectorHealth(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, health)
+}
+
+// ListVectorFiles lists .md files in a vector scope directory (filesystem only, no engine required).
+// GET /api/v1/vector/list?scope=<scope>
+func ListVectorFiles(c *gin.Context) {
+	scope := c.Query("scope")
+	if scope == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "scope is required"})
+		return
+	}
+	if !isValidScope(scope) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid scope"})
+		return
+	}
+	home, _ := os.UserHomeDir()
+	dir := filepath.Join(home, ".ai-hub", scope)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			c.JSON(http.StatusOK, []string{})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	var files []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
+			files = append(files, e.Name())
+		}
+	}
+	if files == nil {
+		files = []string{}
+	}
+	c.JSON(http.StatusOK, files)
+}
+
+// ReadVector reads a single file from any valid scope (filesystem only, no engine required).
+// POST /api/v1/vector/read
+func ReadVector(c *gin.Context) {
+	var req struct {
+		FileName string `json:"file_name"`
+		Scope    string `json:"scope"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !isValidScope(req.Scope) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid scope"})
+		return
+	}
+	if req.FileName == "" || !validatePath(req.FileName) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "valid file_name is required"})
+		return
+	}
+	home, _ := os.UserHomeDir()
+	dir := filepath.Join(home, ".ai-hub", req.Scope)
+	path := filepath.Join(dir, req.FileName)
+	if !strings.HasPrefix(path, dir) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"file_name": req.FileName, "content": string(data), "scope": req.Scope})
 }

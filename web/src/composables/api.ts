@@ -191,6 +191,17 @@ export const vectorSearch = (scope: string, query: string, topK: number = 5) =>
 export const vectorHealth = () =>
   request<{ ready: boolean; disabled: boolean; error?: string; fix_hint?: string }>('/vector/health')
 
+// List .md files in a vector scope dir (knowledge / memory / rules)
+export const listVectorFiles = (scope: string) =>
+  request<string[]>(`/vector/list?scope=${encodeURIComponent(scope)}`)
+
+// Read a single file from any valid scope
+export const readVectorFile = (scope: string, fileName: string) =>
+  request<{ file_name: string; content: string; scope: string }>('/vector/read', {
+    method: 'POST',
+    body: JSON.stringify({ scope, file_name: fileName }),
+  })
+
 // Channels
 export const listChannels = () => request<Channel[]>('/channels')
 export const createChannel = (ch: Partial<Channel>) =>

@@ -209,6 +209,8 @@ func main() {
 		v1.GET("/vector/status", api.VectorStatus)
 		v1.GET("/vector/health", api.VectorHealth)
 		v1.POST("/vector/restart", api.RestartVector)
+		v1.GET("/vector/list", api.ListVectorFiles)
+		v1.POST("/vector/read", api.ReadVector)
 
 		// Token usage
 		v1.GET("/token-usage/message/:id", api.GetMessageTokenUsage)
