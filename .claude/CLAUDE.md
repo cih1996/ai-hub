@@ -82,6 +82,37 @@ AI Hub 通过 go:embed 嵌入资源，启动时自动安装到 ~/.ai-hub/：
 - 提交：fix(scope): description (closes #issue)
 - 发布流程：合并 main → 打 tag → 编译 release → 推送 tag → 创建 GitHub Release
 
+### 分支卫生检查（技术维护每次开始工作前必须执行，禁止跳过）
+
+**背景：流程中断（超时、崩溃等）可能导致上一轮分支尚未合并，贸然新开分支会造成多分支代码分叉。**
+
+执行步骤：
+
+```bash
+# 1. 查看所有本地分支
+git branch
+
+# 2. 查看未合并到 main 的分支
+git branch --no-merged main
+```
+
+判断与处置规则：
+
+| 情况 | 处置方式 |
+|------|----------|
+| 所有分支已合并 main，当前在 main | 正常新开分支：`git checkout main && git pull && git checkout -b fix/<issue>-<简述>` |
+| 存在未合并分支，且该分支对应当前要修复的 Issue | 切换到该分支继续提交，无需新开：`git checkout <已有分支>` |
+| 存在未合并分支，但不属于当前 Issue | **禁止新开分支**，立即通知测试工程师（#23）处理 |
+
+通知测试工程师格式：
+```bash
+curl -X POST http://localhost:8080/api/v1/chat/send \
+  -H "Content-Type: application/json" \
+  -d '{"session_id": 23, "content": "【技术】检测到未合并分支：<分支名>，请优先完成验证并完成 PR 合并，合并后通知我继续新任务"}'
+```
+
+- 发送通知后停止当前任务，等待测试工程师主动回调"已合并"后再继续
+
 ### API 开发规范
 - PUT update 接口必须先读数据库再 merge，禁止直接 bind 覆盖（防零值覆盖未传字段）
 
