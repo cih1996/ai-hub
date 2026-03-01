@@ -128,6 +128,7 @@ func main() {
 		v1.GET("/providers", api.ListProviders)
 		v1.POST("/providers", api.CreateProvider)
 		v1.PUT("/providers/:id", api.UpdateProvider)
+		v1.PUT("/providers/:id/default", api.SetProviderDefault)
 		v1.DELETE("/providers/:id", api.DeleteProvider)
 		v1.GET("/claude/auth-status", api.GetClaudeAuthStatus)
 

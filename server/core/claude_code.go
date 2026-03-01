@@ -47,6 +47,7 @@ type ClaudeCodeRequest struct {
 	BaseURL      string
 	APIKey       string
 	AuthMode     string // "api_key" | "oauth"
+	ProxyURL     string // optional subprocess proxy, e.g. http://127.0.0.1:7890
 	ModelID      string
 	WorkDir      string // 工作目录，空 = home
 	HubSessionID int64  // AI Hub 会话 ID，注入为环境变量
@@ -125,6 +126,7 @@ func (c *ClaudeCodeClient) Stream(ctx context.Context, req ClaudeCodeRequest, on
 			cmd.Env = append(cmd.Env, "ANTHROPIC_BASE_URL="+req.BaseURL)
 		}
 	}
+	cmd.Env = applyProviderProxyEnv(cmd.Env, req.ProxyURL)
 	// OAuth mode: no API key or base URL injection, CLI uses local OAuth token
 	if req.HubSessionID > 0 {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("AI_HUB_SESSION_ID=%d", req.HubSessionID))

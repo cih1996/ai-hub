@@ -215,15 +215,9 @@ func (p *ProcessPool) spawnProcess(req ClaudeCodeRequest, isResume bool) (*Persi
 		cmd.Dir = home
 	}
 
-	// Filter out env vars that interfere with subprocess behavior
-	for _, e := range os.Environ() {
+	// Filter out env vars that interfere with subprocess behavior.
+	for _, e := range filterAnthropicEnv(os.Environ()) {
 		if strings.HasPrefix(e, "CLAUDECODE=") {
-			continue
-		}
-		// Always strip inherited ANTHROPIC_* and inject from provider config below.
-		if strings.HasPrefix(e, "ANTHROPIC_API_KEY=") ||
-			strings.HasPrefix(e, "ANTHROPIC_AUTH_TOKEN=") ||
-			strings.HasPrefix(e, "ANTHROPIC_BASE_URL=") {
 			continue
 		}
 		cmd.Env = append(cmd.Env, e)
@@ -243,6 +237,7 @@ func (p *ProcessPool) spawnProcess(req ClaudeCodeRequest, isResume bool) (*Persi
 			cmd.Env = append(cmd.Env, "ANTHROPIC_BASE_URL="+req.BaseURL)
 		}
 	}
+	cmd.Env = applyProviderProxyEnv(cmd.Env, req.ProxyURL)
 	// OAuth mode: no API key or base URL injection, CLI uses local OAuth token
 	if req.HubSessionID > 0 {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("AI_HUB_SESSION_ID=%d", req.HubSessionID))

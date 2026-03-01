@@ -22,6 +22,8 @@ export const updateProvider = (id: string, p: Partial<Provider>) =>
   request<Provider>(`/providers/${id}`, { method: 'PUT', body: JSON.stringify(p) })
 export const deleteProvider = (id: string) =>
   request<{ ok: boolean }>(`/providers/${id}`, { method: 'DELETE' })
+export const setProviderDefault = (id: string) =>
+  request<{ ok: boolean }>(`/providers/${id}/default`, { method: 'PUT' })
 export interface ClaudeAuthStatus {
   logged_in: boolean
   auth_method: string
@@ -50,10 +52,10 @@ export const switchProvider = (id: number, providerId: string) =>
   request<{ ok: boolean; provider_id: string; provider_name: string }>(`/sessions/${id}/provider`, { method: 'PUT', body: JSON.stringify({ provider_id: providerId }) })
 
 // Chat
-export const sendChat = (sessionId: number, content: string, workDir?: string, sessionRules?: string) =>
+export const sendChat = (sessionId: number, content: string, workDir?: string, sessionRules?: string, providerId?: string) =>
   request<{ session_id: number; status: string }>('/chat/send', {
     method: 'POST',
-    body: JSON.stringify({ session_id: sessionId, content, work_dir: workDir || '', session_rules: sessionRules || '' }),
+    body: JSON.stringify({ session_id: sessionId, content, work_dir: workDir || '', session_rules: sessionRules || '', provider_id: providerId || '' }),
   })
 
 // Status

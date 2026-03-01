@@ -21,6 +21,7 @@ export const useChatStore = defineStore('chat', () => {
   let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null
 
   const workDir = ref('')
+  const pendingProviderId = ref('')  // provider selected in new-chat dialog
 
   const currentSession = computed(() =>
     sessions.value.find((s) => s.id === currentSessionId.value)
@@ -321,7 +322,7 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function newChat() {
+  function newChat(providerId?: string) {
     currentSessionId.value = 0
     messages.value = []
     streaming.value = false
@@ -330,6 +331,7 @@ export const useChatStore = defineStore('chat', () => {
     toolCalls.value = []
     workDir.value = ''
     latestTokenUsage.value = null
+    pendingProviderId.value = providerId || ''
   }
 
   async function deleteSessionById(id: number) {
@@ -357,9 +359,11 @@ export const useChatStore = defineStore('chat', () => {
     toolCalls.value = []
 
     try {
-      const resp = await api.sendChat(currentSessionId.value, content, workDir.value || undefined)
+      const pid = currentSessionId.value === 0 ? pendingProviderId.value : undefined
+      const resp = await api.sendChat(currentSessionId.value, content, workDir.value || undefined, undefined, pid || undefined)
       // If it was a new session (id=0), update to the real session ID
       if (currentSessionId.value === 0 && resp.session_id) {
+        pendingProviderId.value = ''  // clear after session created
         currentSessionId.value = resp.session_id
         window.history.replaceState({}, '', `/chat/${resp.session_id}`)
       }
@@ -442,6 +446,7 @@ export const useChatStore = defineStore('chat', () => {
     latestTokenUsage,
     sessionTokenTotals,
     workDir,
+    pendingProviderId,
     wsConnected,
     connectWS,
     loadProviders,
