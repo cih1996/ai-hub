@@ -122,10 +122,19 @@ func vectorSearch(c *gin.Context, scope string) {
 	var req struct {
 		Query string `json:"query"`
 		TopK  int    `json:"top_k"`
+		Scope string `json:"scope"` // optional: overrides the fixed scope parameter (team scoping)
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+	// Use request-body scope if provided and valid (allows team scoping via universal endpoints)
+	if req.Scope != "" {
+		if !isValidScope(req.Scope) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid scope"})
+			return
+		}
+		scope = req.Scope
 	}
 	if req.Query == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "query is required"})

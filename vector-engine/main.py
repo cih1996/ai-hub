@@ -1,5 +1,6 @@
 """向量引擎 FastAPI 微服务"""
 
+import hashlib
 import os
 import sys
 
@@ -12,9 +13,22 @@ from vector_db import VectorDB
 
 app = FastAPI(title="AI Hub Vector Engine")
 
-# 两个独立的 collection：knowledge 和 memory
+# 全局库：knowledge 和 memory
 knowledge_db = VectorDB(collection_name="knowledge")
 memory_db = VectorDB(collection_name="memory")
+
+# 团队库缓存（scope 字符串 → VectorDB）
+_team_dbs: dict[str, VectorDB] = {}
+
+
+def _scope_to_collection(scope: str) -> str:
+    """将团队 scope 转换为 ChromaDB 安全的 collection 名称（只含 ASCII）。
+    例："AI Hub 维护团队/knowledge" → "team_knowledge_a1b2c3d4e5f6"
+    """
+    parts = scope.rsplit("/", 1)
+    suffix = parts[1]  # knowledge | memory
+    h = hashlib.md5(scope.encode("utf-8")).hexdigest()[:12]
+    return f"team_{suffix}_{h}"
 
 
 def _get_db(scope: str) -> VectorDB:
@@ -22,11 +36,25 @@ def _get_db(scope: str) -> VectorDB:
         return knowledge_db
     elif scope == "memory":
         return memory_db
+    # 团队 scope 格式：<非空团队名>/<knowledge|memory>
+    # 安全校验：非空前缀、无路径穿越、合法后缀
+    parts = scope.rsplit("/", 1)
+    if (
+        len(parts) == 2
+        and parts[1] in ("knowledge", "memory")
+        and parts[0].strip()
+        and ".." not in parts[0]
+        and "\x00" not in parts[0]
+    ):
+        if scope not in _team_dbs:
+            coll_name = _scope_to_collection(scope)
+            _team_dbs[scope] = VectorDB(collection_name=coll_name)
+        return _team_dbs[scope]
     raise HTTPException(status_code=400, detail=f"invalid scope: {scope}")
 
 
 class EmbedRequest(BaseModel):
-    scope: str  # "knowledge" | "memory"
+    scope: str  # "knowledge" | "memory" | "<team>/knowledge" | "<team>/memory"
     doc_id: str  # 文件路径作为唯一 ID
     text: str  # 文件名 + 内容前200字
     metadata: dict = None
