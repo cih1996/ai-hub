@@ -7,12 +7,14 @@ import (
 )
 
 // Provider 供应商配置
-// Mode 由后端自动判断: "claude-code" 走 CLI, "direct" 走 OpenAI 兼容 API
+// Mode 固定为 "claude-code"，统一走 Claude Code CLI。
 type Provider struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
-	Mode      string    `json:"mode"`      // "claude-code" | "direct" (auto-detected, not set by user)
-	AuthMode  string    `json:"auth_mode"` // "api_key" (default) | "oauth" (Claude subscription)
+	Mode      string    `json:"mode"`       // "claude-code" (fixed)
+	AuthMode  string    `json:"auth_mode"`  // "api_key" (default) | "oauth" (Claude subscription)
+	UsageMode string    `json:"usage_mode"` // "upstream" (default) | "middleware"
+	ProxyURL  string    `json:"proxy_url"`  // optional: force HTTP(S) proxy for Claude CLI subprocess
 	BaseURL   string    `json:"base_url"`
 	APIKey    string    `json:"api_key"`
 	ModelID   string    `json:"model_id"`
@@ -21,18 +23,9 @@ type Provider struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// DetectMode 根据 model_id 自动判断走 Claude Code CLI 还是直连 API
+// DetectMode 固定返回 Claude Code 模式。
 func (p *Provider) DetectMode() string {
-	// 包含 claude 关键字的走 Claude Code CLI
-	lower := strings.ToLower(p.ModelID)
-	if strings.Contains(lower, "claude") {
-		return "claude-code"
-	}
-	// Ollama 的 Anthropic 兼容端点也走 Claude Code CLI
-	if isOllamaBaseURL(p.BaseURL) {
-		return "claude-code"
-	}
-	return "direct"
+	return "claude-code"
 }
 
 func isOllamaBaseURL(raw string) bool {

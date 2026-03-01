@@ -135,7 +135,6 @@ func (s *ActiveStream) Cancel() {
 
 var (
 	claudeClient    = core.NewClaudeCodeClient()
-	openaiClient    = core.NewOpenAIClient()
 	activeStreams   = make(map[int64]*ActiveStream)
 	activeStreamsMu sync.RWMutex
 )
@@ -356,16 +355,8 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 	log.Printf("[chat] session=%d provider=%s mode=%s model=%s base_url=%s",
 		session.ID, provider.Name, provider.Mode, provider.ModelID, provider.BaseURL)
 
-	switch provider.Mode {
-	case "claude-code":
-		isResume := !isNewSession && core.Pool.HasProcess(session.ID)
-		fullResponse, metadataJSON, usageInput, usageOutput, usageCacheCreation, usageCacheRead, err = streamClaudeCode(ctx, provider, query, session.ClaudeSessionID, isResume, stream.Send, session.ID, session.WorkDir)
-	default:
-		err = streamOpenAI(ctx, provider, session.ID, func(chunk string) {
-			fullResponse += chunk
-			stream.Send(WSMessage{Type: "chunk", SessionID: session.ID, Content: chunk})
-		})
-	}
+	isResume := !isNewSession && core.Pool.HasProcess(session.ID)
+	fullResponse, metadataJSON, usageInput, usageOutput, usageCacheCreation, usageCacheRead, err = streamClaudeCode(ctx, provider, query, session.ClaudeSessionID, isResume, stream.Send, session.ID, session.WorkDir)
 
 	if err != nil {
 		log.Printf("[chat] session=%d provider=%s error: %v", session.ID, provider.Name, err)
@@ -492,9 +483,14 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 		BaseURL:      p.BaseURL,
 		APIKey:       p.APIKey,
 		AuthMode:     p.AuthMode,
-		ModelID:      p.ModelID,
+		ProxyURL:     p.ProxyURL,
+		ModelID:      strings.TrimSpace(p.ModelID),
 		WorkDir:      workDir,
 		HubSessionID: sessID,
+	}
+	// OAuth/subscription mode uses Claude default model selection.
+	if p.AuthMode == "oauth" {
+		req.ModelID = ""
 	}
 
 	// Build system prompt: global rules + session rules
@@ -544,8 +540,8 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 			Result           string          `json:"result"`
 			Event            json.RawMessage `json:"event"`
 			ConversationName string          `json:"conversation_name"`
-			Error json.RawMessage `json:"error"`
-			Usage struct {
+			Error            json.RawMessage `json:"error"`
+			Usage            struct {
 				InputTokens              int64 `json:"input_tokens"`
 				OutputTokens             int64 `json:"output_tokens"`
 				CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
@@ -768,24 +764,4 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 	}
 
 	return fullResponse, metadataJSON, usageInput, usageOutput, usageCacheCreation, usageCacheRead, err
-}
-
-func streamOpenAI(ctx context.Context, p *model.Provider, sessionID int64, onChunk func(string)) error {
-	msgs, err := store.GetMessages(sessionID)
-	if err != nil {
-		return err
-	}
-	var chatMsgs []core.ChatMessage
-	for _, m := range msgs {
-		chatMsgs = append(chatMsgs, core.ChatMessage{
-			Role:    m.Role,
-			Content: m.Content,
-		})
-	}
-	return openaiClient.Stream(ctx, core.OpenAIRequest{
-		BaseURL:  p.BaseURL,
-		APIKey:   p.APIKey,
-		ModelID:  p.ModelID,
-		Messages: chatMsgs,
-	}, onChunk)
 }

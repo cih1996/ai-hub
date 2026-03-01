@@ -14,6 +14,17 @@ import (
 
 // Provider handlers
 
+func normalizeProviderInput(p *model.Provider) {
+	if p == nil {
+		return
+	}
+	p.ModelID = strings.TrimSpace(p.ModelID)
+	// Claude subscription OAuth mode cannot set model explicitly.
+	if p.AuthMode == "oauth" {
+		p.ModelID = ""
+	}
+}
+
 func ListProviders(c *gin.Context) {
 	list, err := store.ListProviders()
 	if err != nil {
@@ -32,6 +43,7 @@ func CreateProvider(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	normalizeProviderInput(&p)
 	if err := store.CreateProvider(&p); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -50,6 +62,7 @@ func UpdateProvider(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	normalizeProviderInput(existing)
 	existing.ID = id
 	if err := store.UpdateProvider(existing); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
