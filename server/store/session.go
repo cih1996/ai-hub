@@ -168,10 +168,11 @@ func GetLastUserMessageID(sessionID int64) int64 {
 	return id
 }
 
-// DeleteMessagesAfter removes all messages with id > afterMsgID for the given session.
-// Used by the retry-message feature to truncate history before re-sending.
-func DeleteMessagesAfter(sessionID int64, afterMsgID int64) error {
-	_, err := DB.Exec(`DELETE FROM messages WHERE session_id = ? AND id > ?`, sessionID, afterMsgID)
+// DeleteMessagesFrom removes the message with the given id AND all messages after it
+// for the given session (id >= fromMsgID). Used by the retry-message feature so the
+// original user message + any subsequent AI reply are both cleared before re-sending.
+func DeleteMessagesFrom(sessionID int64, fromMsgID int64) error {
+	_, err := DB.Exec(`DELETE FROM messages WHERE session_id = ? AND id >= ?`, sessionID, fromMsgID)
 	return err
 }
 

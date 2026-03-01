@@ -165,17 +165,19 @@ const lastUserMsgId = computed(() => {
 
 async function retryMessage(msgId: number, content: string) {
   if (store.streaming) return
-  // Delete all messages after this user message (the AI reply and anything after)
+  // Delete the user message itself + all messages after it (AI reply etc.)
+  // Using inclusive "from" semantics: the original user msg is removed then re-sent fresh
   if (store.currentSessionId > 0) {
     try {
       await api.truncateMessages(store.currentSessionId, msgId)
     } catch { /* ignore, still retry */ }
   }
-  // Truncate local messages array to remove messages after msgId
+  // Remove from idx inclusive: the user message itself + anything after (AI reply)
   const idx = store.messages.findIndex((m) => m.id === msgId)
   if (idx !== -1) {
-    store.messages.splice(idx + 1)
+    store.messages.splice(idx)
   }
+  // sendMessage will push a fresh user message and trigger the stream
   store.sendMessage(content)
 }
 

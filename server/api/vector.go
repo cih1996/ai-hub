@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/gin-gonic/gin"
 )
@@ -40,7 +41,8 @@ func waitVectorReady(c *gin.Context) bool {
 //   - "knowledge" or "memory" (global)
 //   - "<groupname>/knowledge" or "<groupname>/memory" (team-level)
 //
-// groupname may only contain letters, digits, hyphens and underscores.
+// groupname supports Unicode letters (including CJK/Chinese), digits, spaces,
+// hyphens and underscores. Path traversal sequences are rejected.
 func isValidScope(scope string) bool {
 	if scope == "knowledge" || scope == "memory" {
 		return true
@@ -54,16 +56,17 @@ func isValidScope(scope string) bool {
 		return false
 	}
 	prefix := scope[:idx]
-	// No further slashes allowed in the group name
-	if strings.Contains(prefix, "/") {
+	// Reject path traversal and null bytes
+	if strings.Contains(prefix, "..") || strings.Contains(prefix, "\x00") || strings.Contains(prefix, "/") {
 		return false
 	}
+	// Allow Unicode letters (covers Chinese, Japanese, etc.), digits, spaces, hyphens, underscores
 	for _, ch := range prefix {
-		if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_') {
+		if !unicode.IsLetter(ch) && !unicode.IsDigit(ch) && ch != '-' && ch != '_' && ch != ' ' {
 			return false
 		}
 	}
-	return len(prefix) > 0
+	return len(strings.TrimSpace(prefix)) > 0
 }
 
 // --- Vector MCP tool handlers ---
