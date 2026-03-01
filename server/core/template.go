@@ -64,6 +64,39 @@ func TemplateDir() string {
 	return templateDir
 }
 
+// BuildTeamRules reads all *.md files from ~/.ai-hub/<groupName>/rules/ (flat),
+// concatenates them sorted by name, renders template variables, and returns
+// the combined content. Returns "" when groupName is empty or no files found.
+func BuildTeamRules(groupName string) string {
+	if groupName == "" {
+		return ""
+	}
+	home, _ := os.UserHomeDir()
+	teamRulesDir := filepath.Join(home, ".ai-hub", groupName, "rules")
+	entries, err := os.ReadDir(teamRulesDir)
+	if err != nil {
+		return ""
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
+			names = append(names, e.Name())
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	sort.Strings(names)
+	var parts []string
+	for _, name := range names {
+		if data, err := os.ReadFile(filepath.Join(teamRulesDir, name)); err == nil {
+			parts = append(parts, string(data))
+		}
+	}
+	combined := strings.Join(parts, "\n\n---\n\n")
+	return RenderTemplate(combined)
+}
+
 // BuildSystemPrompt reads all *.md files from ~/.ai-hub/rules/ (flat),
 // concatenates them sorted by name, appends Skills summary, renders variables,
 // and returns the full system prompt.

@@ -375,7 +375,7 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 	// For new sessions or sessions whose first turn was cancelled (no assistant messages),
 	// isResume stays false so the CLI starts fresh with --session-id instead of --resume.
 	isResume := !isNewSession && (core.Pool.HasProcess(session.ID) || store.HasAssistantMessages(session.ID))
-	fullResponse, metadataJSON, usageInput, usageOutput, usageCacheCreation, usageCacheRead, err = streamClaudeCode(ctx, provider, query, session.ClaudeSessionID, isResume, stream.Send, session.ID, session.WorkDir)
+	fullResponse, metadataJSON, usageInput, usageOutput, usageCacheCreation, usageCacheRead, err = streamClaudeCode(ctx, provider, query, session.ClaudeSessionID, isResume, stream.Send, session.ID, session.WorkDir, session.GroupName)
 
 	if err != nil {
 		log.Printf("[chat] session=%d provider=%s error: %v", session.ID, provider.Name, err)
@@ -494,7 +494,7 @@ type StepsMetadata struct {
 	Thinking string     `json:"thinking,omitempty"` // truncated thinking summary
 }
 
-func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID string, resume bool, send func(WSMessage), sessID int64, workDir string) (string, string, int64, int64, int64, int64, error) {
+func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID string, resume bool, send func(WSMessage), sessID int64, workDir string, groupName string) (string, string, int64, int64, int64, int64, error) {
 	req := core.ClaudeCodeRequest{
 		Query:        query,
 		SessionID:    sessionID,
@@ -512,10 +512,18 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 		req.ModelID = ""
 	}
 
-	// Build system prompt: global rules + session rules
+	// Build system prompt: 三层合并（优先级从低到高）
+	// ① 全局规则 (~/.ai-hub/rules/*.md)
+	// ② 团队规则 (~/.ai-hub/<group_name>/rules/*.md)，仅团队会话生效
+	// ③ 会话角色规则 (session-rules/<sessID>.md)
+	// 注：Claude CLI 的 --setting-sources 可控制是否加载项目级 .claude/CLAUDE.md，
+	//     当前暂不禁用，仍允许工作目录项目规则生效（待后续评估）
 	var promptParts []string
 	if globalPrompt := core.BuildSystemPrompt(); globalPrompt != "" {
 		promptParts = append(promptParts, globalPrompt)
+	}
+	if teamRules := core.BuildTeamRules(groupName); teamRules != "" {
+		promptParts = append(promptParts, teamRules)
 	}
 	if rules, err := ReadSessionRules(sessID); err == nil && rules != "" {
 		promptParts = append(promptParts, rules)
