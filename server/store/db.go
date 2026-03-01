@@ -118,6 +118,10 @@ func migrate() error {
 
 	// Provider: add auth_mode column (api_key | oauth)
 	DB.Exec(`ALTER TABLE providers ADD COLUMN auth_mode TEXT NOT NULL DEFAULT 'api_key'`)
+	// Provider: token usage metering mode (upstream | middleware)
+	DB.Exec(`ALTER TABLE providers ADD COLUMN usage_mode TEXT NOT NULL DEFAULT 'upstream'`)
+	// Provider: optional subprocess proxy URL
+	DB.Exec(`ALTER TABLE providers ADD COLUMN proxy_url TEXT NOT NULL DEFAULT ''`)
 
 	return nil
 }

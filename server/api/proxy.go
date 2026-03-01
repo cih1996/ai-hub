@@ -1,6 +1,7 @@
 package api
 
 import (
+	"ai-hub/server/model"
 	"ai-hub/server/store"
 	"bufio"
 	"encoding/json"
@@ -28,9 +29,16 @@ type ProxyUsage struct {
 	Captured                 bool // true if proxy captured any usage
 }
 
+type meteringContext struct {
+	Provider    *model.Provider
+	Adapter     UsageAdapter
+	EstInput    int64
+	RequestBody []byte
+}
+
 var (
-	proxyUsageMap   = make(map[int64]*ProxyUsage)
-	proxyUsageMu    sync.Mutex
+	proxyUsageMap = make(map[int64]*ProxyUsage)
+	proxyUsageMu  sync.Mutex
 )
 
 // proxyAccumulate adds usage from one API call to the session accumulator.
@@ -88,12 +96,18 @@ func HandleAnthropicProxy(c *gin.Context) {
 	}
 
 	// Look up session → provider → real base_url
-	var realBaseURL string
+	var (
+		realBaseURL string
+		provider    *model.Provider
+	)
 	if sessionID > 0 {
 		session, err := store.GetSession(sessionID)
 		if err == nil {
-			provider, err := store.GetProvider(session.ProviderID)
-			if err == nil && provider.BaseURL != "" {
+			p, err := store.GetProvider(session.ProviderID)
+			if err == nil {
+				provider = p
+			}
+			if provider != nil && provider.BaseURL != "" {
 				realBaseURL = provider.BaseURL
 			}
 		}
@@ -111,6 +125,16 @@ func HandleAnthropicProxy(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "read body: " + err.Error()})
 		return
+	}
+
+	meter := &meteringContext{Provider: provider, RequestBody: body}
+	if provider != nil {
+		meter.Adapter = selectUsageAdapter(provider)
+		if meter.Adapter != nil {
+			meter.EstInput = meter.Adapter.EstimateInputTokens(provider, body)
+			log.Printf("[proxy] session=%d metering adapter=%s mode=%s estimated_input=%d",
+				sessionID, meter.Adapter.Name(), provider.UsageMode, meter.EstInput)
+		}
 	}
 
 	// Create forwarding request
@@ -155,24 +179,25 @@ func HandleAnthropicProxy(c *gin.Context) {
 	if !isSSE {
 		// Non-streaming: just copy body through and try to parse usage
 		respBody, _ := io.ReadAll(resp.Body)
-		parseNonStreamUsage(sessionID, respBody)
+		parseNonStreamUsage(sessionID, respBody, meter)
 		c.Writer.Write(respBody)
 		c.Writer.Flush()
 		return
 	}
 
 	// SSE streaming: parse usage while forwarding
-	streamProxySSE(c, resp.Body, sessionID)
+	streamProxySSE(c, resp.Body, sessionID, meter)
 }
 
 // streamProxySSE reads SSE lines from upstream, parses usage, and forwards to client.
-func streamProxySSE(c *gin.Context, upstream io.Reader, sessionID int64) {
+func streamProxySSE(c *gin.Context, upstream io.Reader, sessionID int64, meter *meteringContext) {
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
 		log.Printf("[proxy] session=%d ResponseWriter does not support Flush", sessionID)
 	}
 
 	var turnInput, turnOutput, turnCacheCreation, turnCacheRead int64
+	var outputText strings.Builder
 
 	scanner := bufio.NewScanner(upstream)
 	scanner.Buffer(make([]byte, 256*1024), 1024*1024)
@@ -223,6 +248,27 @@ func streamProxySSE(c *gin.Context, upstream io.Reader, sessionID int64) {
 			turnCacheRead += evt.Message.Usage.CacheReadInputTokens
 		case "message_delta":
 			turnOutput += evt.Usage.OutputTokens
+		case "content_block_delta":
+			var txtEvt struct {
+				Delta struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"delta"`
+			}
+			if err := json.Unmarshal([]byte(data), &txtEvt); err == nil && txtEvt.Delta.Type == "text_delta" && txtEvt.Delta.Text != "" {
+				outputText.WriteString(txtEvt.Delta.Text)
+			}
+		}
+	}
+
+	if meter != nil && meter.Adapter != nil {
+		if turnInput == 0 && meter.EstInput > 0 {
+			turnInput = meter.EstInput
+		}
+		if turnOutput == 0 {
+			if n := meter.Adapter.EstimateOutputTokens(meter.Provider, outputText.String(), nil); n > 0 {
+				turnOutput = n
+			}
 		}
 	}
 
@@ -235,7 +281,7 @@ func streamProxySSE(c *gin.Context, upstream io.Reader, sessionID int64) {
 }
 
 // parseNonStreamUsage parses usage from a non-streaming Anthropic API response.
-func parseNonStreamUsage(sessionID int64, body []byte) {
+func parseNonStreamUsage(sessionID int64, body []byte, meter *meteringContext) {
 	if sessionID <= 0 {
 		return
 	}
@@ -251,6 +297,16 @@ func parseNonStreamUsage(sessionID int64, body []byte) {
 		return
 	}
 	u := resp.Usage
+	if meter != nil && meter.Adapter != nil {
+		if u.InputTokens == 0 && meter.EstInput > 0 {
+			u.InputTokens = meter.EstInput
+		}
+		if u.OutputTokens == 0 {
+			if n := meter.Adapter.EstimateOutputTokens(meter.Provider, "", body); n > 0 {
+				u.OutputTokens = n
+			}
+		}
+	}
 	if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheCreationInputTokens > 0 || u.CacheReadInputTokens > 0 {
 		proxyAccumulate(sessionID, u.InputTokens, u.OutputTokens, u.CacheCreationInputTokens, u.CacheReadInputTokens)
 		log.Printf("[proxy] session=%d non-stream usage: input=%d output=%d cache_create=%d cache_read=%d",

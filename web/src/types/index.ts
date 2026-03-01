@@ -3,6 +3,8 @@ export interface Provider {
   name: string
   mode: string
   auth_mode: string
+  usage_mode: 'upstream' | 'middleware'
+  proxy_url: string
   base_url: string
   api_key: string
   model_id: string

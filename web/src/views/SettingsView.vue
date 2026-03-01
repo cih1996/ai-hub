@@ -20,9 +20,23 @@ const store = useChatStore()
 const showForm = ref(false)
 const editing = ref<Provider | null>(null)
 
-const form = ref({
+type UsageMode = 'upstream' | 'middleware'
+type ProviderForm = {
+  name: string
+  auth_mode: string
+  usage_mode: UsageMode
+  proxy_url: string
+  base_url: string
+  api_key: string
+  model_id: string
+  is_default: boolean
+}
+
+const form = ref<ProviderForm>({
   name: '',
   auth_mode: 'api_key',
+  usage_mode: 'upstream',
+  proxy_url: '',
   base_url: '',
   api_key: '',
   model_id: '',
@@ -41,7 +55,7 @@ async function loadAuthStatus() {
 }
 
 function resetForm() {
-  form.value = { name: '', auth_mode: 'api_key', base_url: '', api_key: '', model_id: '', is_default: false }
+  form.value = { name: '', auth_mode: 'api_key', usage_mode: 'upstream', proxy_url: '', base_url: '', api_key: '', model_id: '', is_default: false }
   editing.value = null
   showForm.value = false
 }
@@ -51,6 +65,8 @@ function editProvider(p: Provider) {
   form.value = {
     name: p.name,
     auth_mode: p.auth_mode || 'api_key',
+    usage_mode: p.usage_mode || 'upstream',
+    proxy_url: p.proxy_url || '',
     base_url: p.base_url,
     api_key: p.api_key,
     model_id: p.model_id,
@@ -61,7 +77,10 @@ function editProvider(p: Provider) {
 }
 
 watch(() => form.value.auth_mode, (mode) => {
-  if (mode === 'oauth') loadAuthStatus()
+  if (mode === 'oauth') {
+    form.value.model_id = ''
+    loadAuthStatus()
+  }
 })
 
 function isLikelyOllamaBaseURL(baseURL: string): boolean {
@@ -131,7 +150,7 @@ onMounted(() => store.loadProviders())
         <div class="section-header">
           <div>
             <h2>模型供应商</h2>
-            <p class="section-desc">配置 LLM API 端点。Claude 模型自动通过 Claude Code CLI 路由。</p>
+            <p class="section-desc">配置 LLM API 端点。所有供应商统一通过 Claude Code CLI 路由。</p>
           </div>
           <button class="btn-add" @click="showForm = true">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -147,13 +166,16 @@ onMounted(() => store.loadProviders())
               <div class="provider-name">
                 {{ p.name }}
                 <span v-if="p.is_default" class="badge default">默认</span>
-                <span class="badge mode">{{ p.mode === 'claude-code' ? 'Claude Code' : '直连 API' }}</span>
+                <span class="badge mode">Claude Code</span>
                 <span v-if="p.auth_mode === 'oauth'" class="badge oauth">OAuth</span>
+                <span v-if="p.usage_mode === 'middleware'" class="badge meter">Middleware Metering</span>
               </div>
               <div class="provider-meta">
                 {{ p.model_id }}
                 <span v-if="p.base_url" class="sep">·</span>
                 <span v-if="p.base_url" class="url">{{ p.base_url }}</span>
+                <span v-if="p.proxy_url" class="sep">·</span>
+                <span v-if="p.proxy_url" class="url">Proxy {{ p.proxy_url }}</span>
                 <span class="sep">·</span>
                 <span class="key">{{ maskKey(p.api_key) }}</span>
               </div>
@@ -216,9 +238,29 @@ onMounted(() => store.loadProviders())
             </template>
 
             <div class="form-group">
+              <label>代理地址（可选）</label>
+              <input v-model="form.proxy_url" placeholder="http://127.0.0.1:7890" />
+              <span class="hint">为该供应商的 Claude 子进程单独设置代理。留空则不覆盖系统代理。</span>
+            </div>
+
+            <div class="form-group">
               <label>模型 ID</label>
-              <input v-model="form.model_id" placeholder="claude-sonnet-4-20250514 / qwen3-coder / glm-4.7" />
-              <span class="hint">包含 `claude` 或使用 Ollama 端点时会自动通过 Claude Code CLI 路由。</span>
+              <input
+                v-model="form.model_id"
+                :disabled="form.auth_mode === 'oauth'"
+                placeholder="留空使用默认模型；可填 qwen3-coder / glm-4.7 / llama3.1"
+              />
+              <span class="hint" v-if="form.auth_mode === 'oauth'">订阅账号模式不支持手动指定模型，将使用 Claude 默认模型。</span>
+              <span class="hint" v-else>可留空使用默认模型；按需填写具体模型 ID。</span>
+            </div>
+
+            <div class="form-group">
+              <label>Token 统计模式</label>
+              <select v-model="form.usage_mode">
+                <option value="upstream">Upstream（默认）</option>
+                <option value="middleware">Middleware（中转修正）</option>
+              </select>
+              <span class="hint">默认使用上游返回。仅在需要本地中转修正统计时开启，便于后续接入不同 LLM API。</span>
             </div>
 
             <div class="form-group checkbox">
@@ -230,7 +272,7 @@ onMounted(() => store.loadProviders())
 
             <div class="form-actions">
               <button class="btn-cancel" @click="resetForm">取消</button>
-              <button class="btn-save" @click="saveProvider" :disabled="!form.name || !form.model_id || (needsApiKey && !form.api_key)">
+              <button class="btn-save" @click="saveProvider" :disabled="!form.name || (needsApiKey && !form.api_key)">
                 保存
               </button>
             </div>
@@ -300,6 +342,7 @@ onMounted(() => store.loadProviders())
 .badge.default { background: var(--accent-soft); color: var(--accent); }
 .badge.mode { background: var(--bg-tertiary); color: var(--text-secondary); }
 .badge.oauth { background: rgba(34,197,94,0.15); color: #22c55e; }
+.badge.meter { background: rgba(59,130,246,0.14); color: #3b82f6; }
 .auth-status { font-size: 13px; padding: 8px 12px; border-radius: var(--radius); }
 .auth-status.loading { color: var(--text-muted); background: var(--bg-tertiary); }
 .auth-status.ok { color: #22c55e; background: rgba(34,197,94,0.1); }
