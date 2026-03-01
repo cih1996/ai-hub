@@ -22,6 +22,7 @@ export const useChatStore = defineStore('chat', () => {
 
   const workDir = ref('')
   const pendingProviderId = ref('')  // provider selected in new-chat dialog
+  const pendingGroupName = ref('')   // group_name selected in new-chat dialog
 
   const currentSession = computed(() =>
     sessions.value.find((s) => s.id === currentSessionId.value)
@@ -322,7 +323,7 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function newChat(providerId?: string) {
+  function newChat(providerId?: string, groupName?: string) {
     currentSessionId.value = 0
     messages.value = []
     streaming.value = false
@@ -332,6 +333,7 @@ export const useChatStore = defineStore('chat', () => {
     workDir.value = ''
     latestTokenUsage.value = null
     pendingProviderId.value = providerId || ''
+    pendingGroupName.value = groupName || ''
   }
 
   async function deleteSessionById(id: number) {
@@ -360,10 +362,12 @@ export const useChatStore = defineStore('chat', () => {
 
     try {
       const pid = currentSessionId.value === 0 ? pendingProviderId.value : undefined
-      const resp = await api.sendChat(currentSessionId.value, content, workDir.value || undefined, undefined, pid || undefined)
+      const gname = currentSessionId.value === 0 ? pendingGroupName.value : undefined
+      const resp = await api.sendChat(currentSessionId.value, content, workDir.value || undefined, undefined, pid || undefined, gname || undefined)
       // If it was a new session (id=0), update to the real session ID
       if (currentSessionId.value === 0 && resp.session_id) {
         pendingProviderId.value = ''  // clear after session created
+        pendingGroupName.value = ''   // clear after session created
         currentSessionId.value = resp.session_id
         window.history.replaceState({}, '', `/chat/${resp.session_id}`)
       }
@@ -447,6 +451,7 @@ export const useChatStore = defineStore('chat', () => {
     sessionTokenTotals,
     workDir,
     pendingProviderId,
+    pendingGroupName,
     wsConnected,
     connectWS,
     loadProviders,

@@ -30,6 +30,17 @@ const version = ref('')
 // New chat dialog
 const showNewChatDialog = ref(false)
 const newChatProviderId = ref('')
+const newChatGroupName = ref('')   // '' = 默认组, '__new__' = 创建新团队, 其他 = 已有团队名
+const newChatCustomGroup = ref('') // 创建新团队时输入的名称
+
+// Unique existing group names from all sessions (for dropdown)
+const existingGroupNames = computed<string[]>(() => {
+  const names = new Set<string>()
+  for (const s of store.sessions) {
+    if (s.group_name) names.add(s.group_name)
+  }
+  return [...names].sort()
+})
 
 onMounted(async () => {
   try {
@@ -105,14 +116,20 @@ const displayGroupedSessions = computed<SessionGroup[]>(() => {
 })
 
 function openNewChatDialog() {
-  // Pre-select current default provider
+  // Pre-select current default provider, reset group
   newChatProviderId.value = store.defaultProvider?.id || ''
+  newChatGroupName.value = ''
+  newChatCustomGroup.value = ''
   showNewChatDialog.value = true
 }
 
 function confirmNewChat() {
   showNewChatDialog.value = false
-  store.newChat(newChatProviderId.value || undefined)
+  // Resolve group name: '' = default, '__new__' = custom input, otherwise existing name
+  const groupName = newChatGroupName.value === '__new__'
+    ? newChatCustomGroup.value.trim()
+    : newChatGroupName.value
+  store.newChat(newChatProviderId.value || undefined, groupName || undefined)
   router.push('/chat')
   if (isMobile.value) closeSidebar()
 }
@@ -342,6 +359,21 @@ onMounted(async () => {
                 {{ p.name }}{{ p.is_default ? ' (默认)' : '' }}
               </option>
             </select>
+          </div>
+          <div class="modal-form-group">
+            <label class="modal-label">团队分组</label>
+            <select v-model="newChatGroupName" class="modal-select">
+              <option value="">默认组</option>
+              <option v-for="g in existingGroupNames" :key="g" :value="g">{{ g }}</option>
+              <option value="__new__">+ 创建新团队</option>
+            </select>
+            <input
+              v-if="newChatGroupName === '__new__'"
+              v-model="newChatCustomGroup"
+              class="modal-input"
+              placeholder="输入团队名称"
+              maxlength="50"
+            />
           </div>
           <div class="modal-actions">
             <button class="modal-btn cancel" @click="showNewChatDialog = false">取消</button>
@@ -687,6 +719,21 @@ onMounted(async () => {
   font-size: 14px;
   color: var(--text-primary);
   cursor: pointer;
+}
+.modal-input {
+  width: 100%;
+  margin-top: 6px;
+  padding: 10px 12px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 14px;
+  color: var(--text-primary);
+  box-sizing: border-box;
+}
+.modal-input:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 /* Mobile: show delete button always (no hover on touch) */
 @media (max-width: 768px) {
