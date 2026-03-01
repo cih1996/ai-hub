@@ -6,6 +6,7 @@ import (
 	"ai-hub/server/store"
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -376,6 +377,10 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 		isResume := !isNewSession && core.Pool.HasProcess(session.ID)
 		fullResponse, metadataJSON, usageInput, usageOutput, usageCacheCreation, usageCacheRead, err = streamClaudeCode(ctx, provider, query, session.ClaudeSessionID, isResume, stream.Send, session.ID, session.WorkDir)
 	default:
+		if strings.TrimSpace(provider.BaseURL) == "" {
+			err = errors.New("provider base_url is required for direct mode")
+			break
+		}
 		err = streamOpenAI(ctx, provider, session.ID, func(chunk string) {
 			fullResponse += chunk
 			stream.Send(WSMessage{Type: "chunk", SessionID: session.ID, Content: chunk})
@@ -559,8 +564,8 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 			Result           string          `json:"result"`
 			Event            json.RawMessage `json:"event"`
 			ConversationName string          `json:"conversation_name"`
-			Error json.RawMessage `json:"error"`
-			Usage struct {
+			Error            json.RawMessage `json:"error"`
+			Usage            struct {
 				InputTokens              int64 `json:"input_tokens"`
 				OutputTokens             int64 `json:"output_tokens"`
 				CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`

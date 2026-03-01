@@ -23,6 +23,10 @@ type Provider struct {
 
 // DetectMode 根据 model_id 自动判断走 Claude Code CLI 还是直连 API
 func (p *Provider) DetectMode() string {
+	// OAuth subscription mode always uses Claude Code CLI.
+	if strings.EqualFold(strings.TrimSpace(p.AuthMode), "oauth") {
+		return "claude-code"
+	}
 	// 包含 claude 关键字的走 Claude Code CLI
 	lower := strings.ToLower(p.ModelID)
 	if strings.Contains(lower, "claude") {
