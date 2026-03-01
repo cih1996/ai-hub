@@ -57,10 +57,10 @@ export const switchProvider = (id: number, providerId: string) =>
   request<{ ok: boolean; provider_id: string; provider_name: string }>(`/sessions/${id}/provider`, { method: 'PUT', body: JSON.stringify({ provider_id: providerId }) })
 
 // Chat
-export const sendChat = (sessionId: number, content: string, workDir?: string, sessionRules?: string, providerId?: string) =>
+export const sendChat = (sessionId: number, content: string, workDir?: string, sessionRules?: string, providerId?: string, groupName?: string) =>
   request<{ session_id: number; status: string }>('/chat/send', {
     method: 'POST',
-    body: JSON.stringify({ session_id: sessionId, content, work_dir: workDir || '', session_rules: sessionRules || '', provider_id: providerId || '' }),
+    body: JSON.stringify({ session_id: sessionId, content, work_dir: workDir || '', session_rules: sessionRules || '', provider_id: providerId || '', group_name: groupName || '' }),
   })
 
 // Status
