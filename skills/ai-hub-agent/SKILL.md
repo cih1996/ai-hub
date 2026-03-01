@@ -50,7 +50,7 @@ curl -X POST http://localhost:$AI_HUB_PORT/api/v1/chat/send \
 - `session_id: 0` — 创建新会话
 - `content` — 任务指令，写清楚你要这个会话做什么
 - `work_dir` — 该会话的工作目录，CLI 将在此目录下运行。省略或空字符串则使用用户 home 目录
-- `group_name` — 会话分组名称，同一团队的所有会话应使用相同的 group_name，前端侧边栏会按此字段分组显示。省略或空字符串则归入默认组
+- `group_name` — 会话分组名称，同一团队的所有会话应使用相同的 group_name，前端侧边栏会按此字段分组显示。省略或空字符串则归入默认组。**非空 group_name 还会触发团队规则注入**：系统自动读取 `~/.ai-hub/<group_name>/rules/*.md` 合并到 system prompt（优先级：全局规则 < 团队规则 < 会话级规则）
 
 记住返回的 `session_id`，后续所有操作都靠它。
 

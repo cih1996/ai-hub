@@ -4,7 +4,6 @@ import type { Ref } from 'vue'
 import { marked } from 'marked'
 import { useChatStore } from '../stores/chat'
 import * as api from '../composables/api'
-import type { FileItem } from '../composables/api'
 import type { StepsMetadata } from '../types'
 
 const isMobile = inject<Ref<boolean>>('isMobile', ref(false))
@@ -79,13 +78,6 @@ function showToast(msg: string, type: 'success' | 'error' = 'success') {
   clearTimeout(toastTimer)
   toastTimer = setTimeout(() => { toastVisible.value = false }, 2500)
 }
-
-// Rules modal state
-const showRulesModal = ref(false)
-const ruleFiles = ref<FileItem[]>([])
-const selectedRulePath = ref('')
-const ruleContent = ref('')
-const ruleSaving = ref(false)
 
 // Session rules modal state
 const showSessionRulesModal = ref(false)
@@ -284,39 +276,6 @@ function autoResize() {
   el.style.height = Math.min(el.scrollHeight, 200) + 'px'
 }
 
-// Rules modal functions
-async function openRulesModal() {
-  const wd = store.currentSession?.work_dir
-  if (!wd) return
-  showRulesModal.value = true
-  ruleFiles.value = await api.listProjectRules(wd)
-  if (ruleFiles.value.length > 0 && ruleFiles.value[0]) {
-    await selectRule(ruleFiles.value[0].path)
-  }
-}
-
-async function selectRule(path: string) {
-  const wd = store.currentSession?.work_dir
-  if (!wd) return
-  selectedRulePath.value = path
-  const res = await api.readProjectRule(wd, path)
-  ruleContent.value = res.content
-}
-
-async function saveRule() {
-  const wd = store.currentSession?.work_dir
-  if (!wd || !selectedRulePath.value) return
-  ruleSaving.value = true
-  try {
-    await api.writeProjectRule(wd, selectedRulePath.value, ruleContent.value)
-    showToast('保存成功')
-  } catch (e: any) {
-    showToast('保存失败: ' + (e.message || '未知错误'), 'error')
-  } finally {
-    ruleSaving.value = false
-  }
-}
-
 // Session rules functions
 async function openSessionRulesModal() {
   const sid = store.currentSession?.id
@@ -464,18 +423,6 @@ function formatToolInput(raw: string): string {
           压缩
         </button>
         <button
-          v-if="store.currentSession.work_dir"
-          class="btn-rules"
-          @click="openRulesModal"
-          title="项目规则"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
-            <polyline points="14 2 14 8 20 8"/>
-          </svg>
-          规则
-        </button>
-        <button
           class="btn-rules"
           @click="openSessionRulesModal"
           title="会话规则（角色设定）"
@@ -501,7 +448,6 @@ function formatToolInput(raw: string): string {
           </button>
           <div v-if="moreMenuOpen" class="more-menu" @click="moreMenuOpen = false">
             <button @click="store.compressContext()" :disabled="store.streaming">压缩上下文</button>
-            <button v-if="store.currentSession.work_dir" @click="openRulesModal">项目规则</button>
             <button @click="openSessionRulesModal">会话角色</button>
             <div class="more-menu-divider"></div>
             <div class="more-menu-label">切换模型</div>
@@ -742,50 +688,6 @@ function formatToolInput(raw: string): string {
         </div>
       </div>
     </div>
-
-    <!-- Rules modal -->
-    <Teleport to="body">
-      <div v-if="showRulesModal" class="modal-overlay" @click="showRulesModal = false">
-        <div class="rules-modal" @click.stop>
-          <div class="rules-modal-header">
-            <span class="rules-modal-title">项目规则</span>
-            <span class="rules-modal-dir">{{ displayWorkDir }}</span>
-            <button class="rules-modal-close" @click="showRulesModal = false">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M18 6L6 18M6 6l12 12"/>
-              </svg>
-            </button>
-          </div>
-          <div class="rules-modal-body">
-            <div class="rules-file-list">
-              <div
-                v-for="f in ruleFiles"
-                :key="f.path"
-                class="rules-file-item"
-                :class="{ active: f.path === selectedRulePath }"
-                @click="selectRule(f.path)"
-              >
-                {{ f.name }}
-              </div>
-              <div v-if="ruleFiles.length === 0" class="rules-empty">暂无规则文件</div>
-            </div>
-            <div class="rules-editor">
-              <textarea
-                v-model="ruleContent"
-                class="rules-textarea"
-                placeholder="规则内容..."
-                :disabled="!selectedRulePath"
-              />
-              <div class="rules-editor-actions">
-                <button class="btn-save-rule" :disabled="!selectedRulePath || ruleSaving" @click="saveRule">
-                  {{ ruleSaving ? '保存中...' : '保存' }}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </Teleport>
 
     <!-- Session rules modal -->
     <Teleport to="body">
