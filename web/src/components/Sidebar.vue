@@ -230,22 +230,16 @@ onMounted(async () => {
       </button>
     </div>
 
-    <!-- Group tabs + collapse toggle -->
+    <!-- Group filter dropdown + collapse toggle -->
     <div class="session-area-header">
-      <div v-if="namedGroupTabs.length > 0" class="group-tabs">
-        <button
-          class="group-tab"
-          :class="{ active: activeGroupTab === '' }"
-          @click="activeGroupTab = ''"
-        >全部</button>
-        <button
-          v-for="tab in namedGroupTabs"
-          :key="tab"
-          class="group-tab"
-          :class="{ active: activeGroupTab === tab }"
-          @click="activeGroupTab = tab"
-        >{{ tab }}</button>
-      </div>
+      <select
+        v-if="namedGroupTabs.length > 0"
+        v-model="activeGroupTab"
+        class="group-filter"
+      >
+        <option value="">全部分组</option>
+        <option v-for="tab in namedGroupTabs" :key="tab" :value="tab">{{ tab }}</option>
+      </select>
       <button
         class="collapse-btn"
         :title="sessionListCollapsed ? '展开会话列表' : '折叠会话列表'"
@@ -411,40 +405,29 @@ onMounted(async () => {
   background: var(--bg-active);
   color: var(--text-primary);
 }
-/* Session area header: group tabs + collapse btn */
+/* Session area header: group filter dropdown + collapse btn */
 .session-area-header {
   display: flex;
   align-items: center;
-  padding: 4px 8px 0;
+  padding: 6px 8px 2px;
   gap: 4px;
   flex-shrink: 0;
 }
-.group-tabs {
-  display: flex;
+.group-filter {
   flex: 1;
-  gap: 4px;
-  flex-wrap: wrap;
   min-width: 0;
-}
-.group-tab {
-  padding: 3px 10px;
+  height: 26px;
+  padding: 0 6px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text-muted);
-  background: transparent;
-  cursor: pointer;
-  transition: all var(--transition);
-  white-space: nowrap;
-  border: 1px solid transparent;
-}
-.group-tab:hover {
+  font-size: 12px;
   color: var(--text-primary);
-  background: var(--bg-hover);
+  cursor: pointer;
+  appearance: auto;
 }
-.group-tab.active {
-  color: var(--accent);
-  background: var(--accent-soft);
+.group-filter:focus {
+  outline: none;
   border-color: var(--accent);
 }
 .collapse-btn {
