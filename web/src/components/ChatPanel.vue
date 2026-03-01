@@ -163,8 +163,19 @@ const lastUserMsgId = computed(() => {
   return userMsgs.length > 0 ? userMsgs[userMsgs.length - 1]!.id : -1
 })
 
-function retryMessage(content: string) {
+async function retryMessage(msgId: number, content: string) {
   if (store.streaming) return
+  // Delete all messages after this user message (the AI reply and anything after)
+  if (store.currentSessionId > 0) {
+    try {
+      await api.truncateMessages(store.currentSessionId, msgId)
+    } catch { /* ignore, still retry */ }
+  }
+  // Truncate local messages array to remove messages after msgId
+  const idx = store.messages.findIndex((m) => m.id === msgId)
+  if (idx !== -1) {
+    store.messages.splice(idx + 1)
+  }
   store.sendMessage(content)
 }
 
@@ -597,7 +608,7 @@ function formatToolInput(raw: string): string {
             <button
               v-if="msg.role === 'user' && msg.id === lastUserMsgId && !store.streaming"
               class="btn-retry"
-              @click="retryMessage(msg.content)"
+              @click="retryMessage(msg.id, msg.content)"
               title="重新发送"
             >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">

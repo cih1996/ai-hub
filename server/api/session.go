@@ -135,6 +135,28 @@ func GetMessages(c *gin.Context) {
 	c.JSON(http.StatusOK, msgs)
 }
 
+// TruncateMessages handles DELETE /api/v1/sessions/:id/messages?after=<msgId>
+// Deletes all messages with id > afterMsgId in the session.
+// Used by the retry-message feature to cut off history before re-sending.
+func TruncateMessages(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid session id"})
+		return
+	}
+	afterStr := c.Query("after")
+	afterID, err := strconv.ParseInt(afterStr, 10, 64)
+	if err != nil || afterID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "after parameter required and must be a positive integer"})
+		return
+	}
+	if err := store.DeleteMessagesAfter(id, afterID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
 // CompressSession handles POST /api/v1/sessions/:id/compress
 // Generates a new claude_session_id, builds a condensed summary from recent messages,
 // and starts a new CLI stream with the summary as the first message.

@@ -36,6 +36,36 @@ func waitVectorReady(c *gin.Context) bool {
 	return false
 }
 
+// isValidScope returns true if scope is one of the allowed forms:
+//   - "knowledge" or "memory" (global)
+//   - "<groupname>/knowledge" or "<groupname>/memory" (team-level)
+//
+// groupname may only contain letters, digits, hyphens and underscores.
+func isValidScope(scope string) bool {
+	if scope == "knowledge" || scope == "memory" {
+		return true
+	}
+	idx := strings.LastIndex(scope, "/")
+	if idx <= 0 {
+		return false
+	}
+	suffix := scope[idx+1:]
+	if suffix != "knowledge" && suffix != "memory" {
+		return false
+	}
+	prefix := scope[:idx]
+	// No further slashes allowed in the group name
+	if strings.Contains(prefix, "/") {
+		return false
+	}
+	for _, ch := range prefix {
+		if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_') {
+			return false
+		}
+	}
+	return len(prefix) > 0
+}
+
 // --- Vector MCP tool handlers ---
 // These are HTTP endpoints that Claude CLI calls via MCP configuration.
 
@@ -51,8 +81,8 @@ func SearchVector(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if req.Scope != "knowledge" && req.Scope != "memory" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "scope must be 'knowledge' or 'memory'"})
+	if !isValidScope(req.Scope) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "scope must be 'knowledge', 'memory', or '<groupname>/knowledge', '<groupname>/memory'"})
 		return
 	}
 	if req.Query == "" {
@@ -127,10 +157,19 @@ func ReadMemory(c *gin.Context) {
 func vectorRead(c *gin.Context, scope string) {
 	var req struct {
 		FileName string `json:"file_name"`
+		Scope    string `json:"scope"` // optional: overrides the fixed scope parameter
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+	// Use request-body scope if provided and valid (allows team scoping via universal endpoints)
+	if req.Scope != "" {
+		if !isValidScope(req.Scope) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid scope"})
+			return
+		}
+		scope = req.Scope
 	}
 	if req.FileName == "" || !validatePath(req.FileName) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "valid file_name is required"})
@@ -148,7 +187,7 @@ func vectorRead(c *gin.Context, scope string) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"file_name": req.FileName, "content": string(data)})
+	c.JSON(http.StatusOK, gin.H{"file_name": req.FileName, "content": string(data), "scope": scope})
 }
 
 // WriteKnowledge writes/updates a knowledge file
@@ -167,10 +206,18 @@ func vectorWrite(c *gin.Context, scope string) {
 	var req struct {
 		FileName string `json:"file_name"`
 		Content  string `json:"content"`
+		Scope    string `json:"scope"` // optional: overrides the fixed scope parameter
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+	if req.Scope != "" {
+		if !isValidScope(req.Scope) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid scope"})
+			return
+		}
+		scope = req.Scope
 	}
 	if req.FileName == "" || !validatePath(req.FileName) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "valid file_name is required"})
@@ -188,9 +235,9 @@ func vectorWrite(c *gin.Context, scope string) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	// Trigger vector sync
+	// Trigger vector sync (also registers the dir for watching if new group scope)
 	core.SyncFileToVector(scope, path)
-	c.JSON(http.StatusOK, gin.H{"ok": true, "file_name": req.FileName})
+	c.JSON(http.StatusOK, gin.H{"ok": true, "file_name": req.FileName, "scope": scope})
 }
 
 // DeleteKnowledge deletes a knowledge file
@@ -208,10 +255,18 @@ func DeleteMemory(c *gin.Context) {
 func vectorDelete(c *gin.Context, scope string) {
 	var req struct {
 		FileName string `json:"file_name"`
+		Scope    string `json:"scope"` // optional: overrides the fixed scope parameter
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+	if req.Scope != "" {
+		if !isValidScope(req.Scope) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid scope"})
+			return
+		}
+		scope = req.Scope
 	}
 	if req.FileName == "" || !validatePath(req.FileName) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "valid file_name is required"})
@@ -236,6 +291,10 @@ func vectorDelete(c *gin.Context, scope string) {
 // GET /api/v1/vector/stats?scope=knowledge
 func StatsVector(c *gin.Context) {
 	scope := c.DefaultQuery("scope", "knowledge")
+	if !isValidScope(scope) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid scope"})
+		return
+	}
 	if !waitVectorReady(c) {
 		return
 	}

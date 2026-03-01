@@ -47,6 +47,10 @@ export const getMessages = (sessionId: number) =>
 export const compressSession = (id: number) =>
   request<{ ok: boolean }>(`/sessions/${id}/compress`, { method: 'POST' })
 
+// Truncate messages after a given message ID (used for retry-message feature)
+export const truncateMessages = (sessionId: number, afterMsgId: number) =>
+  request<{ ok: boolean }>(`/sessions/${sessionId}/messages?after=${afterMsgId}`, { method: 'DELETE' })
+
 // Switch session provider
 export const switchProvider = (id: number, providerId: string) =>
   request<{ ok: boolean; provider_id: string; provider_name: string }>(`/sessions/${id}/provider`, { method: 'PUT', body: JSON.stringify({ provider_id: providerId }) })

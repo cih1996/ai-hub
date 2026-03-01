@@ -168,6 +168,21 @@ func GetLastUserMessageID(sessionID int64) int64 {
 	return id
 }
 
+// DeleteMessagesAfter removes all messages with id > afterMsgID for the given session.
+// Used by the retry-message feature to truncate history before re-sending.
+func DeleteMessagesAfter(sessionID int64, afterMsgID int64) error {
+	_, err := DB.Exec(`DELETE FROM messages WHERE session_id = ? AND id > ?`, sessionID, afterMsgID)
+	return err
+}
+
+// HasAssistantMessages returns true if the session has at least one assistant message.
+// Used to determine whether a dead process's conversation can be resumed.
+func HasAssistantMessages(sessionID int64) bool {
+	var count int
+	DB.QueryRow(`SELECT COUNT(*) FROM messages WHERE session_id = ? AND role = 'assistant' LIMIT 1`, sessionID).Scan(&count)
+	return count > 0
+}
+
 func UpdateSessionTitle(id int64, title string) error {
 	_, err := DB.Exec(`UPDATE sessions SET title=?, updated_at=? WHERE id=?`, title, time.Now(), id)
 	return err

@@ -113,6 +113,7 @@ func main() {
 
 	// Start vector file watcher
 	vectorWatcher := core.StartVectorWatcher()
+	core.Watcher = vectorWatcher // expose globally for SyncFileToVector
 	defer vectorWatcher.Stop()
 
 	gin.SetMode(gin.ReleaseMode)
@@ -139,6 +140,7 @@ func main() {
 		v1.PUT("/sessions/:id", api.UpdateSession)
 		v1.DELETE("/sessions/:id", api.DeleteSession)
 		v1.GET("/sessions/:id/messages", api.GetMessages)
+		v1.DELETE("/sessions/:id/messages", api.TruncateMessages)
 		v1.POST("/sessions/:id/compress", api.CompressSession)
 		v1.PUT("/sessions/:id/provider", api.SwitchProvider)
 

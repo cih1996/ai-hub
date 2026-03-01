@@ -23,20 +23,55 @@ type fileSnapshot struct {
 	size    int64
 }
 
-// StartVectorWatcher begins polling watched directories
+// StartVectorWatcher begins polling watched directories.
+// Also discovers existing team-level knowledge/memory dirs under ~/.ai-hub/<groupname>/.
 func StartVectorWatcher() *VectorWatcher {
 	home, _ := os.UserHomeDir()
+	dirs := map[string]string{
+		filepath.Join(home, ".ai-hub", "knowledge"): "knowledge",
+		filepath.Join(home, ".ai-hub", "memory"):    "memory",
+	}
+	// Discover existing team-level knowledge/memory directories
+	aiHubDir := filepath.Join(home, ".ai-hub")
+	builtinDirs := map[string]bool{
+		"knowledge": true, "memory": true, "rules": true,
+		"skills": true, "notes": true, "scripts": true,
+		"vector-engine": true, "logs": true,
+	}
+	if entries, err := os.ReadDir(aiHubDir); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() || strings.HasPrefix(e.Name(), ".") || builtinDirs[e.Name()] {
+				continue
+			}
+			for _, sub := range []string{"knowledge", "memory"} {
+				subDir := filepath.Join(aiHubDir, e.Name(), sub)
+				if info, err2 := os.Stat(subDir); err2 == nil && info.IsDir() {
+					scope := e.Name() + "/" + sub
+					dirs[subDir] = scope
+					log.Printf("[vector-watcher] discovered team dir: %s -> scope=%s", subDir, scope)
+				}
+			}
+		}
+	}
 	w := &VectorWatcher{
 		stopCh:    make(chan struct{}),
 		snapshots: make(map[string]fileSnapshot),
-		dirs: map[string]string{
-			filepath.Join(home, ".ai-hub", "knowledge"): "knowledge",
-			filepath.Join(home, ".ai-hub", "memory"):    "memory",
-		},
+		dirs:      dirs,
 	}
 	go w.loop()
 	log.Println("[vector-watcher] started")
 	return w
+}
+
+// AddWatchDir dynamically registers a new directory for polling.
+// Called when a file is first written to a new team scope via the API.
+func (w *VectorWatcher) AddWatchDir(dir, scope string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if _, exists := w.dirs[dir]; !exists {
+		w.dirs[dir] = scope
+		log.Printf("[vector-watcher] added watch dir: %s -> scope=%s", dir, scope)
+	}
 }
 
 func (w *VectorWatcher) Stop() {
@@ -148,8 +183,17 @@ func (w *VectorWatcher) scopeForPath(path string) string {
 	return ""
 }
 
-// SyncFile is called externally (e.g., after WriteFile API) to trigger immediate sync
+// Watcher is the global VectorWatcher instance (set by StartVectorWatcher).
+var Watcher *VectorWatcher
+
+// SyncFileToVector is called externally (e.g., after WriteFile API) to trigger immediate sync.
+// Also registers the file's parent directory for watching if it's a new team scope dir.
 func SyncFileToVector(scope, filePath string) {
+	// Dynamically register the parent dir for watching (covers new team scope dirs)
+	if Watcher != nil {
+		dir := filepath.Dir(filePath)
+		Watcher.AddWatchDir(dir, scope)
+	}
 	if Vector == nil || !Vector.IsReady() {
 		return
 	}
