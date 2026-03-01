@@ -593,7 +593,7 @@ function formatToolInput(raw: string): string {
               v-html="renderMd(msg.content)"
             />
             <div v-else class="message-content">{{ msg.content }}</div>
-            <!-- Retry button: only for the last user message, hidden until hover -->
+            <!-- Retry button: only for the last user message, always visible -->
             <button
               v-if="msg.role === 'user' && msg.id === lastUserMsgId && !store.streaming"
               class="btn-retry"
@@ -604,7 +604,6 @@ function formatToolInput(raw: string): string {
                 <polyline points="1 4 1 10 7 10"/>
                 <path d="M3.51 15a9 9 0 1 0 .49-3.87"/>
               </svg>
-              重新发送
             </button>
             <div v-if="msg.role === 'assistant' && store.tokenUsageMap[msg.id]" class="token-usage">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><circle cx="9" cy="9" r="1.5"/><circle cx="15" cy="9" r="1.5"/><circle cx="9" cy="15" r="1.5"/><circle cx="15" cy="15" r="1.5"/></svg>
@@ -1040,12 +1039,12 @@ function formatToolInput(raw: string): string {
 .message.user .message-content { white-space: pre-wrap; }
 /* Retry button on last user message */
 .btn-retry {
-  display: none;
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
   margin-top: 6px;
-  padding: 4px 10px;
-  font-size: 11px;
+  width: 24px;
+  height: 24px;
   color: var(--text-muted);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -1057,9 +1056,6 @@ function formatToolInput(raw: string): string {
   color: var(--accent);
   border-color: var(--accent);
   background: var(--accent-soft);
-}
-.message.user:hover .btn-retry {
-  display: inline-flex;
 }
 .token-usage {
   display: flex; align-items: center; gap: 4px; margin-top: 6px;
