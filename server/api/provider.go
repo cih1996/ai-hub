@@ -58,6 +58,21 @@ func UpdateProvider(c *gin.Context) {
 	c.JSON(http.StatusOK, existing)
 }
 
+// SetProviderDefault handles PUT /api/v1/providers/:id/default
+// Atomically marks the given provider as the sole default, clearing all others.
+func SetProviderDefault(c *gin.Context) {
+	id := c.Param("id")
+	if err := store.SetProviderDefault(id); err != nil {
+		if err.Error() == "provider not found" {
+			c.JSON(http.StatusNotFound, gin.H{"error": "provider not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
 func DeleteProvider(c *gin.Context) {
 	id := c.Param("id")
 	if err := store.DeleteProvider(id); err != nil {

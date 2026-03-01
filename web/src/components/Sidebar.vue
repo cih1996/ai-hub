@@ -27,6 +27,10 @@ const route = useRoute()
 const deleteTarget = ref<Session | null>(null)
 const version = ref('')
 
+// New chat dialog
+const showNewChatDialog = ref(false)
+const newChatProviderId = ref('')
+
 onMounted(async () => {
   try {
     const res = await api.getVersion()
@@ -79,8 +83,15 @@ const groupedSessions = computed<SessionGroup[]>(() => {
   return result
 })
 
-function newChat() {
-  store.newChat()
+function openNewChatDialog() {
+  // Pre-select current default provider
+  newChatProviderId.value = store.defaultProvider?.id || ''
+  showNewChatDialog.value = true
+}
+
+function confirmNewChat() {
+  showNewChatDialog.value = false
+  store.newChat(newChatProviderId.value || undefined)
   router.push('/chat')
   if (isMobile.value) closeSidebar()
 }
@@ -144,7 +155,7 @@ onMounted(async () => {
     </div>
 
     <div class="sidebar-nav">
-      <button class="nav-item" @click="newChat">
+      <button class="nav-item" @click="openNewChatDialog">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M12 5v14M5 12h14"/>
         </svg>
@@ -271,6 +282,27 @@ onMounted(async () => {
           <div class="modal-actions">
             <button class="modal-btn cancel" @click="deleteTarget = null">取消</button>
             <button class="modal-btn confirm" @click="confirmDelete">删除</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- New chat dialog -->
+    <Teleport to="body">
+      <div v-if="showNewChatDialog" class="modal-overlay" @click="showNewChatDialog = false">
+        <div class="modal-box" @click.stop>
+          <p class="modal-title">新建会话</p>
+          <div class="modal-form-group">
+            <label class="modal-label">选择模型</label>
+            <select v-model="newChatProviderId" class="modal-select">
+              <option v-for="p in store.providers" :key="p.id" :value="p.id">
+                {{ p.name }}{{ p.is_default ? ' (默认)' : '' }}
+              </option>
+            </select>
+          </div>
+          <div class="modal-actions">
+            <button class="modal-btn cancel" @click="showNewChatDialog = false">取消</button>
+            <button class="modal-btn confirm-primary" @click="confirmNewChat">创建</button>
           </div>
         </div>
       </div>
@@ -543,6 +575,35 @@ onMounted(async () => {
 }
 .modal-btn.confirm:hover {
   opacity: 0.9;
+}
+.modal-btn.confirm-primary {
+  color: var(--btn-text);
+  background: var(--accent);
+}
+.modal-btn.confirm-primary:hover {
+  opacity: 0.9;
+}
+.modal-form-group {
+  margin-bottom: 16px;
+}
+.modal-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.modal-select {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 14px;
+  color: var(--text-primary);
+  cursor: pointer;
 }
 /* Mobile: show delete button always (no hover on touch) */
 @media (max-width: 768px) {

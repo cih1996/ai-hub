@@ -96,6 +96,11 @@ async function removeProvider(id: string) {
   await store.loadProviders()
 }
 
+async function setDefaultProvider(id: string) {
+  await api.setProviderDefault(id)
+  await store.loadProviders()
+}
+
 function maskKey(key: string): string {
   if (!key || key.length < 8) return '••••••••'
   return key.slice(0, 4) + '••••' + key.slice(-4)
@@ -154,6 +159,7 @@ onMounted(() => store.loadProviders())
               </div>
             </div>
             <div class="provider-actions">
+              <button v-if="!p.is_default" class="btn-sm btn-default" @click="setDefaultProvider(p.id)" title="设为默认运营商">设为默认</button>
               <button class="btn-sm" @click="editProvider(p)">编辑</button>
               <button class="btn-sm btn-danger" @click="removeProvider(p.id)">删除</button>
             </div>
@@ -307,6 +313,8 @@ onMounted(() => store.loadProviders())
 }
 .btn-sm:hover { background: var(--bg-hover); color: var(--text-primary); }
 .btn-danger:hover { background: rgba(239,68,68,0.15); color: var(--danger); }
+.btn-default { color: var(--accent); }
+.btn-default:hover { background: var(--accent-soft); color: var(--accent); }
 .empty { text-align: center; color: var(--text-muted); padding: 32px; font-size: 13px; }
 
 /* Modal */
