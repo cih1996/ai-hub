@@ -6,6 +6,7 @@ import { useChatStore } from '../stores/chat'
 import { useRouter, useRoute } from 'vue-router'
 import * as api from '../composables/api'
 import { useTheme, type ThemeMode } from '../composables/theme'
+import TeamDetailModal from './TeamDetailModal.vue'
 
 const isMobile = inject<Ref<boolean>>('isMobile', ref(false))
 const closeSidebar = inject<() => void>('closeSidebar', () => {})
@@ -26,6 +27,9 @@ const route = useRoute()
 
 const deleteTarget = ref<Session | null>(null)
 const version = ref('')
+
+// Team detail modal
+const teamDetailGroup = ref('')  // non-empty = show modal for this group_name
 
 // New chat dialog
 const showNewChatDialog = ref(false)
@@ -271,7 +275,17 @@ onMounted(async () => {
 
     <div v-show="!sessionListCollapsed" class="session-list">
       <template v-for="group in displayGroupedSessions" :key="group.key">
-        <div v-if="displayGroupedSessions.length > 1 || (activeGroupTab === '' && namedGroupTabs.length > 0)" class="group-label">{{ group.label }}</div>
+        <div
+          v-if="displayGroupedSessions.length > 1 || (activeGroupTab === '' && namedGroupTabs.length > 0)"
+          class="group-label"
+          :class="{ 'group-label-clickable': namedGroupTabs.includes(group.key) }"
+          @click="namedGroupTabs.includes(group.key) && (teamDetailGroup = group.key)"
+        >
+          {{ group.label }}
+          <svg v-if="namedGroupTabs.includes(group.key)" class="group-label-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+        </div>
         <div
           v-for="s in group.sessions"
           :key="s.id"
@@ -382,6 +396,13 @@ onMounted(async () => {
         </div>
       </div>
     </Teleport>
+
+    <!-- Team detail modal -->
+    <TeamDetailModal
+      :visible="!!teamDetailGroup"
+      :group-name="teamDetailGroup"
+      @close="teamDetailGroup = ''"
+    />
   </aside>
 </template>
 
@@ -486,11 +507,25 @@ onMounted(async () => {
   font-size: 11px;
   color: var(--text-muted);
   padding: 8px 12px 4px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
   border-bottom: 1px solid var(--border);
   margin-bottom: 4px;
+}
+.group-label-clickable {
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: color var(--transition);
+}
+.group-label-clickable:hover {
+  color: var(--accent);
+}
+.group-label-icon {
+  flex-shrink: 0;
+  opacity: 0.6;
 }
 .session-item {
   display: flex;
