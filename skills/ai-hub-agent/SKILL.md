@@ -50,7 +50,7 @@ curl -X POST http://localhost:$AI_HUB_PORT/api/v1/chat/send \
 - `session_id: 0` — 创建新会话
 - `content` — 任务指令，写清楚你要这个会话做什么
 - `work_dir` — 该会话的工作目录，CLI 将在此目录下运行。省略或空字符串则使用用户 home 目录
-- `group_name` — 会话分组名称，同一团队的所有会话应使用相同的 group_name，前端侧边栏会按此字段分组显示。省略或空字符串则归入默认组。**非空 group_name 还会触发团队规则注入**：系统自动读取 `~/.ai-hub/<group_name>/rules/*.md` 合并到 system prompt（优先级：全局规则 < 团队规则 < 会话级规则）
+- `group_name` — 会话分组名称，同一团队的所有会话应使用相同的 group_name，前端侧边栏会按此字段分组显示。省略或空字符串则归入默认组。**非空 group_name 还会触发团队规则注入**：系统自动读取 `~/.ai-hub/teams/<group_name>/rules/*.md` 合并到 system prompt（优先级：全局规则 < 团队规则 < 会话级规则），同时注入 `AI_HUB_GROUP_NAME` 环境变量供 AI 感知自身团队归属
 
 记住返回的 `session_id`，后续所有操作都靠它。
 
@@ -430,6 +430,7 @@ curl -X POST http://localhost:$AI_HUB_PORT/api/v1/chat/send \
 7. 你自己也运行在一个会话中，不要向自己的 session_id 发送消息
 8. 你的会话 ID 可通过 `$AI_HUB_SESSION_ID` 环境变量获取，用于查询和管理自己的触发器
 9. 通过 `process_alive` 字段可判断会话是否有活跃进程，`idle_sec` 可判断进程空闲时长
+13. **每个会话进程可通过环境变量感知自身身份**：`AI_HUB_SESSION_ID`（会话ID）、`AI_HUB_GROUP_NAME`（团队名，无团队为空）、`AI_HUB_PORT`（服务端口）
 10. **创建多角色协作团队时，必须为每个角色会话写入会话级规则（session-rules），确保角色定位持久化，进程重启后自动恢复**
 11. **会话级规则通过 `PUT /api/v1/session-rules/{session_id}` 写入，通过 `GET /api/v1/session-rules/{session_id}` 读取**
 12. **创建多角色协作团队时，所有角色会话应使用相同的 group_name，确保前端侧边栏将它们归为一组显示**

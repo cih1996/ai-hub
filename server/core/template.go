@@ -64,15 +64,33 @@ func TemplateDir() string {
 	return templateDir
 }
 
-// BuildTeamRules reads all *.md files from ~/.ai-hub/<groupName>/rules/ (flat),
+// ScopeDir returns the filesystem directory for the given vector scope.
+// Global scopes (e.g. "knowledge") resolve to ~/.ai-hub/knowledge.
+// Team scopes (e.g. "团队名/knowledge") resolve to ~/.ai-hub/teams/团队名/knowledge.
+func ScopeDir(scope string) string {
+	home, _ := os.UserHomeDir()
+	if idx := strings.LastIndex(scope, "/"); idx > 0 {
+		groupName := scope[:idx]
+		suffix := scope[idx+1:]
+		return filepath.Join(home, ".ai-hub", "teams", groupName, suffix)
+	}
+	return filepath.Join(home, ".ai-hub", scope)
+}
+
+// TeamDir returns the base directory for a team's resources.
+func TeamDir(groupName string) string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".ai-hub", "teams", groupName)
+}
+
+// BuildTeamRules reads all *.md files from ~/.ai-hub/teams/<groupName>/rules/ (flat),
 // concatenates them sorted by name, renders template variables, and returns
 // the combined content. Returns "" when groupName is empty or no files found.
 func BuildTeamRules(groupName string) string {
 	if groupName == "" {
 		return ""
 	}
-	home, _ := os.UserHomeDir()
-	teamRulesDir := filepath.Join(home, ".ai-hub", groupName, "rules")
+	teamRulesDir := filepath.Join(TeamDir(groupName), "rules")
 	entries, err := os.ReadDir(teamRulesDir)
 	if err != nil {
 		return ""

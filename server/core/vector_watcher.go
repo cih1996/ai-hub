@@ -31,20 +31,15 @@ func StartVectorWatcher() *VectorWatcher {
 		filepath.Join(home, ".ai-hub", "knowledge"): "knowledge",
 		filepath.Join(home, ".ai-hub", "memory"):    "memory",
 	}
-	// Discover existing team-level knowledge/memory directories
-	aiHubDir := filepath.Join(home, ".ai-hub")
-	builtinDirs := map[string]bool{
-		"knowledge": true, "memory": true, "rules": true,
-		"skills": true, "notes": true, "scripts": true,
-		"vector-engine": true, "logs": true,
-	}
-	if entries, err := os.ReadDir(aiHubDir); err == nil {
+	// Discover existing team-level knowledge/memory directories under ~/.ai-hub/teams/
+	teamsDir := filepath.Join(home, ".ai-hub", "teams")
+	if entries, err := os.ReadDir(teamsDir); err == nil {
 		for _, e := range entries {
-			if !e.IsDir() || strings.HasPrefix(e.Name(), ".") || builtinDirs[e.Name()] {
+			if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
 				continue
 			}
 			for _, sub := range []string{"knowledge", "memory"} {
-				subDir := filepath.Join(aiHubDir, e.Name(), sub)
+				subDir := filepath.Join(teamsDir, e.Name(), sub)
 				if info, err2 := os.Stat(subDir); err2 == nil && info.IsDir() {
 					scope := e.Name() + "/" + sub
 					dirs[subDir] = scope
