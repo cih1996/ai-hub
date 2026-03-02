@@ -128,7 +128,7 @@ curl "http://localhost:$AI_HUB_PORT/api/v1/files/variables"
 
 存储位置：`~/.ai-hub/teams/<group_name>/rules/*.md`（所有 `.md` 文件按文件名排序合并）
 
-**操作方法：** 通过「向量知识库」Skill 读写 `<group_name>/rules` scope：
+**读取方法：** 通过「向量知识库」Skill 读取 `<group_name>/rules` scope（仅支持 list 和 read，不支持 write/delete）：
 
 ```bash
 # 列出团队规则文件
@@ -140,10 +140,9 @@ curl -X POST http://localhost:$AI_HUB_PORT/api/v1/vector/read \
   -d '{"scope": "AI Hub 维护团队/rules", "file_name": "CLAUDE.md"}'
 ```
 
-**直接操作（Read/Edit）：** 团队规则文件不走向量引擎，也可用 Read/Edit 工具直接访问：
-```
-~/.ai-hub/teams/<group_name>/rules/<文件名>.md
-```
+**写入方法：** 团队规则文件需通过以下方式写入（向量 API 不支持 rules scope 写入）：
+- 直接使用 Read/Edit 工具操作：`~/.ai-hub/teams/<group_name>/rules/<文件名>.md`
+- 或通过文件管理 API：`PUT /api/v1/files/content` scope=`<group_name>/rules`
 
 **生效时机：** 修改后，下次该团队会话发送消息时自动注入新内容（无需重启进程，但现有进程的历史上下文已有旧规则，新内容仅对后续对话生效）。
 
