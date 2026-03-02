@@ -28,12 +28,36 @@ func TemplateVars() map[string]string {
 		"DATE":          now.Format("2006-01-02"),
 		"DATETIME":      now.Format("2006-01-02 15:04:05"),
 		"TIME_BEIJING":  now.In(bjLoc).Format("2006-01-02 15:04:05"),
+		// Runtime-injected vars (populated per session at stream build time).
+		"AI_HUB_SESSION_ID":           "",
+		"AI_HUB_PORT":                 hubPort,
+		"AI_HUB_GROUP_NAME":           "",
+		"AI_HUB_SESSION_MESSAGES_API": "",
 	}
+}
+
+// TemplateVarsWithExtra returns template vars merged with extra runtime variables.
+// Extra keys override defaults when duplicated.
+func TemplateVarsWithExtra(extra map[string]string) map[string]string {
+	vars := TemplateVars()
+	for k, v := range extra {
+		if strings.TrimSpace(k) == "" {
+			continue
+		}
+		vars[k] = v
+	}
+	return vars
 }
 
 // RenderTemplate replaces {{VAR}} placeholders in content with actual values.
 func RenderTemplate(content string) string {
-	vars := TemplateVars()
+	return RenderTemplateWithVars(content, nil)
+}
+
+// RenderTemplateWithVars replaces {{VAR}} placeholders in content with actual values,
+// merged with optional extra runtime variables.
+func RenderTemplateWithVars(content string, extra map[string]string) string {
+	vars := TemplateVarsWithExtra(extra)
 	for k, v := range vars {
 		content = strings.ReplaceAll(content, "{{"+k+"}}", v)
 	}
@@ -87,6 +111,13 @@ func TeamDir(groupName string) string {
 // concatenates them sorted by name, renders template variables, and returns
 // the combined content. Returns "" when groupName is empty or no files found.
 func BuildTeamRules(groupName string) string {
+	return BuildTeamRulesWithVars(groupName, nil)
+}
+
+// BuildTeamRulesWithVars reads all *.md files from ~/.ai-hub/teams/<groupName>/rules/ (flat),
+// concatenates them sorted by name, renders template variables + extra vars, and returns
+// the combined content. Returns "" when groupName is empty or no files found.
+func BuildTeamRulesWithVars(groupName string, extra map[string]string) string {
 	if groupName == "" {
 		return ""
 	}
@@ -112,13 +143,20 @@ func BuildTeamRules(groupName string) string {
 		}
 	}
 	combined := strings.Join(parts, "\n\n---\n\n")
-	return RenderTemplate(combined)
+	return RenderTemplateWithVars(combined, extra)
 }
 
 // BuildSystemPrompt reads all *.md files from ~/.ai-hub/rules/ (flat),
 // concatenates them sorted by name, appends Skills summary, renders variables,
 // and returns the full system prompt.
 func BuildSystemPrompt() string {
+	return BuildSystemPromptWithVars(nil)
+}
+
+// BuildSystemPromptWithVars reads all *.md files from ~/.ai-hub/rules/ (flat),
+// concatenates them sorted by name, appends Skills summary, renders template variables
+// with optional extra vars, and returns the full system prompt.
+func BuildSystemPromptWithVars(extra map[string]string) string {
 	entries, err := os.ReadDir(templateDir)
 	if err != nil {
 		return ""
@@ -146,7 +184,7 @@ func BuildSystemPrompt() string {
 	}
 
 	combined := strings.Join(parts, "\n\n---\n\n")
-	return RenderTemplate(combined)
+	return RenderTemplateWithVars(combined, extra)
 }
 
 // buildSkillsSummary scans ~/.ai-hub/skills/*/SKILL.md, extracts YAML

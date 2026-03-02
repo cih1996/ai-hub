@@ -38,6 +38,10 @@ interface FileItem {
   content: string | null   // null = not yet loaded
   expanded: boolean
   loading: boolean
+  editing: boolean
+  draft: string
+  saving: boolean
+  deleting: boolean
 }
 
 const files = ref<FileItem[]>([])
@@ -53,7 +57,16 @@ async function loadFiles() {
   files.value = []
   try {
     const names = await api.listVectorFiles(scope.value)
-    files.value = names.map((name) => ({ name, content: null, expanded: false, loading: false }))
+    files.value = names.map((name) => ({
+      name,
+      content: null,
+      expanded: false,
+      loading: false,
+      editing: false,
+      draft: '',
+      saving: false,
+      deleting: false,
+    }))
   } catch (e: any) {
     listError.value = e.message || '加载失败'
   } finally {
@@ -61,25 +74,65 @@ async function loadFiles() {
   }
 }
 
-async function toggleFile(item: FileItem) {
-  if (item.expanded) {
-    item.expanded = false
-    return
-  }
-  if (item.content !== null) {
-    item.expanded = true
-    return
-  }
+async function loadContent(item: FileItem) {
+  if (item.content !== null) return
   item.loading = true
   try {
     const res = await api.readVectorFile(scope.value, item.name)
     item.content = res.content
-    item.expanded = true
+    item.draft = res.content
   } catch {
     item.content = '读取文件内容失败'
-    item.expanded = true
+    item.draft = item.content
   } finally {
     item.loading = false
+  }
+}
+
+async function toggleFile(item: FileItem) {
+  if (item.expanded && !item.editing) {
+    item.expanded = false
+    return
+  }
+  await loadContent(item)
+  item.expanded = true
+}
+
+async function startEdit(item: FileItem) {
+  await loadContent(item)
+  item.editing = true
+  item.expanded = true
+}
+
+function cancelEdit(item: FileItem) {
+  item.editing = false
+  item.draft = item.content ?? ''
+}
+
+async function saveRule(item: FileItem) {
+  item.saving = true
+  try {
+    await api.writeVectorFile(scope.value, item.name, item.draft)
+    item.content = item.draft
+    item.editing = false
+  } catch (e: any) {
+    alert('保存失败: ' + (e.message || '未知错误'))
+  } finally {
+    item.saving = false
+  }
+}
+
+async function deleteFile(item: FileItem) {
+  if (activeTab.value === 'rules') return
+  if (!confirm(`确定删除 ${item.name}？`)) return
+  item.deleting = true
+  try {
+    await api.deleteVectorFile(scope.value, item.name)
+    files.value = files.value.filter((f) => f.name !== item.name)
+  } catch (e: any) {
+    alert('删除失败: ' + (e.message || '未知错误'))
+  } finally {
+    item.deleting = false
   }
 }
 
@@ -168,7 +221,7 @@ watch(
               class="tdm-file"
             >
               <!-- File header row -->
-              <button class="tdm-file-header" @click="toggleFile(item)">
+              <div class="tdm-file-header" @click="toggleFile(item)">
                 <svg
                   class="tdm-chevron"
                   :class="{ expanded: item.expanded }"
@@ -184,11 +237,32 @@ watch(
                 <svg v-if="item.loading" class="tdm-spin tdm-inline-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M21 12a9 9 0 11-6.219-8.56"/>
                 </svg>
-              </button>
+                <button
+                  v-if="activeTab === 'rules'"
+                  class="tdm-action-btn"
+                  :disabled="item.loading || item.saving"
+                  @click.stop="startEdit(item)"
+                >编辑</button>
+                <button
+                  v-else
+                  class="tdm-action-btn tdm-action-danger"
+                  :disabled="item.deleting || item.loading"
+                  @click.stop="deleteFile(item)"
+                >{{ item.deleting ? '删除中…' : '删除' }}</button>
+              </div>
 
               <!-- File content -->
               <div v-if="item.expanded && item.content !== null" class="tdm-file-content">
-                <pre>{{ item.content }}</pre>
+                <template v-if="activeTab === 'rules' && item.editing">
+                  <textarea v-model="item.draft" class="tdm-editor" spellcheck="false" />
+                  <div class="tdm-editor-actions">
+                    <button class="tdm-action-btn" :disabled="item.saving" @click="cancelEdit(item)">取消</button>
+                    <button class="tdm-action-btn tdm-action-primary" :disabled="item.saving" @click="saveRule(item)">
+                      {{ item.saving ? '保存中…' : '保存' }}
+                    </button>
+                  </div>
+                </template>
+                <pre v-else>{{ item.content }}</pre>
               </div>
             </div>
           </div>
@@ -371,6 +445,46 @@ watch(
   border-top: 1px solid var(--border);
   max-height: 300px;
   overflow-y: auto;
+}
+.tdm-action-btn {
+  padding: 3px 8px;
+  font-size: 11px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.tdm-action-btn:hover { color: var(--text-primary); }
+.tdm-action-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.tdm-action-primary {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+.tdm-action-danger {
+  color: var(--danger, #ef4444);
+  border-color: color-mix(in srgb, var(--danger, #ef4444) 30%, var(--border));
+}
+.tdm-editor {
+  width: 100%;
+  min-height: 180px;
+  padding: 12px 14px;
+  border: none;
+  resize: vertical;
+  outline: none;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+}
+.tdm-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-secondary);
 }
 .tdm-file-content pre {
   margin: 0;

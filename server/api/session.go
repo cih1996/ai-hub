@@ -182,6 +182,10 @@ func CompressSession(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
 		return
 	}
+	// Capture recent messages before reset to build one-shot recovery seed.
+	if msgs, err := store.GetMessages(id); err == nil && len(msgs) > 0 {
+		setPendingRecoverySeed(id, buildRecoverySeed(msgs, "上下文压缩后恢复"))
+	}
 
 	newUUID := uuid.New().String()
 	core.Pool.Kill(id)
@@ -189,6 +193,8 @@ func CompressSession(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update session id"})
 		return
 	}
+	// Session reset happened: next run must start fresh (no --resume).
+	markForceFreshRun(id)
 	session.ClaudeSessionID = newUUID
 
 	// Save a system message indicating compression
@@ -202,8 +208,8 @@ func CompressSession(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true, "message": "context compressed, session reset"})
 }
 
-// buildCondensedQuery takes recent messages and builds a condensed prompt for context recovery.
-func buildCondensedQuery(msgs []model.Message) string {
+// buildRecoverySeed takes recent messages and builds a condensed prompt for context recovery.
+func buildRecoverySeed(msgs []model.Message, reason string) string {
 	const maxMsgs = 10
 	const maxContentLen = 500
 
@@ -214,7 +220,10 @@ func buildCondensedQuery(msgs []model.Message) string {
 	recent := msgs[start:]
 
 	var sb strings.Builder
-	sb.WriteString("【上下文恢复】之前的对话因上下文过长被手动压缩。以下是最近的对话记录，请基于这些信息继续工作：\n\n")
+	if strings.TrimSpace(reason) == "" {
+		reason = "会话重置后恢复"
+	}
+	sb.WriteString(fmt.Sprintf("【上下文恢复】本轮因“%s”进入新会话。请先基于以下历史记录恢复上下文，再继续处理当前用户请求。\n\n", reason))
 
 	for _, m := range recent {
 		role := "用户"
@@ -229,7 +238,8 @@ func buildCondensedQuery(msgs []model.Message) string {
 		sb.WriteString(fmt.Sprintf("[%s]: %s\n\n", role, content))
 	}
 
-	sb.WriteString("---\n请继续处理上面最后一条用户消息的请求。如果之前有未完成的任务，请继续完成。")
+	sb.WriteString(fmt.Sprintf("\n---\n如需完整历史，请调用：GET /api/v1/sessions/%d/messages（不要使用不存在的接口）。\n", msgs[len(msgs)-1].SessionID))
+	sb.WriteString("请继续处理上面最后一条用户消息的请求；若存在未完成任务，延续执行。")
 	return sb.String()
 }
 
@@ -261,6 +271,10 @@ func SwitchProvider(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
 		return
 	}
+	// Capture recent messages before provider switch reset.
+	if msgs, err := store.GetMessages(id); err == nil && len(msgs) > 0 {
+		setPendingRecoverySeed(id, buildRecoverySeed(msgs, "切换模型/供应商后恢复"))
+	}
 
 	// Verify provider exists
 	provider, err := store.GetProvider(body.ProviderID)
@@ -283,6 +297,9 @@ func SwitchProvider(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	// Provider switched and CLI session reset: force one fresh run to avoid
+	// accidental --resume against the new UUID.
+	markForceFreshRun(id)
 
 	// Save system message
 	sysMsg := &model.Message{

@@ -279,8 +279,16 @@ func GetTemplateVars(c *gin.Context) {
 		"DATE":          "当前日期",
 		"DATETIME":      "当前本地时间",
 		"TIME_BEIJING":  "当前北京时间",
+		"AI_HUB_SESSION_ID": "当前会话ID（运行时注入）",
+		"AI_HUB_PORT":       "当前服务端口（运行时注入）",
+		"AI_HUB_GROUP_NAME": "当前团队名（运行时注入）",
+		"AI_HUB_SESSION_MESSAGES_API": "当前会话消息接口（运行时注入）",
 	}
-	order := []string{"HOME_DIR", "CLAUDE_DIR", "MEMORY_DIR", "KNOWLEDGE_DIR", "RULES_DIR", "OS", "PORT", "DATE", "DATETIME", "TIME_BEIJING"}
+	order := []string{
+		"HOME_DIR", "CLAUDE_DIR", "MEMORY_DIR", "KNOWLEDGE_DIR", "RULES_DIR",
+		"OS", "PORT", "DATE", "DATETIME", "TIME_BEIJING",
+		"AI_HUB_SESSION_ID", "AI_HUB_PORT", "AI_HUB_GROUP_NAME", "AI_HUB_SESSION_MESSAGES_API",
+	}
 	result := make([]VarInfo, 0, len(order))
 	for _, k := range order {
 		result = append(result, VarInfo{Name: k, Desc: descs[k], Value: vars[k]})

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -134,6 +135,18 @@ func SearchKnowledge(c *gin.Context) {
 // POST /api/v1/vector/search_memory
 func SearchMemory(c *gin.Context) {
 	vectorSearch(c, "memory")
+}
+
+// ListKnowledgeFiles lists knowledge files with optional session_id auto-scope.
+// GET /api/v1/vector/list_knowledge?session_id=<id>&scope=<optional>
+func ListKnowledgeFiles(c *gin.Context) {
+	vectorList(c, "knowledge")
+}
+
+// ListMemoryFiles lists memory files with optional session_id auto-scope.
+// GET /api/v1/vector/list_memory?session_id=<id>&scope=<optional>
+func ListMemoryFiles(c *gin.Context) {
+	vectorList(c, "memory")
 }
 
 func vectorSearch(c *gin.Context, defaultScope string) {
@@ -280,6 +293,13 @@ func WriteMemory(c *gin.Context) {
 	vectorWrite(c, "memory")
 }
 
+// WriteVector writes/updates a file in any valid vector scope.
+// POST /api/v1/vector/write
+func WriteVector(c *gin.Context) {
+	// Default scope is only used when request omits scope.
+	vectorWrite(c, "knowledge")
+}
+
 func vectorWrite(c *gin.Context, defaultScope string) {
 	var req struct {
 		FileName  string `json:"file_name"`
@@ -331,6 +351,13 @@ func DeleteKnowledge(c *gin.Context) {
 // POST /api/v1/vector/delete_memory
 func DeleteMemory(c *gin.Context) {
 	vectorDelete(c, "memory")
+}
+
+// DeleteVector deletes a file in any valid vector scope.
+// POST /api/v1/vector/delete
+func DeleteVector(c *gin.Context) {
+	// Default scope is only used when request omits scope.
+	vectorDelete(c, "knowledge")
 }
 
 func vectorDelete(c *gin.Context, defaultScope string) {
@@ -467,6 +494,54 @@ func ListVectorFiles(c *gin.Context) {
 		files = []string{}
 	}
 	c.JSON(http.StatusOK, files)
+}
+
+// vectorList lists .md files in defaultScope or resolved team scope.
+// Priority: explicit scope > session_id team scope > defaultScope.
+func vectorList(c *gin.Context, defaultScope string) {
+	scope := strings.TrimSpace(c.Query("scope"))
+	sessionIDStr := strings.TrimSpace(c.Query("session_id"))
+
+	if scope != "" {
+		if !isValidScope(scope) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid scope"})
+			return
+		}
+	} else if sessionIDStr != "" {
+		sessionID, err := strconv.ParseInt(sessionIDStr, 10, 64)
+		if err != nil || sessionID <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid session_id"})
+			return
+		}
+		if teamScope := resolveTeamScope(sessionID, defaultScope); teamScope != "" {
+			scope = teamScope
+		} else {
+			scope = defaultScope
+		}
+	} else {
+		scope = defaultScope
+	}
+
+	dir := core.ScopeDir(scope)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			c.JSON(http.StatusOK, gin.H{"scope": scope, "files": []string{}})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	var files []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
+			files = append(files, e.Name())
+		}
+	}
+	if files == nil {
+		files = []string{}
+	}
+	c.JSON(http.StatusOK, gin.H{"scope": scope, "files": files})
 }
 
 // ReadVector reads a single file from any valid scope (filesystem only, no engine required).

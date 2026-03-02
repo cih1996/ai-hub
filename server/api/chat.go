@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -54,6 +55,11 @@ func (c *wsClient) Ping() error {
 var (
 	wsClients   = make(map[*wsClient]struct{})
 	wsClientsMu sync.RWMutex
+	// pendingRecoverySeed stores one-shot context recovery text per session.
+	// It is consumed on the next runStream turn after session reset actions
+	// (e.g. compress/switch provider), to avoid context loss.
+	pendingRecoverySeed   = make(map[int64]string)
+	pendingRecoverySeedMu sync.Mutex
 )
 
 func registerClient(c *wsClient) {
@@ -66,6 +72,24 @@ func unregisterClient(c *wsClient) {
 	wsClientsMu.Lock()
 	delete(wsClients, c)
 	wsClientsMu.Unlock()
+}
+
+func setPendingRecoverySeed(sessionID int64, seed string) {
+	seed = strings.TrimSpace(seed)
+	if seed == "" {
+		return
+	}
+	pendingRecoverySeedMu.Lock()
+	pendingRecoverySeed[sessionID] = seed
+	pendingRecoverySeedMu.Unlock()
+}
+
+func takePendingRecoverySeed(sessionID int64) string {
+	pendingRecoverySeedMu.Lock()
+	defer pendingRecoverySeedMu.Unlock()
+	seed := pendingRecoverySeed[sessionID]
+	delete(pendingRecoverySeed, sessionID)
+	return seed
 }
 
 // Broadcast sends a message to ALL connected WS clients
@@ -405,6 +429,11 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 	log.Printf("[chat] session=%d provider=%s mode=%s model=%s base_url=%s",
 		session.ID, provider.Name, provider.Mode, provider.ModelID, provider.BaseURL)
 
+	// One-shot recovery seed after session reset actions.
+	if seed := takePendingRecoverySeed(session.ID); strings.TrimSpace(seed) != "" {
+		query = seed + "\n\n---\n\n" + query
+	}
+
 	// isResume: true when the persistent process is alive OR when the session has
 	// completed assistant messages in DB (i.e., we need to restore the conversation).
 	// If previous turn detected "No conversation found", force one fresh run to avoid
@@ -532,6 +561,20 @@ type StepsMetadata struct {
 	Thinking string     `json:"thinking,omitempty"` // truncated thinking summary
 }
 
+func runtimeTemplateVars(sessID int64, groupName string) map[string]string {
+	vars := map[string]string{
+		"AI_HUB_SESSION_ID": strconv.FormatInt(sessID, 10),
+	}
+	if port := core.GetPort(); port != "" {
+		vars["AI_HUB_PORT"] = port
+		vars["AI_HUB_SESSION_MESSAGES_API"] = "http://127.0.0.1:" + port + "/api/v1/sessions/" + strconv.FormatInt(sessID, 10) + "/messages"
+	}
+	if strings.TrimSpace(groupName) != "" {
+		vars["AI_HUB_GROUP_NAME"] = groupName
+	}
+	return vars
+}
+
 func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID string, resume bool, send func(WSMessage), sessID int64, workDir string, groupName string) (string, string, int64, int64, int64, int64, error) {
 	req := core.ClaudeCodeRequest{
 		Query:        query,
@@ -555,17 +598,19 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 	// ① 全局规则 (~/.ai-hub/rules/*.md)
 	// ② 团队规则 (~/.ai-hub/teams/<group_name>/rules/*.md)，仅团队会话生效
 	// ③ 会话角色规则 (session-rules/<sessID>.md)
+	// 变量替换：支持会话级动态变量（如 {{AI_HUB_SESSION_ID}}）
 	// 注：Claude CLI 的 --setting-sources 可控制是否加载项目级 .claude/CLAUDE.md，
 	//     当前暂不禁用，仍允许工作目录项目规则生效（待后续评估）
+	tplVars := runtimeTemplateVars(sessID, groupName)
 	var promptParts []string
-	if globalPrompt := core.BuildSystemPrompt(); globalPrompt != "" {
+	if globalPrompt := core.BuildSystemPromptWithVars(tplVars); globalPrompt != "" {
 		promptParts = append(promptParts, globalPrompt)
 	}
-	if teamRules := core.BuildTeamRules(groupName); teamRules != "" {
+	if teamRules := core.BuildTeamRulesWithVars(groupName, tplVars); teamRules != "" {
 		promptParts = append(promptParts, teamRules)
 	}
 	if rules, err := ReadSessionRules(sessID); err == nil && rules != "" {
-		promptParts = append(promptParts, rules)
+		promptParts = append(promptParts, core.RenderTemplateWithVars(rules, tplVars))
 	}
 	if len(promptParts) > 0 {
 		req.SystemPrompt = strings.Join(promptParts, "\n\n---\n\n")

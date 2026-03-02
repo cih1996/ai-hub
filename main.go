@@ -209,13 +209,17 @@ func main() {
 		v1.POST("/vector/read_memory", api.ReadMemory)
 		v1.POST("/vector/write_knowledge", api.WriteKnowledge)
 		v1.POST("/vector/write_memory", api.WriteMemory)
+		v1.POST("/vector/write", api.WriteVector)
 		v1.POST("/vector/delete_knowledge", api.DeleteKnowledge)
 		v1.POST("/vector/delete_memory", api.DeleteMemory)
+		v1.POST("/vector/delete", api.DeleteVector)
 		v1.GET("/vector/stats", api.StatsVector)
 		v1.GET("/vector/status", api.VectorStatus)
 		v1.GET("/vector/health", api.VectorHealth)
 		v1.POST("/vector/restart", api.RestartVector)
 		v1.GET("/vector/list", api.ListVectorFiles)
+		v1.GET("/vector/list_knowledge", api.ListKnowledgeFiles)
+		v1.GET("/vector/list_memory", api.ListMemoryFiles)
 		v1.POST("/vector/read", api.ReadVector)
 
 		// Export / Import

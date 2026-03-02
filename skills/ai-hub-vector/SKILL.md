@@ -135,6 +135,36 @@ curl "http://localhost:$AI_HUB_PORT/api/v1/vector/list?scope=knowledge"
 
 返回：`["文件A.md", "文件B.md"]`
 
+### 9.1 列出知识库文件（推荐，支持 session_id 自动团队）
+
+```bash
+# 推荐：按当前会话自动定位团队知识库（无团队则回退全局 knowledge）
+curl "http://localhost:$AI_HUB_PORT/api/v1/vector/list_knowledge?session_id=$AI_HUB_SESSION_ID"
+
+# 显式指定 scope（覆盖自动推断）
+curl "http://localhost:$AI_HUB_PORT/api/v1/vector/list_knowledge?scope=AI%20Hub%20维护团队/knowledge"
+```
+
+返回：
+```json
+{"scope":"AI Hub 维护团队/knowledge","files":["A.md","B.md"]}
+```
+
+### 9.2 列出记忆库文件（推荐，支持 session_id 自动团队）
+
+```bash
+# 推荐：按当前会话自动定位团队记忆库（无团队则回退全局 memory）
+curl "http://localhost:$AI_HUB_PORT/api/v1/vector/list_memory?session_id=$AI_HUB_SESSION_ID"
+
+# 显式指定 scope（覆盖自动推断）
+curl "http://localhost:$AI_HUB_PORT/api/v1/vector/list_memory?scope=AI%20Hub%20维护团队/memory"
+```
+
+返回：
+```json
+{"scope":"AI Hub 维护团队/memory","files":["X.md","Y.md"]}
+```
+
 ### 10. 读取任意 scope 文件（通用）
 
 不区分 knowledge/memory，指定 scope 和文件名即可读取：
@@ -179,6 +209,25 @@ curl -X POST http://localhost:$AI_HUB_PORT/api/v1/vector/search_memory \
 - **记忆库**：每个文件单一主题，控制 50 行以内，文件名体现主题
 - 写入前先搜索，避免重复创建；发现内容过时立即用 write 接口更新
 - **团队会话传 `session_id` 即可自动写入团队库**，无需手动指定 scope
+
+#### 主文件机制（强制）
+
+同一主题只能维护一个主文件（canonical file）：
+
+1. 写入前必须先 `search_*` 检索同主题候选文件。
+2. 命中候选时，优先选择已有主文件并执行更新，不新建平行文件。
+3. 仅在“确实无同主题文件”时允许新建。
+4. 发现同主题多文件并存时，必须执行收敛：
+- 选定一个主文件承载“当前有效状态”。
+- 将其他文件内容合并后删除或标记废弃。
+- 收敛完成前不得继续新增同主题文件。
+
+#### 内容写法规范（强制）
+
+1. 正文写“当前有效状态”，禁止把“本次新增/增强版/本次修改/新版”作为正文主体。
+2. 历史变更统一写在同文件末尾 `变更记录`，不要拆成多个迭代文件。
+3. 文件名保持稳定，不使用 `xxx-增强版.md`、`xxx-v2.md` 这类时态命名。
+4. 禁止过程复盘叙事进入正文：不写“此前问题经过/为什么当时失败/本次如何修复”，只写可执行结论、参数与边界。
 
 ### 可用环境变量
 

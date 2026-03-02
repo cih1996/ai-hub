@@ -202,6 +202,20 @@ export const readVectorFile = (scope: string, fileName: string) =>
     body: JSON.stringify({ scope, file_name: fileName }),
   })
 
+// Write a single file to any valid vector scope
+export const writeVectorFile = (scope: string, fileName: string, content: string) =>
+  request<{ ok: boolean; file_name: string; scope: string }>('/vector/write', {
+    method: 'POST',
+    body: JSON.stringify({ scope, file_name: fileName, content }),
+  })
+
+// Delete a single file from any valid vector scope
+export const deleteVectorFile = (scope: string, fileName: string) =>
+  request<{ ok: boolean; file_name: string }>('/vector/delete', {
+    method: 'POST',
+    body: JSON.stringify({ scope, file_name: fileName }),
+  })
+
 // Channels
 export const listChannels = () => request<Channel[]>('/channels')
 export const createChannel = (ch: Partial<Channel>) =>
