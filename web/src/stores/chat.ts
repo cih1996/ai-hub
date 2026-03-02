@@ -24,6 +24,34 @@ export const useChatStore = defineStore('chat', () => {
   const pendingProviderId = ref('')  // provider selected in new-chat dialog
   const pendingGroupName = ref('')   // group_name selected in new-chat dialog
 
+  // Upstream quota/rate-limit warning (e.g. "You've hit your limit").
+  const usageLimitWarning = ref('')
+
+  function clearUsageLimitWarning() {
+    usageLimitWarning.value = ''
+  }
+
+  function detectUsageLimitWarning(raw: string) {
+    const msg = (raw || '').trim()
+    if (!msg) return
+    const lower = msg.toLowerCase()
+    const hit =
+      lower.includes("you've hit your limit") ||
+      lower.includes('hit your limit') ||
+      lower.includes('rate limit') ||
+      lower.includes('quota') ||
+      msg.includes('额度') ||
+      msg.includes('配额')
+    if (!hit) return
+
+    const m = msg.match(/resets[^.。\n]*/i)
+    if (m?.[0]) {
+      usageLimitWarning.value = `当前账号额度已用尽，${m[0]}。请切换供应商或稍后重试。`
+    } else {
+      usageLimitWarning.value = '当前账号额度已用尽，请切换供应商或等待额度重置后再试。'
+    }
+  }
+
   // Model switch debounce lock
   const providerSwitching = ref(false)
 
@@ -274,6 +302,7 @@ export const useChatStore = defineStore('chat', () => {
             content: `Error: ${msg.content}`,
             created_at: new Date().toISOString(),
           })
+          detectUsageLimitWarning(msg.content)
           break
       }
     }
@@ -305,6 +334,7 @@ export const useChatStore = defineStore('chat', () => {
     thinkingContent.value = ''
     toolCalls.value = []
     latestTokenUsage.value = null
+    clearUsageLimitWarning()
     if (id === 0) {
       messages.value = []
       workDir.value = ''
@@ -335,6 +365,7 @@ export const useChatStore = defineStore('chat', () => {
     toolCalls.value = []
     workDir.value = ''
     latestTokenUsage.value = null
+    clearUsageLimitWarning()
     pendingProviderId.value = providerId || ''
     pendingGroupName.value = groupName || ''
   }
@@ -349,6 +380,7 @@ export const useChatStore = defineStore('chat', () => {
 
   async function sendMessage(content: string) {
     if (streaming.value) return
+    clearUsageLimitWarning()
 
     messages.value.push({
       id: Date.now(),
@@ -380,6 +412,7 @@ export const useChatStore = defineStore('chat', () => {
       }
     } catch (e: any) {
       streaming.value = false
+      detectUsageLimitWarning(String(e?.message || ''))
       messages.value.push({
         id: Date.now(),
         session_id: currentSessionId.value,
@@ -471,5 +504,7 @@ export const useChatStore = defineStore('chat', () => {
     currentProvider,
     switchProviderForSession,
     providerSwitching,
+    usageLimitWarning,
+    clearUsageLimitWarning,
   }
 })

@@ -347,6 +347,11 @@ function formatToolInput(raw: string): string {
       </button>
       <button class="vector-banner-close" @click="vectorHealthy = true">✕</button>
     </div>
+    <div v-if="store.usageLimitWarning" class="quota-banner">
+      <span class="quota-banner-icon">⚠️</span>
+      <span class="quota-banner-text">{{ store.usageLimitWarning }}</span>
+      <button class="quota-banner-close" @click="store.clearUsageLimitWarning()">✕</button>
+    </div>
     <!-- Mobile: always show top bar with hamburger -->
     <div v-if="isMobile && !store.currentSession" class="chat-header">
       <div class="header-left">
@@ -773,6 +778,26 @@ function formatToolInput(raw: string): string {
 .vector-banner-btn:hover { background: var(--warning-border); color: var(--btn-text); }
 .vector-banner-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 .vector-banner-close {
+  background: none;
+  border: none;
+  color: var(--warning-text);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0 4px;
+}
+.quota-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 24px;
+  background: rgba(245, 158, 11, 0.12);
+  border-bottom: 1px solid rgba(245, 158, 11, 0.35);
+  font-size: 13px;
+  color: var(--warning-text);
+}
+.quota-banner-icon { font-size: 16px; }
+.quota-banner-text { flex: 1; }
+.quota-banner-close {
   background: none;
   border: none;
   color: var(--warning-text);

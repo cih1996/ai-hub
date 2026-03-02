@@ -1,436 +1,106 @@
 ---
 name: "一号智能体"
-description: "AI Hub 多会话调度系统。当用户提到团队协作、虚拟员工、多任务并行、调用其他会话、创建子任务、会话编排时触发，通过 HTTP API 创建和管理多个独立会话，实现任务分发与结果收集。"
+description: "AI Hub 多会话调度 Skill（优化版）：通过 HTTP API 创建/调度会话、检查状态、汇总结果，并以 Skill-first 方式执行。"
 ---
 
-# 一号智能体 — 多会话调度手册
+# 一号智能体 Skill（v2）
 
-你是 AI Hub 的调度中枢。你可以通过 HTTP API 创建新的会话、向任意会话发送指令、轮询会话状态、读取会话结果。每个会话是一个独立的 Claude Code CLI 实例，拥有独立的上下文和工作目录。
+本手册用于“多会话调度与编排”。目标是稳定、可回放、可扩展，不绑定特定业务场景。
 
-本手册是你的操作指南，不是给用户看的文档。
+## 0. 执行原则（先读）
 
-## 核心能力
+1. Skill-first：已有 Skill 能做的动作，优先按 Skill 执行。
+2. 先锁定上下文：`group_name/scope/target/task_id` 不完整时，先澄清再调度。
+3. 先结论后证据：对用户先返回结果，再补关键过程。
+4. 单会话串行：同一 `session_id` 不并发发消息。
+5. 去特化：避免把固定业务词写死在全局流程里。
 
-- 创建任意数量的独立会话，每个会话可指定不同的工作目录
-- 向指定会话发送任务指令
-- 轮询会话状态，等待任务完成
-- 读取会话的完整消息历史，获取执行结果
-- 清理已完成的会话
+## 1. API 基础
 
-## API 基础
+- Base URL: `http://localhost:$AI_HUB_PORT/api/v1`
+- Header: `Content-Type: application/json`
+- 禁止启动新 ai-hub 实例；只通过当前服务 API 操作。
 
-所有接口地址：`http://localhost:$AI_HUB_PORT/api/v1`（端口通过环境变量 `AI_HUB_PORT` 获取）
-请求头：`Content-Type: application/json`
+## 2. 标准流程（SOP）
 
-**严禁直接运行 ai-hub 二进制文件启动新实例。所有子任务、子角色必须通过 HTTP API 在当前服务内创建新会话。**
+1. 建立任务上下文：确定 `group_name/scope/target/task_id`。
+2. 创建或选择会话：新任务用 `session_id=0`，续任务用已有 `session_id`。
+3. 发送指令：内容必须包含目标、约束、交付物。
+4. 等待完成：轮询会话 `streaming` 状态。
+5. 读取结果：取最新 assistant 消息。
+6. 汇总回传：给用户结论 + 证据。
+7. 沉淀经验：必要时写入记忆/知识或提出 Skill 修订。
 
----
+## 3. 常用接口模板
 
-## 操作一：创建会话并派发任务
-
-向 session_id=0 发送消息，系统自动创建新会话并开始执行
+### 3.1 创建会话并派发
 
 ```bash
 curl -X POST http://localhost:$AI_HUB_PORT/api/v1/chat/send \
   -H "Content-Type: application/json" \
   -d '{
     "session_id": 0,
-    "content": "你的任务指令",
-    "work_dir": "/path/to/project",
-    "group_name": "团队名称"
+    "content": "<任务指令>",
+    "work_dir": "<可选>",
+    "group_name": "<建议填写>"
   }'
 ```
 
-响应：
-```json
-{ "session_id": 42, "status": "started" }
-```
-
-关键参数：
-- `session_id: 0` — 创建新会话
-- `content` — 任务指令，写清楚你要这个会话做什么
-- `work_dir` — 该会话的工作目录，CLI 将在此目录下运行。省略或空字符串则使用用户 home 目录
-- `group_name` — 会话分组名称，同一团队的所有会话应使用相同的 group_name，前端侧边栏会按此字段分组显示。省略或空字符串则归入默认组。**非空 group_name 还会触发团队规则注入**：系统自动读取 `~/.ai-hub/teams/<group_name>/rules/*.md` 合并到 system prompt（优先级：全局规则 < 团队规则 < 会话级规则），同时注入 `AI_HUB_GROUP_NAME` 环境变量供 AI 感知自身团队归属
-
-记住返回的 `session_id`，后续所有操作都靠它。
-
-### 创建带角色规则的会话（推荐）
-
-创建会话后，立即写入会话级规则，确保角色定位持久化：
-
-```bash
-# 第一步：创建会话并发送任务
-RESPONSE=$(curl -s -X POST http://localhost:$AI_HUB_PORT/api/v1/chat/send \
-  -H "Content-Type: application/json" \
-  -d '{"session_id": 0, "content": "你的任务指令", "work_dir": "/path/to/project", "group_name": "团队名称"}')
-
-# 第二步：提取新会话ID，写入会话级规则
-NEW_ID=$(echo $RESPONSE | grep -o '"session_id":[0-9]*' | grep -o '[0-9]*')
-curl -X PUT "http://localhost:$AI_HUB_PORT/api/v1/session-rules/$NEW_ID" \
-  -H "Content-Type: application/json" \
-  -d '{"content": "你是XXX角色，职责是..."}'
-```
-
-这样即使 Claude 进程超时重启，角色规则也会自动重新注入。
-
----
-
-## 操作二：向已有会话追加指令
-
-对一个已存在且空闲的会话发送后续指令：
+### 3.2 向已有会话发送
 
 ```bash
 curl -X POST http://localhost:$AI_HUB_PORT/api/v1/chat/send \
   -H "Content-Type: application/json" \
-  -d '{
-    "session_id": 42,
-    "content": "继续执行下一步..."
-  }'
+  -d '{"session_id": 42, "content": "<后续指令>"}'
 ```
 
-注意：
-- 会话正在处理中时发送会返回 409（冲突），必须等它完成
-- 同一会话的上下文是连续的，后续指令能看到之前的对话历史
+### 3.3 查询状态与结果
 
----
-
-## 操作三：检查会话状态
-
-获取所有会话列表，查看哪些在运行、哪些已空闲：
-
-```bash
-curl http://localhost:$AI_HUB_PORT/api/v1/sessions
-```
-
-响应（数组，按更新时间降序）：
-```json
-[
-  {
-    "id": 42,
-    "title": "会话标题",
-    "provider_id": "uuid",
-    "work_dir": "/path/to/project",
-    "group_name": "团队名称",
-    "streaming": true,
-    "process_alive": true,
-    "process_pid": 12345,
-    "process_state": "busy",
-    "uptime_sec": 3600,
-    "idle_sec": 0,
-    "created_at": "...",
-    "updated_at": "..."
-  }
-]
-```
-
-字段说明：
-- `streaming: true` 表示正在处理消息，`false` 表示空闲可接收新指令
-- `process_alive: true` 表示有持久 CLI 进程在运行（MCP 连接保持中）
-- `process_pid` — 进程 PID，可用于调试
-- `process_state` — `idle`（等待指令）或 `busy`（正在处理）
-- `uptime_sec` — 进程已运行时长（秒）
-- `idle_sec` — 距上次活跃的空闲时长（秒），超过 30 分钟会被自动回收
-
-查看单个会话：
 ```bash
 curl http://localhost:$AI_HUB_PORT/api/v1/sessions/42
-```
-
----
-
-## 操作四：读取会话结果
-
-获取指定会话的完整消息历史：
-
-```bash
 curl http://localhost:$AI_HUB_PORT/api/v1/sessions/42/messages
 ```
 
-响应（数组，按时间升序）：
-```json
-[
-  { "id": 1, "session_id": 42, "role": "user", "content": "任务指令", "created_at": "..." },
-  { "id": 2, "session_id": 42, "role": "assistant", "content": "执行结果...", "created_at": "..." }
-]
-```
-
-最后一条 `role: "assistant"` 的消息就是该会话的最新执行结果。
-
----
-
-## 操作五：清理会话
-
-任务完成后删除不再需要的会话：
+### 3.4 会话规则读写
 
 ```bash
-curl -X DELETE http://localhost:$AI_HUB_PORT/api/v1/sessions/42
-```
-
-会同时删除该会话的所有消息记录。
-
----
-
-## 调度模式
-
-### 模式一：串行流水线
-
-适用于有依赖关系的多步任务。
-
-```
-1. 创建会话 A → 发送任务 → 等待完成 → 读取结果
-2. 根据 A 的结果，创建会话 B → 发送任务 → 等待完成 → 读取结果
-3. 汇总所有结果，回复用户
-```
-
-### 模式二：并行分发
-
-适用于互不依赖的多个子任务。
-
-```
-1. 同时创建会话 A、B、C，各自发送不同任务
-2. 轮询所有会话状态，等待全部完成
-3. 逐个读取结果，汇总后回复用户
-```
-
-### 模式三：主从协作
-
-适用于一个主任务需要多个辅助任务支撑。
-
-```
-1. 创建主会话 M（work_dir 指向项目根目录）
-2. 创建辅助会话 S1（负责测试）、S2（负责文档）
-3. 主会话完成后，触发辅助会话
-4. 全部完成后汇总
-```
-
----
-
-## 轮询等待模板
-
-等待一个会话完成的标准流程：
-
-```
-1. GET /sessions/{id} → 检查 streaming 字段
-2. 如果 streaming=true → 等待几秒后重试
-3. 如果 streaming=false → GET /sessions/{id}/messages 读取结果
-```
-
-等待多个会话全部完成：
-
-```
-1. GET /sessions → 过滤出目标会话 ID 列表
-2. 检查所有目标会话的 streaming 字段
-3. 如果任一为 true → 等待后重试
-4. 全部 false → 逐个读取结果
-```
-
----
-
-## 错误处理
-
-| 状态码 | 含义 | 你应该怎么做 |
-|--------|------|-------------|
-| 400 | 内容为空或未配置 Provider | 检查请求参数 |
-| 404 | 会话不存在 | 会话可能已被删除，创建新的 |
-| 409 | 会话正在处理中 | 等待完成后再发送 |
-| 500 | 服务器内部错误 | 重试，或创建新会话绕过 |
-
----
-
-## 操作六：定时触发器
-
-你可以为任意会话创建定时触发器，到时间后系统自动向该会话发送指令。
-
-### 获取自己的会话 ID
-
-你的会话 ID 通过环境变量注入：`AI_HUB_SESSION_ID`
-
-```bash
-echo $AI_HUB_SESSION_ID
-```
-
-### 查看所有触发器
-
-```bash
-curl http://localhost:$AI_HUB_PORT/api/v1/triggers
-```
-
-按指定会话查看：
-```bash
-curl http://localhost:$AI_HUB_PORT/api/v1/triggers?session_id=42
-```
-
-### 创建触发器
-
-```bash
-curl -X POST http://localhost:$AI_HUB_PORT/api/v1/triggers \
+curl http://localhost:$AI_HUB_PORT/api/v1/session-rules/42
+curl -X PUT http://localhost:$AI_HUB_PORT/api/v1/session-rules/42 \
   -H "Content-Type: application/json" \
-  -d '{
-    "session_id": 42,
-    "content": "生成今日工作日报",
-    "trigger_time": "18:00:00",
-    "max_fires": -1
-  }'
+  -d '{"content":"<角色规则>"}'
 ```
 
-`trigger_time` 支持三种格式：
-- `"2026-02-17 10:30:00"` — 精确日期时间，只触发一次
-- `"10:30:00"` — 每天固定时间
-- `"1h30m"` — 固定间隔（Go duration 格式）
+## 4. 调度模式
 
-`max_fires`：最大触发次数，`-1` 表示无限。
+1. 串行：有依赖的任务按阶段推进。
+2. 并行：互不依赖任务并发派发后统一汇总。
+3. 主从：主会话编排，子会话执行并回调。
 
-### 更新触发器
+## 5. 调度防错（强制）
 
-```bash
-curl -X PUT http://localhost:$AI_HUB_PORT/api/v1/triggers/1 \
-  -H "Content-Type: application/json" \
-  -d '{
-    "content": "新的指令内容",
-    "trigger_time": "09:00:00",
-    "enabled": true
-  }'
-```
+- 执行类消息必须携带：`[group_name|scope|target|task_id]`。
+- 未锁定 `scope/target` 不下发。
+- 子会话完成后必须回调上游并带 `task_id`。
+- 若收到 409（会话忙），先等待再重发，不覆盖当前执行。
 
-### 删除触发器
+## 6. 错误处理
 
-```bash
-curl -X DELETE http://localhost:$AI_HUB_PORT/api/v1/triggers/1
-```
+- 400：参数缺失或请求不合法，先修正参数。
+- 404：会话不存在，重建会话并重发。
+- 409：会话忙，等待完成后重试。
+- 500：短重试；连续失败则切换新会话并保留证据。
 
-### 触发器状态说明
+## 7. Skill 演进机制（重点）
 
-| status | 含义 |
-|--------|------|
-| active | 等待触发 |
-| fired | 刚触发完成 |
-| failed | 触发失败（会话不存在或忙） |
-| completed | 已达最大触发次数 |
-| disabled | 已禁用 |
+出现以下情况时，应优先升级 Skill 而非堆叠临时规则：
+- 同类任务连续出现重复步骤。
+- 易错点反复出现。
+- 新 API/新流程已稳定可复用。
 
----
+记录模板：问题、根因、改动点、适用边界、回滚方式。
 
-## 多角色团队创建规范（强制）
+## 8. 边界与禁令
 
-### 0. 执行前检查（必须第一步执行）
-
-创建团队前，必须先搜索记忆库中的纠错记录，避免重复踩坑：
-
-```bash
-# 搜索团队创建相关的纠错记录
-curl -X POST http://localhost:$AI_HUB_PORT/api/v1/vector/search_memory \
-  -H "Content-Type: application/json" \
-  -d '{"query": "纠错 团队创建 角色 会话规则", "top_k": 5}'
-```
-
-命中相似度 > 0.4 的结果时，必须 read 完整内容并严格遵循，然后再开始创建团队。
-
----
-
-创建多角色协作团队时，必须遵循以下规范，缺一不可：
-
-### 1. 会话级规则必须包含团队通讯录
-
-每个角色的 session-rules 中必须写入完整的团队通讯录（所有角色的会话 ID + 工作目录），否则角色之间无法快速定位彼此。
-
-```markdown
-## 团队通讯录
-| 角色 | 会话ID | 工作目录 |
-|------|--------|----------|
-| PM | #101 | /path/to/root |
-| 开发A | #102 | /path/to/module-a |
-| 测试 | #103 | /path/to/root |
-```
-
-### 2. 异步通信，禁止轮询等待
-
-角色之间发消息必须异步——发送后立即结束当前任务，**禁止轮询 GET /sessions/{id} 等待对方完成**。
-
-每个角色的 session-rules 中必须写入异步通信协议：
-- 发送消息后直接汇报"已将任务派发给 XXX（#ID）"，不阻塞等待
-- 禁止在一次对话中串行等待多个角色完成
-
-### 3. 主动回调机制
-
-角色完成任务后，必须主动向上游角色发送结果反馈（回调），而不是等上游来轮询。
-
-每个角色的 session-rules 中必须写入回调规则：
-```
-任务完成后，必须主动向上游角色发送结果：
-curl -X POST http://localhost:$AI_HUB_PORT/api/v1/chat/send \
-  -H "Content-Type: application/json" \
-  -d '{"session_id": <上游会话ID>, "content": "【回调】任务完成，结果：..."}'
-```
-
-### 4. 会话级规则必备要素清单
-
-每个角色的 session-rules 必须包含以下 5 项：
-1. **角色定位**：我是谁，核心职责
-2. **团队通讯录**：所有角色的会话 ID 和工作目录
-3. **异步通信协议**：发送方式（异步不等待）+ 禁止行为
-4. **主动回调规则**：完成后向谁回调、回调格式
-5. **技术栈/工作规范**：该角色特有的技术要求
-
-### 5. 典型通信链路
-
-```
-用户 → PM 接收需求 → 异步派发给开发
-开发完成 → 主动回调 PM
-PM 收到回调 → 异步派发给测试
-测试完成 → 主动回调 PM（如有 Bug 同时通知对应开发）
-PM 收到回调 → 汇总结果给用户
-```
-
-### 6. 分支卫生检查（开发角色每次开工前强制执行）
-
-**问题背景：** 角色间通信中断（超时、崩溃、上下文截断）可能导致上一轮开发分支尚未经测试合并，开发角色若直接新开分支，会造成多分支代码分叉、测试遗漏、合并冲突等问题。
-
-**适用角色：** 承担代码修改职责的开发类角色（技术维护 #25 等），每次接到新开发任务时必须首先执行以下检查，再开分支写代码。
-
-**检查流程：**
-
-```bash
-# 步骤1：查看所有本地分支与当前分支
-git branch
-
-# 步骤2：查看尚未合并到 main 的分支
-git branch --no-merged main
-```
-
-**处置决策树：**
-
-```
-未合并分支为空？
-  ├─ 是 → 正常新开分支（git checkout main && git pull && git checkout -b fix/<issue>-<描述>）
-  └─ 否 → 未合并分支是否属于当前要修复的 Issue？
-            ├─ 是 → 切换到该分支继续提交（git checkout <已有分支>），无需新开
-            └─ 否 → 【停止】立即通知测试工程师处理该分支，等待回调后再继续
-```
-
-**通知测试工程师模板：**
-
-```bash
-curl -X POST http://localhost:$AI_HUB_PORT/api/v1/chat/send \
-  -H "Content-Type: application/json" \
-  -d '{"session_id": <测试会话ID>, "content": "【技术】检测到未合并分支：<分支名>，请优先完成验证并合并到 main，完成后主动回调通知我继续新任务"}'
-```
-
-- 发送通知后停止当前任务，等测试角色主动回调"已合并"后再新建分支
-
----
-
-## 注意事项
-
-1. 每个会话对应一个持久 CLI 进程，首次发消息时自动创建，空闲 30 分钟后自动回收
-2. 持久进程保持 MCP Server 连接，多轮对话间不会断开
-3. 同一会话不能并发发送消息，必须等上一条处理完
-4. `work_dir` 决定了 CLI 的工作目录，影响文件读写和项目上下文
-5. 会话标题由 AI 自动生成，你也可以通过 PUT /sessions/:id 修改
-6. 创建会话时不需要指定 provider，系统自动使用默认 provider
-7. 你自己也运行在一个会话中，不要向自己的 session_id 发送消息
-8. 你的会话 ID 可通过 `$AI_HUB_SESSION_ID` 环境变量获取，用于查询和管理自己的触发器
-9. 通过 `process_alive` 字段可判断会话是否有活跃进程，`idle_sec` 可判断进程空闲时长
-13. **每个会话进程可通过环境变量感知自身身份**：`AI_HUB_SESSION_ID`（会话ID）、`AI_HUB_GROUP_NAME`（团队名，无团队为空）、`AI_HUB_PORT`（服务端口）
-10. **创建多角色协作团队时，必须为每个角色会话写入会话级规则（session-rules），确保角色定位持久化，进程重启后自动恢复**
-11. **会话级规则通过 `PUT /api/v1/session-rules/{session_id}` 写入，通过 `GET /api/v1/session-rules/{session_id}` 读取**
-12. **创建多角色协作团队时，所有角色会话应使用相同的 group_name，确保前端侧边栏将它们归为一组显示**
+- 不猜 API，不造字段，不省略关键上下文。
+- 不在未知上下文下执行高风险动作。
+- 不把团队/会话细则写回全局规则。
