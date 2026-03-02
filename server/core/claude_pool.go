@@ -155,17 +155,19 @@ func (p *ProcessPool) idleReaper() {
 				idle := proc.state == "idle" && now.Sub(proc.lastActive) > 30*time.Minute
 				isDead := proc.dead
 				isBusy := proc.state == "busy"
-				// Zombie detection: busy for >5min AND no events received for >2min
+				// Zombie detection: busy for >10min AND no events received for >6min
+				// Thresholds must exceed compacting timeout (5min) to avoid killing
+				// legitimate context compression operations.
 				isZombie := isBusy && !isDead &&
-					now.Sub(proc.lastActive) > 5*time.Minute &&
-					!proc.lastEventAt.IsZero() && now.Sub(proc.lastEventAt) > 2*time.Minute
+					now.Sub(proc.lastActive) > 10*time.Minute &&
+					!proc.lastEventAt.IsZero() && now.Sub(proc.lastEventAt) > 6*time.Minute
 				proc.mu.Unlock()
 				if isBusy && !isZombie {
 					continue
 				}
 				if idle || isDead || isZombie {
 					if isZombie {
-						log.Printf("[pool] reaper: session %d detected as ZOMBIE (busy >5min, no events >2min), killing", id)
+						log.Printf("[pool] reaper: session %d detected as ZOMBIE (busy >10min, no events >6min), killing", id)
 					}
 					proc.kill()
 					delete(p.processes, id)
