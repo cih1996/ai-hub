@@ -138,7 +138,25 @@ var (
 	claudeClient    = core.NewClaudeCodeClient()
 	activeStreams   = make(map[int64]*ActiveStream)
 	activeStreamsMu sync.RWMutex
+	forceFreshMu    sync.Mutex
+	forceFreshRun   = make(map[int64]bool) // sessionID -> next run must start fresh (no --resume)
 )
+
+func markForceFreshRun(sessionID int64) {
+	forceFreshMu.Lock()
+	forceFreshRun[sessionID] = true
+	forceFreshMu.Unlock()
+}
+
+func consumeForceFreshRun(sessionID int64) bool {
+	forceFreshMu.Lock()
+	defer forceFreshMu.Unlock()
+	if !forceFreshRun[sessionID] {
+		return false
+	}
+	delete(forceFreshRun, sessionID)
+	return true
+}
 
 func HandleChat(c *gin.Context) {
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
@@ -373,9 +391,12 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 
 	// isResume: true when the persistent process is alive OR when the session has
 	// completed assistant messages in DB (i.e., we need to restore the conversation).
-	// For new sessions or sessions whose first turn was cancelled (no assistant messages),
-	// isResume stays false so the CLI starts fresh with --session-id instead of --resume.
+	// If previous turn detected "No conversation found", force one fresh run to avoid
+	// getting stuck in a resume loop.
 	isResume := !isNewSession && (core.Pool.HasProcess(session.ID) || store.HasAssistantMessages(session.ID))
+	if consumeForceFreshRun(session.ID) {
+		isResume = false
+	}
 	fullResponse, metadataJSON, usageInput, usageOutput, usageCacheCreation, usageCacheRead, err = streamClaudeCode(ctx, provider, query, session.ClaudeSessionID, isResume, stream.Send, session.ID, session.WorkDir, session.GroupName)
 
 	if err != nil {
@@ -787,6 +808,7 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 						newUUID := uuid.New().String()
 						if err := store.UpdateClaudeSessionID(sessID, newUUID); err == nil {
 							core.Pool.Kill(sessID)
+							markForceFreshRun(sessID)
 							errContent += " (会话已自动重置，请重新发送消息)"
 							log.Printf("[claude] session %d: claude_session_id reset to %s", sessID, newUUID)
 						}
