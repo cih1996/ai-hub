@@ -2,6 +2,15 @@
 import { ref, computed, watch } from 'vue'
 import * as api from '../composables/api'
 
+function exportTeam(groupName: string) {
+  const a = document.createElement('a')
+  a.href = api.exportTeamUrl(groupName)
+  a.download = ''
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+}
+
 const props = defineProps<{
   groupName: string
   visible: boolean
@@ -104,6 +113,13 @@ watch(
             </svg>
             <span>{{ groupName }}</span>
           </div>
+          <button class="tdm-export" @click="exportTeam(groupName)" title="导出团队">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+              <polyline points="17 8 12 3 7 8"/>
+              <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+          </button>
           <button class="tdm-close" @click="emit('close')" title="关闭">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M18 6L6 18M6 6l12 12"/>
@@ -225,6 +241,21 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.tdm-export {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: all var(--transition);
+}
+.tdm-export:hover {
+  background: var(--bg-hover);
+  color: var(--accent);
 }
 .tdm-close {
   width: 28px;
