@@ -40,6 +40,7 @@ type ProcessPool struct {
 	client        *ClaudeCodeClient
 	stopCh        chan struct{}
 	OnStateChange func(hubSessionID int64, alive bool, state string)
+	IsStreaming   func(hubSessionID int64) bool // injected by api layer to check activeStreams
 }
 
 // Pool is the global process pool instance
@@ -139,9 +140,18 @@ func (p *ProcessPool) HasProcess(hubSessionID int64) bool {
 	return !proc.dead
 }
 
-// idleReaper periodically cleans up idle/dead/zombie processes
+// idleReaper periodically cleans up idle/dead processes and detects zombies.
+//
+// Zombie definition: process is marked "busy" but no active stream exists
+// in the API layer (i.e. runStream goroutine already returned but the
+// process state was never reset). This can happen if runStream panics or
+// the goroutine exits abnormally.
+//
+// Importantly, there is NO time-based timeout for busy processes. A task
+// that takes hours (compilation, complex reasoning, context compression)
+// is legitimate as long as the stream is active.
 func (p *ProcessPool) idleReaper() {
-	ticker := time.NewTicker(1 * time.Minute)
+	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 	for {
 		select {
@@ -155,19 +165,23 @@ func (p *ProcessPool) idleReaper() {
 				idle := proc.state == "idle" && now.Sub(proc.lastActive) > 30*time.Minute
 				isDead := proc.dead
 				isBusy := proc.state == "busy"
-				// Zombie detection: busy for >10min AND no events received for >6min
-				// Thresholds must exceed compacting timeout (5min) to avoid killing
-				// legitimate context compression operations.
-				isZombie := isBusy && !isDead &&
-					now.Sub(proc.lastActive) > 10*time.Minute &&
-					!proc.lastEventAt.IsZero() && now.Sub(proc.lastEventAt) > 6*time.Minute
 				proc.mu.Unlock()
+
+				// Zombie: process claims "busy" but API has no active stream for it.
+				// This means SendAndStream returned but state wasn't cleaned up.
+				isZombie := false
+				if isBusy && !isDead && p.IsStreaming != nil {
+					if !p.IsStreaming(id) {
+						isZombie = true
+					}
+				}
+
 				if isBusy && !isZombie {
-					continue
+					continue // working normally, never interrupt
 				}
 				if idle || isDead || isZombie {
 					if isZombie {
-						log.Printf("[pool] reaper: session %d detected as ZOMBIE (busy >10min, no events >6min), killing", id)
+						log.Printf("[pool] reaper: session %d detected as ZOMBIE (busy but not streaming), killing", id)
 					}
 					proc.kill()
 					delete(p.processes, id)
@@ -408,15 +422,9 @@ drained:
 	if _, err := proc.stdin.Write(data); err != nil {
 		return fmt.Errorf("write stdin: %w", err)
 	}
-	// Read events until "result" type or process death
-	// Response timeout: adaptive based on CLI state
-	// - Normal: 120s (Claude CLI may pause during tool execution, context loading, etc.)
-	// - Compacting: 5min (context compression can take a long time with no stdout)
-	const defaultTimeout = 120 * time.Second
-	const compactingTimeout = 5 * time.Minute
-	currentTimeout := defaultTimeout
-	timer := time.NewTimer(currentTimeout)
-	defer timer.Stop()
+	// Read events until "result" type or process death.
+	// No timeout: long-running tasks (compilation, compacting, complex reasoning)
+	// are legitimate. Only user cancellation (ctx) or process death ends the loop.
 	for {
 		select {
 		case <-ctx.Done():
@@ -426,35 +434,10 @@ drained:
 			if !ok {
 				return fmt.Errorf("event channel closed")
 			}
-			// Update lastEventAt for zombie detection by reaper
+			// Update lastEventAt for status reporting
 			proc.mu.Lock()
 			proc.lastEventAt = time.Now()
 			proc.mu.Unlock()
-
-			// Detect CLI state to adapt timeout
-			var sysEvt struct {
-				Type   string `json:"type"`
-				Status string `json:"status"`
-			}
-			if json.Unmarshal([]byte(line), &sysEvt) == nil && sysEvt.Type == "system" {
-				if sysEvt.Status == "compacting" {
-					currentTimeout = compactingTimeout
-					log.Printf("[pool] session %d: compacting detected, timeout extended to %v", proc.hubSessionID, currentTimeout)
-				}
-			}
-
-			// Reset response timeout with current (possibly extended) duration
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
-			timer.Reset(currentTimeout)
-			// Reset to default after non-system events (compacting is over once we get data again)
-			if sysEvt.Type != "system" {
-				currentTimeout = defaultTimeout
-			}
 
 			onData(line)
 			var evt struct {
@@ -478,10 +461,6 @@ drained:
 					return fmt.Errorf("process exited unexpectedly")
 				}
 			}
-		case <-timer.C:
-			log.Printf("[pool] session %d: response timeout (%v with no events), killing zombie process", proc.hubSessionID, currentTimeout)
-			proc.kill()
-			return fmt.Errorf("response timeout: no data received in %v", currentTimeout)
 		}
 	}
 }

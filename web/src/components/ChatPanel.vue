@@ -659,14 +659,6 @@ function formatToolInput(raw: string): string {
           </div>
         </div>
 
-        <!-- Stream timeout warning -->
-        <div v-if="store.streamTimeout" class="timeout-banner">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-          </svg>
-          <span>AI 响应超时，可能已停止响应</span>
-          <button class="timeout-retry-btn" @click="store.stopStreaming()">停止等待</button>
-        </div>
       </div>
     </div>
 
@@ -1069,44 +1061,6 @@ function formatToolInput(raw: string): string {
   0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
   40% { transform: scale(1); opacity: 1; }
 }
-/* Stream timeout warning banner */
-.timeout-banner {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
-  margin: 8px 24px;
-  background: rgba(245, 158, 11, 0.1);
-  border: 1px solid rgba(245, 158, 11, 0.3);
-  border-radius: 8px;
-  color: var(--warning, #f59e0b);
-  font-size: 13px;
-  animation: fadeIn 0.3s ease;
-}
-.timeout-banner svg {
-  flex-shrink: 0;
-}
-.timeout-retry-btn {
-  margin-left: auto;
-  padding: 4px 12px;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--warning, #f59e0b);
-  border: 1px solid rgba(245, 158, 11, 0.4);
-  background: transparent;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: all var(--transition);
-}
-.timeout-retry-btn:hover {
-  background: rgba(245, 158, 11, 0.15);
-}
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(-4px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
 /* Input area */
 .input-area {
   padding: 16px 24px 24px;

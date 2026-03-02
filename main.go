@@ -79,6 +79,8 @@ func main() {
 	core.Pool.OnStateChange = func(hubSessionID int64, alive bool, state string) {
 		api.BroadcastProcessState(hubSessionID, alive, state)
 	}
+	// Inject active-stream checker for non-time-based zombie detection.
+	core.Pool.IsStreaming = api.IsSessionStreaming
 
 	// Pass version to API layer
 	api.SetVersion(Version)
