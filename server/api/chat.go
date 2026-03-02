@@ -571,11 +571,8 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 			Event            json.RawMessage `json:"event"`
 			ConversationName string          `json:"conversation_name"`
 			Error            json.RawMessage `json:"error"`
-			Errors           []struct {
-				Message string `json:"message"`
-				Type    string `json:"type"`
-			} `json:"errors"`
-			Usage struct {
+			Errors           json.RawMessage `json:"errors"` // Can be []string or []struct{message,type}
+			Usage            struct {
 				InputTokens              int64 `json:"input_tokens"`
 				OutputTokens             int64 `json:"output_tokens"`
 				CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
@@ -738,10 +735,33 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 			}
 
 			// Collect error messages from the errors array (if any)
+			// CLI may send errors as []string or []struct{message,type} — handle both
 			var errMsgs []string
-			for _, e := range wrapper.Errors {
-				if e.Message != "" {
-					errMsgs = append(errMsgs, e.Message)
+			if len(wrapper.Errors) > 0 {
+				// Try []string first (e.g. ["No conversation found with session ID: ..."])
+				var strErrs []string
+				if err := json.Unmarshal(wrapper.Errors, &strErrs); err == nil {
+					for _, s := range strErrs {
+						if s != "" {
+							errMsgs = append(errMsgs, s)
+						}
+					}
+				} else {
+					// Try []struct{message,type}
+					var objErrs []struct {
+						Message string `json:"message"`
+						Type    string `json:"type"`
+					}
+					if err := json.Unmarshal(wrapper.Errors, &objErrs); err == nil {
+						for _, e := range objErrs {
+							if e.Message != "" {
+								errMsgs = append(errMsgs, e.Message)
+							}
+						}
+					} else {
+						// Last resort: log raw errors for debugging
+						log.Printf("[claude] session %d: unparseable errors field: %s", sessID, string(wrapper.Errors))
+					}
 				}
 			}
 

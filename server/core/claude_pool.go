@@ -407,9 +407,13 @@ drained:
 		return fmt.Errorf("write stdin: %w", err)
 	}
 	// Read events until "result" type or process death
-	// Response timeout: if no event received within 60s, assume process is hung
-	const responseTimeout = 60 * time.Second
-	timer := time.NewTimer(responseTimeout)
+	// Response timeout: adaptive based on CLI state
+	// - Normal: 120s (Claude CLI may pause during tool execution, context loading, etc.)
+	// - Compacting: 5min (context compression can take a long time with no stdout)
+	const defaultTimeout = 120 * time.Second
+	const compactingTimeout = 5 * time.Minute
+	currentTimeout := defaultTimeout
+	timer := time.NewTimer(currentTimeout)
 	defer timer.Stop()
 	for {
 		select {
@@ -424,14 +428,32 @@ drained:
 			proc.mu.Lock()
 			proc.lastEventAt = time.Now()
 			proc.mu.Unlock()
-			// Reset response timeout
+
+			// Detect CLI state to adapt timeout
+			var sysEvt struct {
+				Type   string `json:"type"`
+				Status string `json:"status"`
+			}
+			if json.Unmarshal([]byte(line), &sysEvt) == nil && sysEvt.Type == "system" {
+				if sysEvt.Status == "compacting" {
+					currentTimeout = compactingTimeout
+					log.Printf("[pool] session %d: compacting detected, timeout extended to %v", proc.hubSessionID, currentTimeout)
+				}
+			}
+
+			// Reset response timeout with current (possibly extended) duration
 			if !timer.Stop() {
 				select {
 				case <-timer.C:
 				default:
 				}
 			}
-			timer.Reset(responseTimeout)
+			timer.Reset(currentTimeout)
+			// Reset to default after non-system events (compacting is over once we get data again)
+			if sysEvt.Type != "system" {
+				currentTimeout = defaultTimeout
+			}
+
 			onData(line)
 			var evt struct {
 				Type   string `json:"type"`
@@ -455,9 +477,9 @@ drained:
 				}
 			}
 		case <-timer.C:
-			log.Printf("[pool] session %d: response timeout (%v with no events), killing zombie process", proc.hubSessionID, responseTimeout)
+			log.Printf("[pool] session %d: response timeout (%v with no events), killing zombie process", proc.hubSessionID, currentTimeout)
 			proc.kill()
-			return fmt.Errorf("response timeout: no data received in %v", responseTimeout)
+			return fmt.Errorf("response timeout: no data received in %v", currentTimeout)
 		}
 	}
 }
