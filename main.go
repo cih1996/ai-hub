@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"path"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/gin-gonic/gin"
@@ -93,6 +94,9 @@ func main() {
 
 	// Migrate rules/rules/ → rules/ (flatten legacy nested structure)
 	migrateNestedRules(*dataDir)
+
+	// Migrate team dirs: ~/.ai-hub/<团队名>/ → ~/.ai-hub/teams/<团队名>/
+	migrateTeamDirs(*dataDir)
 
 	// Install default rules (skip if already exists)
 	installClaudeRules(*dataDir)
@@ -375,6 +379,56 @@ func migrateNestedRules(dataDir string) {
 	// Remove empty nested dir
 	os.Remove(nested)
 	log.Println("[rules] migrated rules/rules/ → rules/")
+}
+
+// migrateTeamDirs moves team directories from ~/.ai-hub/<团队名>/ to ~/.ai-hub/teams/<团队名>/.
+// This consolidates all team data under a single "teams/" parent to avoid cluttering the root.
+func migrateTeamDirs(dataDir string) {
+	systemDirs := map[string]bool{
+		"rules": true, "knowledge": true, "memory": true,
+		"skills": true, "notes": true, "scripts": true,
+		"vector-engine": true, "logs": true, "session-rules": true,
+		"team": true, "teams": true,
+	}
+	teamsDir := filepath.Join(dataDir, "teams")
+	os.MkdirAll(teamsDir, 0755)
+
+	entries, err := os.ReadDir(dataDir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") || systemDirs[e.Name()] {
+			continue
+		}
+		oldPath := filepath.Join(dataDir, e.Name())
+		// Check if it has team subdirectories (knowledge/, memory/, or rules/)
+		hasTeamContent := false
+		for _, sub := range []string{"knowledge", "memory", "rules"} {
+			if info, err2 := os.Stat(filepath.Join(oldPath, sub)); err2 == nil && info.IsDir() {
+				hasTeamContent = true
+				break
+			}
+		}
+		if !hasTeamContent {
+			continue
+		}
+		newPath := filepath.Join(teamsDir, e.Name())
+		if _, err2 := os.Stat(newPath); err2 == nil {
+			log.Printf("[migrate] skip team dir (already exists in teams/): %s", e.Name())
+			continue
+		}
+		if err2 := os.Rename(oldPath, newPath); err2 == nil {
+			log.Printf("[migrate] moved team dir: %s → teams/%s", e.Name(), e.Name())
+		} else {
+			log.Printf("[migrate] failed to move team dir %s: %v", e.Name(), err2)
+		}
+	}
+	// Remove empty legacy "team" placeholder directory
+	teamDir := filepath.Join(dataDir, "team")
+	if ents, err2 := os.ReadDir(teamDir); err2 == nil && len(ents) == 0 {
+		os.Remove(teamDir)
+	}
 }
 
 // cleanLegacyClaudeDirs removes residual rules/ and skills/ directories under ~/.claude/

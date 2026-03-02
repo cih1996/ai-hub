@@ -506,6 +506,7 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 		ModelID:      strings.TrimSpace(p.ModelID),
 		WorkDir:      workDir,
 		HubSessionID: sessID,
+		GroupName:    groupName,
 	}
 	// OAuth/subscription mode uses Claude default model selection.
 	if p.AuthMode == "oauth" {
@@ -514,7 +515,7 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 
 	// Build system prompt: 三层合并（优先级从低到高）
 	// ① 全局规则 (~/.ai-hub/rules/*.md)
-	// ② 团队规则 (~/.ai-hub/<group_name>/rules/*.md)，仅团队会话生效
+	// ② 团队规则 (~/.ai-hub/teams/<group_name>/rules/*.md)，仅团队会话生效
 	// ③ 会话角色规则 (session-rules/<sessID>.md)
 	// 注：Claude CLI 的 --setting-sources 可控制是否加载项目级 .claude/CLAUDE.md，
 	//     当前暂不禁用，仍允许工作目录项目规则生效（待后续评估）

@@ -244,6 +244,7 @@ func (p *ProcessPool) spawnProcess(req ClaudeCodeRequest, isResume bool) (*Persi
 	if req.HubSessionID > 0 {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("AI_HUB_SESSION_ID=%d", req.HubSessionID))
 	}
+	cmd.Env = append(cmd.Env, "AI_HUB_GROUP_NAME="+req.GroupName)
 	if port := GetPort(); port != "" {
 		cmd.Env = append(cmd.Env, "AI_HUB_PORT="+port)
 	}

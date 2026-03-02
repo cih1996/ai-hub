@@ -77,12 +77,14 @@
 
 系统支持两个层级的知识/记忆存储：
 - 全局（默认）：scope = "knowledge" 或 "memory"，路径 ~/.ai-hub/knowledge/ 和 ~/.ai-hub/memory/
-- 团队级：scope = "<团队名>/knowledge" 或 "<团队名>/memory"，路径 ~/.ai-hub/<团队名>/knowledge/ 和 ~/.ai-hub/<团队名>/memory/
+- 团队级：scope = "<团队名>/knowledge" 或 "<团队名>/memory"，路径 ~/.ai-hub/teams/<团队名>/knowledge/ 和 ~/.ai-hub/teams/<团队名>/memory/
 
-**如何判断该用哪个 scope：**
-- 查看当前会话的 group_name（环境变量 AI_HUB_SESSION_ID 可通过 API 获取）
-- 若 group_name 非空，且话题内容与该团队业务相关（非全局通用技术话题），**必须**用团队级 scope
-- 若 group_name 为空，或话题是 AI Hub 系统本身的通用技术知识，用全局 scope
+**推荐用法（自动推断 scope）：**
+- 所有向量接口支持 `session_id` 字段，传入 `$AI_HUB_SESSION_ID` 后系统自动推断：
+  - 团队会话搜索 → 先搜团队库再搜全局库，合并返回
+  - 团队会话写入 → 自动写入团队库
+  - 无团队的会话 → 操作全局库（行为不变）
+- 也可通过环境变量 `$AI_HUB_GROUP_NAME` 获取当前团队名（无团队时为空）
 - 原则：宁可多用团队级，不要把团队私有信息污染全局库
 
 §4.2 笔记（强制使用）

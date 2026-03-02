@@ -51,6 +51,7 @@ type ClaudeCodeRequest struct {
 	ModelID      string
 	WorkDir      string // 工作目录，空 = home
 	HubSessionID int64  // AI Hub 会话 ID，注入为环境变量
+	GroupName    string // 团队名，注入为 AI_HUB_GROUP_NAME 环境变量
 }
 
 func NewClaudeCodeClient() *ClaudeCodeClient {
@@ -131,6 +132,7 @@ func (c *ClaudeCodeClient) Stream(ctx context.Context, req ClaudeCodeRequest, on
 	if req.HubSessionID > 0 {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("AI_HUB_SESSION_ID=%d", req.HubSessionID))
 	}
+	cmd.Env = append(cmd.Env, "AI_HUB_GROUP_NAME="+req.GroupName)
 	if p := GetPort(); p != "" {
 		cmd.Env = append(cmd.Env, "AI_HUB_PORT="+p)
 	}

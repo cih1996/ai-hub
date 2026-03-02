@@ -2,6 +2,7 @@ package api
 
 import (
 	"ai-hub/server/core"
+	"ai-hub/server/store"
 	"log"
 	"net/http"
 	"os"
@@ -13,6 +14,19 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+// resolveTeamScope looks up a session's group_name and returns the team scope.
+// Returns "" if session not found or has no group_name.
+func resolveTeamScope(sessionID int64, defaultScope string) string {
+	if sessionID <= 0 {
+		return ""
+	}
+	sess, err := store.GetSession(sessionID)
+	if err != nil || sess.GroupName == "" {
+		return ""
+	}
+	return sess.GroupName + "/" + defaultScope
+}
 
 // waitVectorReady waits for the vector engine to become ready during bootstrap.
 // Returns true if ready; returns false and writes 503 response if not.
@@ -76,15 +90,16 @@ func isValidScope(scope string) bool {
 // POST /api/v1/vector/search
 func SearchVector(c *gin.Context) {
 	var req struct {
-		Scope string `json:"scope"`
-		Query string `json:"query"`
-		TopK  int    `json:"top_k"`
+		Scope     string `json:"scope"`
+		Query     string `json:"query"`
+		TopK      int    `json:"top_k"`
+		SessionID int64  `json:"session_id"` // optional: auto-resolve team scope
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if !isValidScope(req.Scope) {
+	if req.Scope != "" && !isValidScope(req.Scope) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "scope must be 'knowledge', 'memory', or '<groupname>/knowledge', '<groupname>/memory'"})
 		return
 	}
@@ -94,6 +109,9 @@ func SearchVector(c *gin.Context) {
 	}
 	if req.TopK <= 0 {
 		req.TopK = 5
+	}
+	if req.Scope == "" {
+		req.Scope = "knowledge" // default scope for generic search
 	}
 	if !waitVectorReady(c) {
 		return
@@ -118,23 +136,16 @@ func SearchMemory(c *gin.Context) {
 	vectorSearch(c, "memory")
 }
 
-func vectorSearch(c *gin.Context, scope string) {
+func vectorSearch(c *gin.Context, defaultScope string) {
 	var req struct {
-		Query string `json:"query"`
-		TopK  int    `json:"top_k"`
-		Scope string `json:"scope"` // optional: overrides the fixed scope parameter (team scoping)
+		Query     string `json:"query"`
+		TopK      int    `json:"top_k"`
+		Scope     string `json:"scope"`      // optional: explicit scope override
+		SessionID int64  `json:"session_id"` // optional: auto-resolve team scope
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
-	}
-	// Use request-body scope if provided and valid (allows team scoping via universal endpoints)
-	if req.Scope != "" {
-		if !isValidScope(req.Scope) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid scope"})
-			return
-		}
-		scope = req.Scope
 	}
 	if req.Query == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "query is required"})
@@ -146,6 +157,59 @@ func vectorSearch(c *gin.Context, scope string) {
 	if !waitVectorReady(c) {
 		return
 	}
+
+	scope := defaultScope
+
+	// Explicit scope takes priority
+	if req.Scope != "" {
+		if !isValidScope(req.Scope) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid scope"})
+			return
+		}
+		scope = req.Scope
+		results, err := core.Vector.Search(scope, req.Query, req.TopK)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"results": results})
+		return
+	}
+
+	// Auto-resolve: if session has group_name, search team scope first then global, merge results
+	if teamScope := resolveTeamScope(req.SessionID, defaultScope); teamScope != "" {
+		var merged []map[string]interface{}
+		// 1. Search team scope
+		teamResults, err := core.Vector.Search(teamScope, req.Query, req.TopK)
+		if err != nil {
+			log.Printf("[vector] team search error (scope=%s): %v", teamScope, err)
+		} else {
+			merged = append(merged, teamResults...)
+		}
+		// 2. Search global scope
+		globalResults, err2 := core.Vector.Search(defaultScope, req.Query, req.TopK)
+		if err2 != nil {
+			log.Printf("[vector] global search error (scope=%s): %v", defaultScope, err2)
+		} else {
+			// Deduplicate: skip global results whose file_name already in team results
+			seen := make(map[string]bool)
+			for _, r := range merged {
+				if fn, ok := r["file_name"].(string); ok {
+					seen[fn] = true
+				}
+			}
+			for _, r := range globalResults {
+				fn, _ := r["file_name"].(string)
+				if !seen[fn] {
+					merged = append(merged, r)
+				}
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{"results": merged})
+		return
+	}
+
+	// Default: search global scope only
 	results, err := core.Vector.Search(scope, req.Query, req.TopK)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -166,29 +230,31 @@ func ReadMemory(c *gin.Context) {
 	vectorRead(c, "memory")
 }
 
-func vectorRead(c *gin.Context, scope string) {
+func vectorRead(c *gin.Context, defaultScope string) {
 	var req struct {
-		FileName string `json:"file_name"`
-		Scope    string `json:"scope"` // optional: overrides the fixed scope parameter
+		FileName  string `json:"file_name"`
+		Scope     string `json:"scope"`      // optional: explicit scope override
+		SessionID int64  `json:"session_id"` // optional: auto-resolve team scope
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	// Use request-body scope if provided and valid (allows team scoping via universal endpoints)
+	scope := defaultScope
 	if req.Scope != "" {
 		if !isValidScope(req.Scope) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid scope"})
 			return
 		}
 		scope = req.Scope
+	} else if teamScope := resolveTeamScope(req.SessionID, defaultScope); teamScope != "" {
+		scope = teamScope
 	}
 	if req.FileName == "" || !validatePath(req.FileName) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "valid file_name is required"})
 		return
 	}
-	home, _ := os.UserHomeDir()
-	dir := filepath.Join(home, ".ai-hub", scope)
+	dir := core.ScopeDir(scope)
 	path := filepath.Join(dir, req.FileName)
 	if !strings.HasPrefix(path, dir) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
@@ -214,29 +280,32 @@ func WriteMemory(c *gin.Context) {
 	vectorWrite(c, "memory")
 }
 
-func vectorWrite(c *gin.Context, scope string) {
+func vectorWrite(c *gin.Context, defaultScope string) {
 	var req struct {
-		FileName string `json:"file_name"`
-		Content  string `json:"content"`
-		Scope    string `json:"scope"` // optional: overrides the fixed scope parameter
+		FileName  string `json:"file_name"`
+		Content   string `json:"content"`
+		Scope     string `json:"scope"`      // optional: explicit scope override
+		SessionID int64  `json:"session_id"` // optional: auto-resolve team scope
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	scope := defaultScope
 	if req.Scope != "" {
 		if !isValidScope(req.Scope) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid scope"})
 			return
 		}
 		scope = req.Scope
+	} else if teamScope := resolveTeamScope(req.SessionID, defaultScope); teamScope != "" {
+		scope = teamScope
 	}
 	if req.FileName == "" || !validatePath(req.FileName) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "valid file_name is required"})
 		return
 	}
-	home, _ := os.UserHomeDir()
-	dir := filepath.Join(home, ".ai-hub", scope)
+	dir := core.ScopeDir(scope)
 	path := filepath.Join(dir, req.FileName)
 	if !strings.HasPrefix(path, dir) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
@@ -264,28 +333,31 @@ func DeleteMemory(c *gin.Context) {
 	vectorDelete(c, "memory")
 }
 
-func vectorDelete(c *gin.Context, scope string) {
+func vectorDelete(c *gin.Context, defaultScope string) {
 	var req struct {
-		FileName string `json:"file_name"`
-		Scope    string `json:"scope"` // optional: overrides the fixed scope parameter
+		FileName  string `json:"file_name"`
+		Scope     string `json:"scope"`      // optional: explicit scope override
+		SessionID int64  `json:"session_id"` // optional: auto-resolve team scope
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	scope := defaultScope
 	if req.Scope != "" {
 		if !isValidScope(req.Scope) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid scope"})
 			return
 		}
 		scope = req.Scope
+	} else if teamScope := resolveTeamScope(req.SessionID, defaultScope); teamScope != "" {
+		scope = teamScope
 	}
 	if req.FileName == "" || !validatePath(req.FileName) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "valid file_name is required"})
 		return
 	}
-	home, _ := os.UserHomeDir()
-	dir := filepath.Join(home, ".ai-hub", scope)
+	dir := core.ScopeDir(scope)
 	path := filepath.Join(dir, req.FileName)
 	if !strings.HasPrefix(path, dir) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
@@ -375,8 +447,7 @@ func ListVectorFiles(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid scope"})
 		return
 	}
-	home, _ := os.UserHomeDir()
-	dir := filepath.Join(home, ".ai-hub", scope)
+	dir := core.ScopeDir(scope)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -417,8 +488,7 @@ func ReadVector(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "valid file_name is required"})
 		return
 	}
-	home, _ := os.UserHomeDir()
-	dir := filepath.Join(home, ".ai-hub", req.Scope)
+	dir := core.ScopeDir(req.Scope)
 	path := filepath.Join(dir, req.FileName)
 	if !strings.HasPrefix(path, dir) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
