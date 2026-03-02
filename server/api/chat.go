@@ -105,25 +105,39 @@ func GetStreamingSessionIDs() map[int64]bool {
 	return result
 }
 
-// ActiveStream tracks an in-progress chat stream so new WS connections can reattach
+// ActiveStream tracks an in-progress chat stream so new WS connections can reattach.
+// It maintains a buffer of replayable events (chunk, thinking, tool_*) so that
+// clients subscribing mid-stream can catch up on content produced before they attached.
 type ActiveStream struct {
 	mu       sync.Mutex
 	sendFn   func(WSMessage)
 	cancelFn context.CancelFunc
+	buffer   []WSMessage // buffered events for replay on subscribe
 }
 
 func (s *ActiveStream) Send(msg WSMessage) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Buffer replayable event types so subscribe can catch up
+	switch msg.Type {
+	case "chunk", "thinking", "tool_start", "tool_input", "tool_result":
+		s.buffer = append(s.buffer, msg)
+	}
 	if s.sendFn != nil {
 		s.sendFn(msg)
 	}
 }
 
-func (s *ActiveStream) SwapSend(fn func(WSMessage)) {
+// SwapSendAndReplay atomically replaces the send function and replays all
+// buffered events to the new function. This ensures no events are lost
+// between the swap and the replay.
+func (s *ActiveStream) SwapSendAndReplay(fn func(WSMessage)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sendFn = fn
+	for _, msg := range s.buffer {
+		fn(msg)
+	}
 }
 
 func (s *ActiveStream) Cancel() {
@@ -226,7 +240,9 @@ func HandleChat(c *gin.Context) {
 			stream, ok := activeStreams[msg.SessionID]
 			activeStreamsMu.RUnlock()
 			if ok {
-				stream.SwapSend(sendJSON)
+				// Atomically swap send function and replay all buffered events
+				// so the client catches up on content produced before subscribing
+				stream.SwapSendAndReplay(sendJSON)
 				sendJSON(WSMessage{Type: "streaming_status", SessionID: msg.SessionID, Content: "streaming"})
 			} else {
 				// Session is not streaming — tell client to correct its state
