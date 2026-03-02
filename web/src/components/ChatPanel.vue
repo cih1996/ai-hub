@@ -382,7 +382,7 @@ function formatToolInput(raw: string): string {
           <div class="header-sub-row">
             <div class="header-workdir">{{ displayWorkDir }}</div>
             <div class="provider-switcher" v-if="store.currentProvider">
-              <button class="provider-badge" @click="providerDropdownOpen = !providerDropdownOpen" :disabled="store.streaming" title="切换模型">
+              <button class="provider-badge" @click="providerDropdownOpen = !providerDropdownOpen" :disabled="store.streaming || store.providerSwitching" title="切换模型">
                 {{ store.currentProvider.name }} · {{ store.currentProvider.model_id }}
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
               </button>
@@ -455,7 +455,7 @@ function formatToolInput(raw: string): string {
               v-for="p in store.providers"
               :key="p.id"
               :class="{ 'more-menu-active': String(p.id) === String(store.currentSession.provider_id) }"
-              :disabled="store.streaming"
+              :disabled="store.streaming || store.providerSwitching"
               @click.stop="onSwitchProvider(String(p.id)); moreMenuOpen = false"
             >{{ p.name }} · {{ p.model_id }}</button>
           </div>
@@ -657,6 +657,15 @@ function formatToolInput(raw: string): string {
               <span></span><span></span><span></span>
             </div>
           </div>
+        </div>
+
+        <!-- Stream timeout warning -->
+        <div v-if="store.streamTimeout" class="timeout-banner">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+          <span>AI 响应超时，可能已停止响应</span>
+          <button class="timeout-retry-btn" @click="store.stopStreaming()">停止等待</button>
         </div>
       </div>
     </div>
@@ -1059,6 +1068,43 @@ function formatToolInput(raw: string): string {
 @keyframes bounce {
   0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
   40% { transform: scale(1); opacity: 1; }
+}
+/* Stream timeout warning banner */
+.timeout-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  margin: 8px 24px;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 8px;
+  color: var(--warning, #f59e0b);
+  font-size: 13px;
+  animation: fadeIn 0.3s ease;
+}
+.timeout-banner svg {
+  flex-shrink: 0;
+}
+.timeout-retry-btn {
+  margin-left: auto;
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--warning, #f59e0b);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  background: transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--transition);
+}
+.timeout-retry-btn:hover {
+  background: rgba(245, 158, 11, 0.15);
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 /* Input area */

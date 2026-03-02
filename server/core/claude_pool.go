@@ -24,6 +24,7 @@ type PersistentProcess struct {
 	hubSessionID   int64  // AI Hub session ID
 	state          string // "idle" | "busy"
 	lastActive     time.Time
+	lastEventAt    time.Time // last time an event was received from stdout
 	startedAt      time.Time
 	dead           bool
 	pendingKill    bool          // deferred kill: set when Kill() called while busy
@@ -138,9 +139,9 @@ func (p *ProcessPool) HasProcess(hubSessionID int64) bool {
 	return !proc.dead
 }
 
-// idleReaper periodically cleans up idle/dead processes
+// idleReaper periodically cleans up idle/dead/zombie processes
 func (p *ProcessPool) idleReaper() {
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 	for {
 		select {
@@ -154,15 +155,21 @@ func (p *ProcessPool) idleReaper() {
 				idle := proc.state == "idle" && now.Sub(proc.lastActive) > 30*time.Minute
 				isDead := proc.dead
 				isBusy := proc.state == "busy"
+				// Zombie detection: busy for >5min AND no events received for >2min
+				isZombie := isBusy && !isDead &&
+					now.Sub(proc.lastActive) > 5*time.Minute &&
+					!proc.lastEventAt.IsZero() && now.Sub(proc.lastEventAt) > 2*time.Minute
 				proc.mu.Unlock()
-				if isBusy {
-					log.Printf("[pool] reaper: session %d is busy, skipping", id)
+				if isBusy && !isZombie {
 					continue
 				}
-				if idle || isDead {
+				if idle || isDead || isZombie {
+					if isZombie {
+						log.Printf("[pool] reaper: session %d detected as ZOMBIE (busy >5min, no events >2min), killing", id)
+					}
 					proc.kill()
 					delete(p.processes, id)
-					log.Printf("[pool] reaped process for session %d (idle=%v dead=%v)", id, idle, isDead)
+					log.Printf("[pool] reaped process for session %d (idle=%v dead=%v zombie=%v)", id, idle, isDead, isZombie)
 					if p.OnStateChange != nil {
 						go p.OnStateChange(id, false, "")
 					}
@@ -294,6 +301,7 @@ func (p *ProcessPool) spawnProcess(req ClaudeCodeRequest, isResume bool) (*Persi
 		hubSessionID:   req.HubSessionID,
 		state:          "idle",
 		lastActive:     time.Now(),
+		lastEventAt:    time.Now(),
 		startedAt:      time.Now(),
 		eventCh:        make(chan string, 256),
 		doneCh:         make(chan struct{}),
@@ -399,6 +407,10 @@ drained:
 		return fmt.Errorf("write stdin: %w", err)
 	}
 	// Read events until "result" type or process death
+	// Response timeout: if no event received within 60s, assume process is hung
+	const responseTimeout = 60 * time.Second
+	timer := time.NewTimer(responseTimeout)
+	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -408,6 +420,18 @@ drained:
 			if !ok {
 				return fmt.Errorf("event channel closed")
 			}
+			// Update lastEventAt for zombie detection by reaper
+			proc.mu.Lock()
+			proc.lastEventAt = time.Now()
+			proc.mu.Unlock()
+			// Reset response timeout
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(responseTimeout)
 			onData(line)
 			var evt struct {
 				Type   string `json:"type"`
@@ -430,6 +454,10 @@ drained:
 					return fmt.Errorf("process exited unexpectedly")
 				}
 			}
+		case <-timer.C:
+			log.Printf("[pool] session %d: response timeout (%v with no events), killing zombie process", proc.hubSessionID, responseTimeout)
+			proc.kill()
+			return fmt.Errorf("response timeout: no data received in %v", responseTimeout)
 		}
 	}
 }
@@ -461,11 +489,12 @@ func (proc *PersistentProcess) kill() {
 
 // ProcessInfo holds runtime info about a persistent process
 type ProcessInfo struct {
-	HubSessionID int64  `json:"hub_session_id"`
-	Pid          int    `json:"pid"`
-	State        string `json:"state"`
-	UptimeSec    int64  `json:"uptime_sec"`
-	IdleSec      int64  `json:"idle_sec"`
+	HubSessionID   int64  `json:"hub_session_id"`
+	Pid            int    `json:"pid"`
+	State          string `json:"state"`
+	UptimeSec      int64  `json:"uptime_sec"`
+	IdleSec        int64  `json:"idle_sec"`
+	LastEventAgeSec int64  `json:"last_event_age_sec"` // seconds since last stdout event
 }
 
 // Status returns info for all live processes
@@ -480,10 +509,11 @@ func (p *ProcessPool) Status() map[int64]ProcessInfo {
 	for id, proc := range p.processes {
 		proc.mu.Lock()
 		info := ProcessInfo{
-			HubSessionID: id,
-			State:        proc.state,
-			UptimeSec:    int64(now.Sub(proc.startedAt).Seconds()),
-			IdleSec:      int64(now.Sub(proc.lastActive).Seconds()),
+			HubSessionID:    id,
+			State:           proc.state,
+			UptimeSec:       int64(now.Sub(proc.startedAt).Seconds()),
+			IdleSec:         int64(now.Sub(proc.lastActive).Seconds()),
+			LastEventAgeSec: int64(now.Sub(proc.lastEventAt).Seconds()),
 		}
 		if proc.cmd != nil && proc.cmd.Process != nil {
 			info.Pid = proc.cmd.Process.Pid

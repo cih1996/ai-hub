@@ -24,6 +24,34 @@ export const useChatStore = defineStore('chat', () => {
   const pendingProviderId = ref('')  // provider selected in new-chat dialog
   const pendingGroupName = ref('')   // group_name selected in new-chat dialog
 
+  // Stream timeout detection: warns user if no events received within 45s while streaming
+  const streamTimeout = ref(false)
+  let streamTimeoutTimer: ReturnType<typeof setTimeout> | null = null
+  const STREAM_TIMEOUT_MS = 45000
+
+  function resetStreamTimeout() {
+    streamTimeout.value = false
+    if (streamTimeoutTimer) clearTimeout(streamTimeoutTimer)
+    if (streaming.value) {
+      streamTimeoutTimer = setTimeout(() => {
+        if (streaming.value) {
+          streamTimeout.value = true
+        }
+      }, STREAM_TIMEOUT_MS)
+    }
+  }
+
+  function clearStreamTimeout() {
+    streamTimeout.value = false
+    if (streamTimeoutTimer) {
+      clearTimeout(streamTimeoutTimer)
+      streamTimeoutTimer = null
+    }
+  }
+
+  // Model switch debounce lock
+  const providerSwitching = ref(false)
+
   const currentSession = computed(() =>
     sessions.value.find((s) => s.id === currentSessionId.value)
   )
@@ -173,6 +201,7 @@ export const useChatStore = defineStore('chat', () => {
           break
         case 'thinking':
           thinkingContent.value += msg.content
+          resetStreamTimeout()
           break
         case 'tool_start': {
           const tc: ToolCall = {
@@ -182,6 +211,7 @@ export const useChatStore = defineStore('chat', () => {
             status: 'running',
           }
           toolCalls.value.push(tc)
+          resetStreamTimeout()
           break
         }
         case 'tool_input': {
@@ -203,6 +233,7 @@ export const useChatStore = defineStore('chat', () => {
             if (tc.status === 'running') tc.status = 'done'
           }
           streamingContent.value += msg.content
+          resetStreamTimeout()
           break
         case 'done': {
           // Build metadata from server response or local state
@@ -235,6 +266,7 @@ export const useChatStore = defineStore('chat', () => {
           thinkingContent.value = ''
           toolCalls.value = []
           streaming.value = false
+          clearStreamTimeout()
           break
         }
         case 'error':
@@ -264,6 +296,7 @@ export const useChatStore = defineStore('chat', () => {
           thinkingContent.value = ''
           toolCalls.value = []
           streaming.value = false
+          clearStreamTimeout()
           messages.value.push({
             id: Date.now() + 1,
             session_id: msg.session_id,
@@ -359,6 +392,7 @@ export const useChatStore = defineStore('chat', () => {
     streamingContent.value = ''
     thinkingContent.value = ''
     toolCalls.value = []
+    resetStreamTimeout()
 
     try {
       const pid = currentSessionId.value === 0 ? pendingProviderId.value : undefined
@@ -377,6 +411,7 @@ export const useChatStore = defineStore('chat', () => {
       }
     } catch (e: any) {
       streaming.value = false
+      clearStreamTimeout()
       messages.value.push({
         id: Date.now(),
         session_id: currentSessionId.value,
@@ -417,7 +452,8 @@ export const useChatStore = defineStore('chat', () => {
   })
 
   async function switchProviderForSession(providerId: string) {
-    if (!currentSessionId.value || streaming.value) return
+    if (!currentSessionId.value || streaming.value || providerSwitching.value) return
+    providerSwitching.value = true
     try {
       await api.switchProvider(currentSessionId.value, providerId)
       // Update local session's provider_id
@@ -432,6 +468,8 @@ export const useChatStore = defineStore('chat', () => {
         content: `切换失败: ${e.message}`,
         created_at: new Date().toISOString(),
       })
+    } finally {
+      providerSwitching.value = false
     }
   }
 
@@ -464,5 +502,7 @@ export const useChatStore = defineStore('chat', () => {
     compressContext,
     currentProvider,
     switchProviderForSession,
+    streamTimeout,
+    providerSwitching,
   }
 })
