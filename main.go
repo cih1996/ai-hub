@@ -216,6 +216,11 @@ func main() {
 		v1.GET("/vector/list", api.ListVectorFiles)
 		v1.POST("/vector/read", api.ReadVector)
 
+		// Export / Import
+		v1.GET("/export/session/:id", api.ExportSession)
+		v1.GET("/export/team/:name", api.ExportTeam)
+		v1.POST("/import", api.ImportArchive)
+
 		// Token usage
 		v1.GET("/token-usage/message/:id", api.GetMessageTokenUsage)
 		v1.GET("/token-usage/session/:id", api.GetSessionTokenUsage)

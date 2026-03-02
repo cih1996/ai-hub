@@ -272,3 +272,26 @@ export const getHourlyTokenUsage = (start?: string, end?: string, sessionId?: nu
   const qs = params.toString()
   return request<HourlyTokenUsage[]>(`/token-usage/hourly${qs ? '?' + qs : ''}`)
 }
+
+// Export / Import
+export interface ImportResult {
+  ok: boolean
+  sessions_imported: number
+  session_id_map: Record<string, number>
+  team_files_imported: number
+  warnings: string[]
+}
+
+export const exportSessionUrl = (id: number) => `${BASE}/export/session/${id}`
+export const exportTeamUrl = (name: string) => `${BASE}/export/team/${encodeURIComponent(name)}`
+
+export async function importArchive(file: File): Promise<ImportResult> {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await fetch(`${BASE}/import`, { method: 'POST', body: form })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error(err.error || res.statusText)
+  }
+  return res.json()
+}
