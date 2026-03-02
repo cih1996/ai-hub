@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
@@ -566,10 +567,15 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 			Type             string          `json:"type"`
 			Subtype          string          `json:"subtype"`
 			Result           string          `json:"result"`
+			IsError          bool            `json:"is_error"`
 			Event            json.RawMessage `json:"event"`
 			ConversationName string          `json:"conversation_name"`
 			Error            json.RawMessage `json:"error"`
-			Usage            struct {
+			Errors           []struct {
+				Message string `json:"message"`
+				Type    string `json:"type"`
+			} `json:"errors"`
+			Usage struct {
 				InputTokens              int64 `json:"input_tokens"`
 				OutputTokens             int64 `json:"output_tokens"`
 				CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
@@ -730,7 +736,45 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 					broadcast(WSMessage{Type: "session_title_update", SessionID: sessID, Content: wrapper.ConversationName})
 				}
 			}
-			if wrapper.Subtype == "success" && fullResponse == "" {
+
+			// Collect error messages from the errors array (if any)
+			var errMsgs []string
+			for _, e := range wrapper.Errors {
+				if e.Message != "" {
+					errMsgs = append(errMsgs, e.Message)
+				}
+			}
+
+			// Determine if this result is an error condition
+			isResultError := wrapper.Subtype == "error" || wrapper.Subtype == "error_during_execution" || wrapper.IsError
+
+			if isResultError {
+				// Build composite error message
+				errContent := wrapper.Result
+				if len(errMsgs) > 0 {
+					errContent = strings.Join(errMsgs, "; ")
+				}
+				if errContent == "" {
+					errContent = "unknown CLI error (subtype=" + wrapper.Subtype + ")"
+				}
+				log.Printf("[claude] session %d: result error: subtype=%s is_error=%v errors=%v result=%s",
+					sessID, wrapper.Subtype, wrapper.IsError, errMsgs, wrapper.Result)
+
+				// Auto-recovery: "No conversation found" → reset claude_session_id
+				for _, msg := range errMsgs {
+					if strings.Contains(strings.ToLower(msg), "no conversation found") {
+						log.Printf("[claude] session %d: detected 'No conversation found', resetting claude_session_id", sessID)
+						newUUID := uuid.New().String()
+						if err := store.UpdateClaudeSessionID(sessID, newUUID); err == nil {
+							core.Pool.Kill(sessID)
+							errContent += " (会话已自动重置，请重新发送消息)"
+							log.Printf("[claude] session %d: claude_session_id reset to %s", sessID, newUUID)
+						}
+						break
+					}
+				}
+				send(WSMessage{Type: "error", SessionID: sessID, Content: errContent})
+			} else if wrapper.Subtype == "success" && fullResponse == "" {
 				// Prefer assistant message content (preserves newlines) over result summary
 				fallback := assistantFullText
 				if fallback == "" {
@@ -741,8 +785,6 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 					fullResponse = fallback
 					send(WSMessage{Type: "chunk", SessionID: sessID, Content: fallback})
 				}
-			} else if wrapper.Subtype == "error" && wrapper.Result != "" {
-				send(WSMessage{Type: "error", SessionID: sessID, Content: wrapper.Result})
 			}
 			// Capture token usage (accumulate, not overwrite)
 			if wrapper.Usage.InputTokens > 0 || wrapper.Usage.OutputTokens > 0 || wrapper.Usage.CacheCreationInputTokens > 0 || wrapper.Usage.CacheReadInputTokens > 0 {
