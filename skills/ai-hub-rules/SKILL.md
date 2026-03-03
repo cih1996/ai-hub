@@ -142,7 +142,25 @@ curl -X POST http://localhost:$AI_HUB_PORT/api/v1/vector/read \
 
 **写入方法：** 团队规则文件需通过以下方式写入（向量 API 不支持 rules scope 写入）：
 - 直接使用 Read/Edit 工具操作：`~/.ai-hub/teams/<group_name>/rules/<文件名>.md`
-- 或通过文件管理 API：`PUT /api/v1/files/content` scope=`<group_name>/rules`
+- 或通过文件管理 API（scope 格式为 `<group_name>/rules`）：
+
+```bash
+# 读取团队规则文件（通过文件 API）
+curl "http://localhost:$AI_HUB_PORT/api/v1/files/content?scope=AI%20Hub%20维护团队/rules&path=CLAUDE.md"
+
+# 新建团队规则文件
+curl -X POST http://localhost:$AI_HUB_PORT/api/v1/files \
+  -H "Content-Type: application/json" \
+  -d '{"scope": "AI Hub 维护团队/rules", "path": "rule-协作协议.md", "content": "规则内容"}'
+
+# 更新已有团队规则文件
+curl -X PUT http://localhost:$AI_HUB_PORT/api/v1/files/content \
+  -H "Content-Type: application/json" \
+  -d '{"scope": "AI Hub 维护团队/rules", "path": "CLAUDE.md", "content": "更新后的规则内容"}'
+
+# 列出所有团队规则文件
+curl "http://localhost:$AI_HUB_PORT/api/v1/files?scope=AI%20Hub%20维护团队/rules"
+```
 
 **生效时机：** 修改后，下次该团队会话发送消息时自动注入新内容（无需重启进程，但现有进程的历史上下文已有旧规则，新内容仅对后续对话生效）。
 
