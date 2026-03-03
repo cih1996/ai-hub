@@ -307,7 +307,8 @@ func buildRecoverySeed(msgs []model.Message, reason string) string {
 	return sb.String()
 }
 
-// maybeAutoCompress checks auto-compress settings and triggers compression if threshold exceeded.
+// maybeAutoCompress checks auto-compress settings and triggers compression if both
+// the token threshold AND the minimum turn count are exceeded (dual-condition).
 // Called asynchronously after each successful runStream; must not block.
 func maybeAutoCompress(session *model.Session, newInputTokens int64) {
 	cfg, err := store.GetCompressSettings()
@@ -315,7 +316,7 @@ func maybeAutoCompress(session *model.Session, newInputTokens int64) {
 		return
 	}
 
-	// Get total accumulated input tokens for this session
+	// Condition 1: total accumulated input tokens must exceed threshold
 	stats, err := store.GetSessionTokenStats(session.ID)
 	if err != nil {
 		return
@@ -325,13 +326,23 @@ func maybeAutoCompress(session *model.Session, newInputTokens int64) {
 		return
 	}
 
+	// Condition 2: conversation turns (user messages) must reach MinTurns
+	if cfg.MinTurns > 0 {
+		turns := store.CountUserMessages(session.ID)
+		if turns < cfg.MinTurns {
+			log.Printf("[compress] auto-compress skipped for session %d: turns=%d < min_turns=%d (tokens=%d)",
+				session.ID, turns, cfg.MinTurns, totalInput)
+			return
+		}
+	}
+
 	// Don't compress if streaming is in progress
 	if IsSessionStreaming(session.ID) {
 		return
 	}
 
-	log.Printf("[compress] auto-compress triggered for session %d: total_input=%d threshold=%d",
-		session.ID, totalInput, cfg.Threshold)
+	log.Printf("[compress] auto-compress triggered for session %d: total_input=%d threshold=%d turns>=%d",
+		session.ID, totalInput, cfg.Threshold, cfg.MinTurns)
 
 	if _, err := doCompress(session, cfg.Mode); err != nil {
 		log.Printf("[compress] auto-compress failed for session %d: %v", session.ID, err)

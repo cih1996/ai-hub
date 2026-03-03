@@ -208,7 +208,15 @@ func (v *VectorEngine) installDeps() error {
 
 func (v *VectorEngine) downloadModel() error {
 	modelCacheDir := filepath.Join(v.baseDir, "models")
+	sentinelFile := filepath.Join(modelCacheDir, ".model_ready")
 	script := filepath.Join(v.scriptDir, "download_model.py")
+
+	// Fast path: sentinel file exists → model already downloaded, skip download script.
+	// The sentinel is only created after a successful download.
+	if _, err := os.Stat(sentinelFile); err == nil {
+		log.Printf("[vector] model cache found (%s), skipping download", modelCacheDir)
+		return nil
+	}
 
 	runDownload := func() error {
 		cmd := exec.Command(v.pythonPath, script)
@@ -233,6 +241,12 @@ func (v *VectorEngine) downloadModel() error {
 			return fmt.Errorf("download_model.py failed: %s", err2)
 		}
 		log.Println("[vector] model download succeeded after cache clear")
+	}
+
+	// Create sentinel file so subsequent restarts skip the download step.
+	os.MkdirAll(modelCacheDir, 0755)
+	if err := os.WriteFile(sentinelFile, []byte("ok"), 0644); err != nil {
+		log.Printf("[vector] warning: could not write sentinel file: %v", err)
 	}
 	return nil
 }
@@ -550,6 +564,26 @@ func (v *VectorEngine) Delete(scope, docID string) error {
 	}
 	_, err := v.post("/delete", body)
 	return err
+}
+
+// ListMetadata returns all vector records' full metadata for a scope (doc_id -> metadata map).
+// Non-fatal: returns nil if engine is not ready or request fails.
+func (v *VectorEngine) ListMetadata(scope string) map[string]map[string]interface{} {
+	if !v.IsReady() {
+		return nil
+	}
+	resp, err := http.Get(fmt.Sprintf("%s/list_metadata?scope=%s", v.baseURL, scope))
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	var result struct {
+		Items map[string]map[string]interface{} `json:"items"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil
+	}
+	return result.Items
 }
 
 // Stats returns hit statistics

@@ -107,6 +107,7 @@ type CompressSettings struct {
 	AutoEnabled bool   `json:"auto_enabled"` // 是否启用自动压缩
 	Threshold   int    `json:"threshold"`    // 触发阈值（累计 input tokens 绝对值，建议 80000）
 	Mode        string `json:"mode"`         // "auto"（智能优先，降级简单）| "intelligent"（仅智能）| "simple"（仅简单截取）
+	MinTurns    int    `json:"min_turns"`    // 最小对话轮数阈值（user 消息数），默认 10；token 与轮数同时满足才触发压缩
 }
 
 // Channel 通讯频道（IM 网关）

@@ -23,12 +23,13 @@ func SetSetting(key, value string) error {
 }
 
 // GetCompressSettings reads compress.* keys and returns a CompressSettings struct.
-// Defaults: auto_enabled=false, threshold=80000, mode="auto".
+// Defaults: auto_enabled=false, threshold=80000, mode="auto", min_turns=10.
 func GetCompressSettings() (*model.CompressSettings, error) {
 	s := &model.CompressSettings{
 		AutoEnabled: false,
 		Threshold:   80000,
 		Mode:        "auto",
+		MinTurns:    10,
 	}
 
 	if v, _ := GetSetting("compress.auto_enabled"); v == "true" {
@@ -42,11 +43,16 @@ func GetCompressSettings() (*model.CompressSettings, error) {
 	if v, _ := GetSetting("compress.mode"); v != "" {
 		s.Mode = v
 	}
+	if v, _ := GetSetting("compress.min_turns"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			s.MinTurns = n
+		}
+	}
 
 	return s, nil
 }
 
-// SaveCompressSettings writes all three compress settings atomically.
+// SaveCompressSettings writes all compress settings atomically.
 func SaveCompressSettings(s *model.CompressSettings) error {
 	enabled := "false"
 	if s.AutoEnabled {
@@ -62,5 +68,16 @@ func SaveCompressSettings(s *model.CompressSettings) error {
 	if mode == "" {
 		mode = "auto"
 	}
-	return SetSetting("compress.mode", mode)
+	if err := SetSetting("compress.mode", mode); err != nil {
+		return err
+	}
+	return SetSetting("compress.min_turns", strconv.Itoa(s.MinTurns))
+}
+
+// CountUserMessages returns the number of user messages in a session (each = 1 turn).
+func CountUserMessages(sessionID int64) int {
+	row := DB.QueryRow(`SELECT COUNT(*) FROM messages WHERE session_id = ? AND role = 'user'`, sessionID)
+	var count int
+	row.Scan(&count)
+	return count
 }

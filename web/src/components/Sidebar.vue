@@ -181,7 +181,9 @@ function confirmNewChat() {
 }
 
 function selectSession(id: number) {
-  store.selectSession(id)
+  // Only push route; App.vue watch(route.params.id) handles store.selectSession uniformly.
+  // Do NOT call store.selectSession here — it would cause a double subscribe to the WS
+  // buffer, resulting in streamed content appearing twice (Issue #112).
   router.push(`/chat/${id}`)
   if (isMobile.value) closeSidebar()
 }

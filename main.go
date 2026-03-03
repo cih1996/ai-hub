@@ -218,6 +218,7 @@ func main() {
 		v1.GET("/vector/health", api.VectorHealth)
 		v1.POST("/vector/restart", api.RestartVector)
 		v1.GET("/vector/list", api.ListVectorFiles)
+		v1.GET("/vector/list_files", api.ListVectorFilesRich) // Issue #109: rich list with preview+type+source_session_id
 		v1.GET("/vector/list_knowledge", api.ListKnowledgeFiles)
 		v1.GET("/vector/list_memory", api.ListMemoryFiles)
 		v1.POST("/vector/read", api.ReadVector)

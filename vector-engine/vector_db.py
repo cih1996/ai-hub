@@ -105,3 +105,16 @@ class VectorDB:
             })
         records.sort(key=lambda x: x["hit_count"], reverse=True)
         return {"total": count, "records": records}
+
+    def list_metadata(self) -> dict:
+        """返回所有记录的完整 metadata（doc_id -> metadata 映射）"""
+        count = self.collection.count()
+        if count == 0:
+            return {"total": 0, "items": {}}
+        all_data = self.collection.get()
+        items = {}
+        for i in range(len(all_data["ids"])):
+            doc_id = all_data["ids"][i]
+            meta = all_data["metadatas"][i] if all_data["metadatas"] else {}
+            items[doc_id] = meta
+        return {"total": count, "items": items}

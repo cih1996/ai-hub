@@ -110,6 +110,13 @@ def stats(scope: str = "knowledge"):
     return db.stats()
 
 
+@app.get("/list_metadata")
+def list_metadata(scope: str = "knowledge"):
+    """Return all records with full metadata for the given scope."""
+    db = _get_db(scope)
+    return db.list_metadata()
+
+
 if __name__ == "__main__":
     import uvicorn
 
