@@ -300,7 +300,7 @@ func ImportArchive(c *gin.Context) {
 			parts := strings.SplitN(relPath, "/", 2)
 			if len(parts) == 2 && (parts[0] == "knowledge" || parts[0] == "memory") {
 				scope := manifest.GroupName + "/" + parts[0]
-				core.SyncFileToVector(scope, destPath)
+				core.SyncFileToVector(scope, destPath, 0) // import: no source session
 			}
 		}
 		if teamFilesImported > 0 || len(warnings) > 0 {

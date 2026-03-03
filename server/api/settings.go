@@ -37,6 +37,13 @@ func UpdateCompressSettings(c *gin.Context) {
 	if req.Threshold > 500000 {
 		req.Threshold = 500000
 	}
+	// Validate min_turns (0 means disabled, max 500)
+	if req.MinTurns < 0 {
+		req.MinTurns = 0
+	}
+	if req.MinTurns > 500 {
+		req.MinTurns = 500
+	}
 
 	if err := store.SaveCompressSettings(&req); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

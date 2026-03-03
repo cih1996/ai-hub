@@ -191,7 +191,7 @@ func WriteFile(c *gin.Context) {
 
 	// Trigger vector sync for knowledge/memory
 	if req.Scope == "knowledge" || req.Scope == "memory" {
-		core.SyncFileToVector(req.Scope, writePath)
+		core.SyncFileToVector(req.Scope, writePath, 0) // files API: no session context
 	}
 
 	c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -228,7 +228,7 @@ func CreateFile(c *gin.Context) {
 
 	// Trigger vector sync for knowledge/memory
 	if req.Scope == "knowledge" || req.Scope == "memory" {
-		core.SyncFileToVector(req.Scope, writePath)
+		core.SyncFileToVector(req.Scope, writePath, 0) // files API: no session context
 	}
 
 	c.JSON(http.StatusCreated, gin.H{"ok": true})

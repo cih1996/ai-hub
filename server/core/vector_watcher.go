@@ -116,7 +116,7 @@ func (w *VectorWatcher) fullSync() {
 				continue
 			}
 			w.snapshots[path] = fileSnapshot{modTime: info.ModTime(), size: info.Size()}
-			syncFileToVector(scope, path)
+			syncFileToVector(scope, path, 0) // watcher-originated: session unknown
 		}
 	}
 	log.Printf("[vector-watcher] initial sync: %d files", len(w.snapshots))
@@ -147,7 +147,7 @@ func (w *VectorWatcher) poll() {
 			snap, exists := w.snapshots[path]
 			if !exists || info.ModTime().After(snap.modTime) || info.Size() != snap.size {
 				w.snapshots[path] = fileSnapshot{modTime: info.ModTime(), size: info.Size()}
-				syncFileToVector(scope, path)
+				syncFileToVector(scope, path, 0) // poll-originated: session unknown
 			}
 		}
 	}
@@ -183,7 +183,8 @@ var Watcher *VectorWatcher
 
 // SyncFileToVector is called externally (e.g., after WriteFile API) to trigger immediate sync.
 // Also registers the file's parent directory for watching if it's a new team scope dir.
-func SyncFileToVector(scope, filePath string) {
+// sessionID is the hub session that wrote the file (0 if unknown / watcher-originated).
+func SyncFileToVector(scope, filePath string, sessionID int64) {
 	// Dynamically register the parent dir for watching (covers new team scope dirs)
 	if Watcher != nil {
 		dir := filepath.Dir(filePath)
@@ -192,10 +193,10 @@ func SyncFileToVector(scope, filePath string) {
 	if Vector == nil || !Vector.IsReady() {
 		return
 	}
-	syncFileToVector(scope, filePath)
+	syncFileToVector(scope, filePath, sessionID)
 }
 
-func syncFileToVector(scope, path string) {
+func syncFileToVector(scope, path string, sessionID int64) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		log.Printf("[vector-watcher] read error %s: %v", path, err)
@@ -214,12 +215,13 @@ func syncFileToVector(scope, path string) {
 
 	docID := name
 	meta := map[string]interface{}{
-		"file_path": path,
-		"scope":     scope,
+		"file_path":         path,
+		"scope":             scope,
+		"source_session_id": sessionID,
 	}
 	if err := Vector.Embed(scope, docID, text, meta); err != nil {
 		log.Printf("[vector-watcher] embed error %s: %v", docID, err)
 	} else {
-		log.Printf("[vector-watcher] synced: %s/%s", scope, docID)
+		log.Printf("[vector-watcher] synced: %s/%s (session=%d)", scope, docID, sessionID)
 	}
 }

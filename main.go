@@ -218,6 +218,7 @@ func main() {
 		v1.GET("/vector/health", api.VectorHealth)
 		v1.POST("/vector/restart", api.RestartVector)
 		v1.GET("/vector/list", api.ListVectorFiles)
+		v1.GET("/vector/list_files", api.ListVectorFilesRich) // Issue #109: rich list with preview+type+source_session_id
 		v1.GET("/vector/list_knowledge", api.ListKnowledgeFiles)
 		v1.GET("/vector/list_memory", api.ListMemoryFiles)
 		v1.POST("/vector/read", api.ReadVector)
@@ -466,7 +467,9 @@ func cleanLegacyClaudeDirs() {
 }
 
 // installClaudeRules copies embedded claude/* to the rules directory (~/.ai-hub/rules/)
-// only if the target rule does not exist. System prompt is built on-the-fly via BuildSystemPrompt().
+// on every startup (always overwrite, like installBuiltinSkills). This ensures system-level
+// rule updates (e.g. new sections, self-correction mechanism) are applied to all
+// existing installations. User customisations should live in separate rule-*.md files.
 func installClaudeRules(dataDir string) {
 	targetBase := filepath.Join(dataDir, "rules")
 	log.Printf("[rules] template dir: %s", targetBase)
@@ -490,12 +493,6 @@ func installClaudeRules(dataDir string) {
 		target := filepath.Join(targetBase, rel)
 		log.Printf("[rules] embed path=%s rel=%s target=%s", p, rel, target)
 
-		// Skip if template source already exists
-		if _, err := os.Stat(target); err == nil {
-			log.Printf("[rules] skip (exists): %s", target)
-			return nil
-		}
-
 		data, err := claudeRulesFS.ReadFile(p)
 		if err != nil {
 			log.Printf("[rules] read embed error: %v", err)
@@ -509,9 +506,9 @@ func installClaudeRules(dataDir string) {
 			log.Printf("[rules] write error: %v", err)
 			return nil
 		}
-		log.Printf("[rules] installed template %s (%d bytes)", target, len(data))
+		log.Printf("[rules] installed/updated template %s (%d bytes)", target, len(data))
 		count++
 		return nil
 	})
-	log.Printf("[rules] done, installed %d template(s)", count)
+	log.Printf("[rules] done, installed/updated %d template(s)", count)
 }

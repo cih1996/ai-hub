@@ -56,7 +56,18 @@ curl -X POST http://localhost:$AI_HUB_PORT/api/v1/vector/search_knowledge \
   -d '{"query": "搜索内容", "top_k": 5, "scope": "AI Hub 维护团队/knowledge"}'
 ```
 
-返回按相似度排序的文件列表（`results[].id` = 文件名 / `results[].similarity` = 相似度分数 / `results[].document` = 内容 / `results[].metadata` = 元信息含 scope、file_path 等）。
+返回按 **自身 > 团队 > 全局** 优先级排序（同级按相似度）的文件列表：
+
+| 字段 | 说明 |
+|------|------|
+| `id` | 文件名 |
+| `similarity` | 相似度 0-1 |
+| `document` | 向量化内容（文件名+前200字） |
+| `metadata` | 元信息（scope、file_path、source_session_id、updated_at 等） |
+| `type` | `"knowledge"` 或 `"memory"` |
+| `source_session_id` | 写入该文件的会话 ID（0 表示未知） |
+
+> 排序逻辑：source_session_id == 当前 session_id（自身） > 同团队 > 全局；传 `session_id` 才能激活智能排序。
 
 ### 2. 语义搜索记忆库
 
@@ -121,7 +132,45 @@ curl -X POST http://localhost:$AI_HUB_PORT/api/v1/vector/delete_memory \
   -d '{"file_name": "文件名.md", "session_id": '"$AI_HUB_SESSION_ID"'}'
 ```
 
-### 9. 列出 scope 目录文件
+### 9. 列出文件（富文本版，推荐）
+
+**`GET /api/v1/vector/list_files`** — 返回文件名 + 前100字预览 + 类型 + 来源会话 + 更新时间，按 自身 > 团队 > 全局 排序：
+
+```bash
+# 推荐：传 session_id，自动列出当前会话所属团队的知识库+记忆库
+curl "http://localhost:$AI_HUB_PORT/api/v1/vector/list_files?session_id=$AI_HUB_SESSION_ID"
+
+# 仅列出记忆库
+curl "http://localhost:$AI_HUB_PORT/api/v1/vector/list_files?session_id=$AI_HUB_SESSION_ID&type=memory"
+
+# 额外包含全局库
+curl "http://localhost:$AI_HUB_PORT/api/v1/vector/list_files?session_id=$AI_HUB_SESSION_ID&list_global=true"
+
+# 显式指定 scope
+curl "http://localhost:$AI_HUB_PORT/api/v1/vector/list_files?scope=AI%20Hub%20维护团队/knowledge"
+```
+
+请求参数：
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `session_id` | int | 当前会话 ID（推断团队归属+排序） |
+| `scope` | string | 可选，显式指定 scope，覆盖自动推断 |
+| `list_global` | bool | 为 true 时额外列出全局库（默认 false） |
+| `type` | string | `memory` / `knowledge` / `all`（默认 all） |
+
+返回示例：
+```json
+{
+  "total": 3,
+  "files": [
+    {"file_name":"项目概览.md","preview":"# 项目...","type":"knowledge","source_session_id":25,"updated_at":"2026-03-03T20:00:00+08:00","scope":"AI Hub 维护团队/knowledge"},
+    {"file_name":"纠错-向量搜索.md","preview":"问题描述...","type":"memory","source_session_id":0,"updated_at":"2026-03-01T12:00:00+08:00","scope":"AI Hub 维护团队/memory"}
+  ]
+}
+```
+
+### 9.1 列出文件（简版，文件名列表）
 
 列出指定 scope 目录下所有 `.md` 文件名（纯文件系统，无需向量引擎就绪）：
 
@@ -135,7 +184,7 @@ curl "http://localhost:$AI_HUB_PORT/api/v1/vector/list?scope=knowledge"
 
 返回：`["文件A.md", "文件B.md"]`
 
-### 9.1 列出知识库文件（推荐，支持 session_id 自动团队）
+### 9.2 列出知识库文件（按团队，文件名列表）
 
 ```bash
 # 推荐：按当前会话自动定位团队知识库（无团队则回退全局 knowledge）
@@ -150,7 +199,7 @@ curl "http://localhost:$AI_HUB_PORT/api/v1/vector/list_knowledge?scope=AI%20Hub%
 {"scope":"AI Hub 维护团队/knowledge","files":["A.md","B.md"]}
 ```
 
-### 9.2 列出记忆库文件（推荐，支持 session_id 自动团队）
+### 9.3 列出记忆库文件（按团队，文件名列表）
 
 ```bash
 # 推荐：按当前会话自动定位团队记忆库（无团队则回退全局 memory）
@@ -256,3 +305,22 @@ curl "http://localhost:$AI_HUB_PORT/api/v1/vector/status"
 如果返回 `ready: false`，说明向量引擎未就绪，此时：
 - **搜索功能不可用**，降级用 `GET /api/v1/vector/list` 列出文件后逐一用 `POST /api/v1/vector/read` 读取
 - 读写删除（`read_knowledge` / `write_knowledge` 等）仍可正常使用，不依赖向量引擎
+
+---
+
+## 操作分类规范（必须 API vs 可直接操作）
+
+| 操作类型 | 方式 | 原因 |
+|----------|------|------|
+| 语义搜索（search） | **必须 API** | 需传 session_id，后端据此推断团队归属、智能排序 |
+| 列出文件（list_files） | **必须 API** | 需感知 session_id / 团队 / 时间，自动排序 |
+| 读取文件内容（read file） | 直接 Read 即可 | 只需知道文件路径，无需后端逻辑 |
+| 编辑/修改内容 | 直接 Edit 即可 | 同上；编辑后向量引擎会自动通过 watcher 同步 |
+| 写入新文件（create） | **必须 API** | 需绑定 source_session_id、触发向量同步 |
+| 删除文件 | **必须 API** | 需同步清理向量记录，仅删文件会导致向量库孤记录 |
+
+> **路径规则**：
+> - 全局 knowledge：`~/.ai-hub/knowledge/<file_name>`
+> - 全局 memory：`~/.ai-hub/memory/<file_name>`
+> - 团队 knowledge：`~/.ai-hub/teams/<团队名>/knowledge/<file_name>`
+> - 团队 memory：`~/.ai-hub/teams/<团队名>/memory/<file_name>`

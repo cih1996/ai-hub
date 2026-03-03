@@ -20,6 +20,9 @@ export const useChatStore = defineStore('chat', () => {
   const wsConnected = ref(false)
   let wsReconnectDelay = 1000 // exponential backoff: 1s → 2s → 4s → ... → 30s
   let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null
+  // FIX #112: session_id to suppress WS streaming events for during selectSession reload.
+  // Prevents pre-subscribe chunks from accumulating before the buffer replay fires.
+  let _suppressChunksFor = 0
 
   const workDir = ref('')
   const pendingProviderId = ref('')  // provider selected in new-chat dialog
@@ -188,6 +191,11 @@ export const useChatStore = defineStore('chat', () => {
         return
       }
 
+      // FIX #112: suppress streaming events for a session being reloaded.
+      // During the async getMessages window in selectSession, the server may still
+      // send this session's chunks (old subscription). Allowing them to accumulate
+      // before the subscribe-replay fires doubles the content.
+      if (_suppressChunksFor > 0 && msg.session_id === _suppressChunksFor) return
       // All other events: ignore if not for the current session
       if (msg.session_id !== currentSessionId.value) return
 
@@ -334,6 +342,15 @@ export const useChatStore = defineStore('chat', () => {
       return
     }
 
+    // FIX #112 (Case 1): navigating back to the SAME session while it is still streaming
+    // (e.g. user went to Settings page and returned). The WS is already subscribed and
+    // chunks are continuously arriving — just return. Resetting + re-subscribing would
+    // cause SwapSendAndReplay to replay the full buffer on top of already-live chunks,
+    // doubling the content.
+    if (id === currentSessionId.value && streaming.value) {
+      return
+    }
+
     currentSessionId.value = id
     streaming.value = false
     streamingContent.value = ''
@@ -341,6 +358,14 @@ export const useChatStore = defineStore('chat', () => {
     toolCalls.value = []
     latestTokenUsage.value = null
     clearUsageLimitWarning()
+
+    // FIX #112 (Case 2): block incoming WS streaming events for `id` during the
+    // async getMessages load. The server-side ActiveStream keeps the old sendFn
+    // pointing at this WS connection even after a session switch, so chunks for `id`
+    // can arrive and accumulate in streamingContent before subscribe fires its replay,
+    // resulting in doubled content. We suppress them here and clear the guard just
+    // before subscribe so the replay lands on a clean slate.
+    _suppressChunksFor = id
 
     // Try to load messages for this session
     try {
@@ -353,6 +378,7 @@ export const useChatStore = defineStore('chat', () => {
       // Check error message since request() throws plain Error without response property
       const errorMsg = err.message || String(err)
       if (errorMsg.includes('session not found') || errorMsg.includes('404')) {
+        _suppressChunksFor = 0
         console.log('[selectSession] Session not found, redirecting to /chat. Error:', errorMsg)
         newChat()
         // Use nextTick to ensure router navigation happens after state updates
@@ -370,6 +396,10 @@ export const useChatStore = defineStore('chat', () => {
       messages.value = []
       console.error('Failed to load messages:', err)
     }
+
+    // Clear suppression BEFORE subscribe so the replay events are processed normally
+    _suppressChunksFor = 0
+
     // Load token usage for this session's messages
     try {
       const resp = await api.getSessionTokenUsage(id)
@@ -377,7 +407,9 @@ export const useChatStore = defineStore('chat', () => {
         if (r.message_id) tokenUsageMap.value[r.message_id] = r
       }
     } catch { /* ignore if no usage data */ }
-    // Subscribe to check if this session is still streaming
+    // Subscribe to check if this session is still streaming.
+    // At this point _suppressChunksFor is 0, so the replay from SwapSendAndReplay
+    // lands on a clean streamingContent — no double-write.
     if (ws.value && ws.value.readyState === WebSocket.OPEN) {
       ws.value.send(JSON.stringify({ type: 'subscribe', session_id: id }))
     }

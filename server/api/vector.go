@@ -149,12 +149,57 @@ func ListMemoryFiles(c *gin.Context) {
 	vectorList(c, "memory")
 }
 
+// enrichResult adds type and source_session_id to a vector search result.
+// origin: "self" | "team" | "global" (used for sorting priority).
+func enrichResult(r map[string]interface{}, scopeType, origin string) map[string]interface{} {
+	out := make(map[string]interface{}, len(r)+3)
+	for k, v := range r {
+		out[k] = v
+	}
+	out["type"] = scopeType // "memory" | "knowledge"
+	// Extract source_session_id from metadata (stored as float64 in JSON)
+	if meta, ok := r["metadata"].(map[string]interface{}); ok {
+		if sid, ok := meta["source_session_id"]; ok {
+			out["source_session_id"] = sid
+		}
+	}
+	if _, exists := out["source_session_id"]; !exists {
+		out["source_session_id"] = 0
+	}
+	out["_origin"] = origin // internal sort key, removed before response
+	return out
+}
+
+// sortPriority returns 0 (self) / 1 (team) / 2 (global) for sorting.
+func sortPriority(r map[string]interface{}, sessionID int64) int {
+	if sessionID > 0 {
+		if sid, ok := r["source_session_id"]; ok {
+			var sidInt int64
+			switch v := sid.(type) {
+			case float64:
+				sidInt = int64(v)
+			case int64:
+				sidInt = v
+			case int:
+				sidInt = int64(v)
+			}
+			if sidInt == sessionID {
+				return 0 // self
+			}
+		}
+	}
+	if origin, ok := r["_origin"].(string); ok && origin == "team" {
+		return 1
+	}
+	return 2 // global
+}
+
 func vectorSearch(c *gin.Context, defaultScope string) {
 	var req struct {
 		Query     string `json:"query"`
 		TopK      int    `json:"top_k"`
 		Scope     string `json:"scope"`      // optional: explicit scope override
-		SessionID int64  `json:"session_id"` // optional: auto-resolve team scope
+		SessionID int64  `json:"session_id"` // optional: auto-resolve team scope + sorting
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -171,7 +216,8 @@ func vectorSearch(c *gin.Context, defaultScope string) {
 		return
 	}
 
-	scope := defaultScope
+	// Determine type label from scope suffix
+	scopeType := defaultScope // "memory" or "knowledge"
 
 	// Explicit scope takes priority
 	if req.Scope != "" {
@@ -179,56 +225,96 @@ func vectorSearch(c *gin.Context, defaultScope string) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid scope"})
 			return
 		}
-		scope = req.Scope
-		results, err := core.Vector.Search(scope, req.Query, req.TopK)
+		// Derive type from explicit scope suffix
+		parts := strings.Split(req.Scope, "/")
+		scopeType = parts[len(parts)-1]
+
+		results, err := core.Vector.Search(req.Scope, req.Query, req.TopK)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"results": results})
+		enriched := make([]map[string]interface{}, 0, len(results))
+		for _, r := range results {
+			e := enrichResult(r, scopeType, "global")
+			delete(e, "_origin")
+			enriched = append(enriched, e)
+		}
+		c.JSON(http.StatusOK, gin.H{"results": enriched})
 		return
 	}
 
-	// Auto-resolve: if session has group_name, search team scope first then global, merge results
+	// Auto-resolve: if session has group_name, search team scope first then global, merge & sort
 	if teamScope := resolveTeamScope(req.SessionID, defaultScope); teamScope != "" {
 		var merged []map[string]interface{}
+		seen := make(map[string]bool)
+
 		// 1. Search team scope
 		teamResults, err := core.Vector.Search(teamScope, req.Query, req.TopK)
 		if err != nil {
 			log.Printf("[vector] team search error (scope=%s): %v", teamScope, err)
 		} else {
-			merged = append(merged, teamResults...)
+			for _, r := range teamResults {
+				e := enrichResult(r, scopeType, "team")
+				id, _ := e["id"].(string)
+				seen[id] = true
+				merged = append(merged, e)
+			}
 		}
+
 		// 2. Search global scope
 		globalResults, err2 := core.Vector.Search(defaultScope, req.Query, req.TopK)
 		if err2 != nil {
 			log.Printf("[vector] global search error (scope=%s): %v", defaultScope, err2)
 		} else {
-			// Deduplicate: skip global results whose file_name already in team results
-			seen := make(map[string]bool)
-			for _, r := range merged {
-				if fn, ok := r["file_name"].(string); ok {
-					seen[fn] = true
-				}
-			}
 			for _, r := range globalResults {
-				fn, _ := r["file_name"].(string)
-				if !seen[fn] {
-					merged = append(merged, r)
+				id, _ := r["id"].(string)
+				if !seen[id] {
+					e := enrichResult(r, scopeType, "global")
+					merged = append(merged, e)
 				}
 			}
+		}
+
+		// Sort: self(0) > team(1) > global(2), same priority keeps search similarity order
+		sortResults(merged, req.SessionID)
+
+		// Remove internal _origin field
+		for _, r := range merged {
+			delete(r, "_origin")
 		}
 		c.JSON(http.StatusOK, gin.H{"results": merged})
 		return
 	}
 
 	// Default: search global scope only
-	results, err := core.Vector.Search(scope, req.Query, req.TopK)
+	results, err := core.Vector.Search(defaultScope, req.Query, req.TopK)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"results": results})
+	enriched := make([]map[string]interface{}, 0, len(results))
+	for _, r := range results {
+		e := enrichResult(r, scopeType, "global")
+		delete(e, "_origin")
+		enriched = append(enriched, e)
+	}
+	c.JSON(http.StatusOK, gin.H{"results": enriched})
+}
+
+// sortResults sorts results in-place: self > team > global, same priority keeps original order.
+func sortResults(results []map[string]interface{}, sessionID int64) {
+	// Stable sort: assign priority, same priority keeps insertion order (search similarity)
+	n := len(results)
+	for i := 0; i < n-1; i++ {
+		for j := i + 1; j < n; j++ {
+			pi := sortPriority(results[i], sessionID)
+			pj := sortPriority(results[j], sessionID)
+			if pj < pi {
+				results[i], results[j] = results[j], results[i]
+			}
+		}
+	}
 }
 
 // ReadKnowledge reads a knowledge file's full content
@@ -337,7 +423,8 @@ func vectorWrite(c *gin.Context, defaultScope string) {
 		return
 	}
 	// Trigger vector sync (also registers the dir for watching if new group scope)
-	core.SyncFileToVector(scope, path)
+	// Pass session_id so it's stored as source_session_id in vector metadata.
+	core.SyncFileToVector(scope, path, req.SessionID)
 	c.JSON(http.StatusOK, gin.H{"ok": true, "file_name": req.FileName, "scope": scope})
 }
 
@@ -464,6 +551,7 @@ func VectorHealth(c *gin.Context) {
 
 // ListVectorFiles lists .md files in a vector scope directory (filesystem only, no engine required).
 // GET /api/v1/vector/list?scope=<scope>
+// For richer response (type, preview, source_session_id), use GET /api/v1/vector/list_files.
 func ListVectorFiles(c *gin.Context) {
 	scope := c.Query("scope")
 	if scope == "" {
@@ -494,6 +582,173 @@ func ListVectorFiles(c *gin.Context) {
 		files = []string{}
 	}
 	c.JSON(http.StatusOK, files)
+}
+
+// VectorFileItem represents one file entry in the rich list response.
+type VectorFileItem struct {
+	FileName        string `json:"file_name"`
+	Preview         string `json:"preview"`           // first 100 chars of content
+	Type            string `json:"type"`              // "memory" | "knowledge"
+	SourceSessionID int64  `json:"source_session_id"` // session that wrote this file (0 if unknown)
+	UpdatedAt       string `json:"updated_at"`        // RFC3339 mod time
+	Scope           string `json:"scope"`
+}
+
+// ListVectorFilesRich lists .md files with preview, type, source_session_id, and updated_at.
+// GET /api/v1/vector/list_files?session_id=<id>&scope=<optional>&list_global=<bool>&type=<memory|knowledge|all>
+//
+// Default behaviour:
+//   - Team session:  lists team scope (both knowledge+memory unless type is specified)
+//   - No team:       lists files where source_session_id == current session
+//   - list_global=true: additionally includes global scope files
+//
+// Sorting: self (source_session_id == session_id) > team > global; same level by updated_at desc.
+func ListVectorFilesRich(c *gin.Context) {
+	sessionIDStr := strings.TrimSpace(c.Query("session_id"))
+	explicitScope := strings.TrimSpace(c.Query("scope"))
+	listGlobal := c.Query("list_global") == "true"
+	typeFilter := strings.TrimSpace(c.Query("type")) // "memory" | "knowledge" | "all" | ""
+
+	var sessionID int64
+	if sessionIDStr != "" {
+		if id, err := strconv.ParseInt(sessionIDStr, 10, 64); err == nil && id > 0 {
+			sessionID = id
+		}
+	}
+
+	type scopeEntry struct {
+		scope  string
+		origin string // "team" | "global"
+	}
+	var scopesToList []scopeEntry
+
+	if explicitScope != "" {
+		if !isValidScope(explicitScope) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid scope"})
+			return
+		}
+		scopesToList = append(scopesToList, scopeEntry{scope: explicitScope, origin: "global"})
+	} else {
+		// Auto-resolve scopes
+		types := []string{"memory", "knowledge"}
+		if typeFilter == "memory" {
+			types = []string{"memory"}
+		} else if typeFilter == "knowledge" {
+			types = []string{"knowledge"}
+		}
+
+		teamScope := ""
+		if sessionID > 0 {
+			if sess, err := store.GetSession(sessionID); err == nil && sess.GroupName != "" {
+				teamScope = sess.GroupName
+			}
+		}
+
+		if teamScope != "" {
+			for _, t := range types {
+				scopesToList = append(scopesToList, scopeEntry{scope: teamScope + "/" + t, origin: "team"})
+			}
+		}
+		if listGlobal || teamScope == "" {
+			for _, t := range types {
+				scopesToList = append(scopesToList, scopeEntry{scope: t, origin: "global"})
+			}
+		}
+	}
+
+	var allItems []VectorFileItem
+
+	for _, se := range scopesToList {
+		// Derive type label from scope suffix
+		scopeType := se.scope
+		if idx := strings.LastIndex(se.scope, "/"); idx >= 0 {
+			scopeType = se.scope[idx+1:]
+		}
+
+		dir := core.ScopeDir(se.scope)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+
+		// Get vector metadata for source_session_id (best-effort, nil if engine not ready)
+		var metaMap map[string]map[string]interface{}
+		if core.Vector != nil {
+			metaMap = core.Vector.ListMetadata(se.scope)
+		}
+
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+				continue
+			}
+			info, err := e.Info()
+			if err != nil {
+				continue
+			}
+
+			// Read preview (first 100 runes)
+			filePath := filepath.Join(dir, e.Name())
+			preview := ""
+			if data, readErr := os.ReadFile(filePath); readErr == nil {
+				runes := []rune(string(data))
+				if len(runes) > 100 {
+					preview = string(runes[:100])
+				} else {
+					preview = string(runes)
+				}
+			}
+
+			// Extract source_session_id from vector metadata
+			var sourceSessionID int64
+			if metaMap != nil {
+				if meta, ok := metaMap[e.Name()]; ok {
+					if sid, ok := meta["source_session_id"]; ok {
+						switch v := sid.(type) {
+						case float64:
+							sourceSessionID = int64(v)
+						case int64:
+							sourceSessionID = v
+						}
+					}
+				}
+			}
+
+			allItems = append(allItems, VectorFileItem{
+				FileName:        e.Name(),
+				Preview:         preview,
+				Type:            scopeType,
+				SourceSessionID: sourceSessionID,
+				UpdatedAt:       info.ModTime().Format(time.RFC3339),
+				Scope:           se.scope,
+			})
+		}
+	}
+
+	// Sort: self > team > global; same level by updated_at desc
+	filePriority := func(item VectorFileItem) int {
+		if sessionID > 0 && item.SourceSessionID == sessionID {
+			return 0
+		}
+		if strings.Contains(item.Scope, "/") {
+			return 1 // team scope
+		}
+		return 2
+	}
+	n := len(allItems)
+	for i := 0; i < n-1; i++ {
+		for j := i + 1; j < n; j++ {
+			pi := filePriority(allItems[i])
+			pj := filePriority(allItems[j])
+			if pj < pi || (pj == pi && allItems[j].UpdatedAt > allItems[i].UpdatedAt) {
+				allItems[i], allItems[j] = allItems[j], allItems[i]
+			}
+		}
+	}
+
+	if allItems == nil {
+		allItems = []VectorFileItem{}
+	}
+	c.JSON(http.StatusOK, gin.H{"files": allItems, "total": len(allItems)})
 }
 
 // vectorList lists .md files in defaultScope or resolved team scope.
