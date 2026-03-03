@@ -125,6 +125,14 @@ func GetMessages(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid session id"})
 		return
 	}
+
+	// 先检查会话是否存在
+	_, err = store.GetSession(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return
+	}
+
 	msgs, err := store.GetMessages(id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

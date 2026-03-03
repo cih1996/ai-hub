@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useChatStore } from './stores/chat'
 
@@ -20,6 +20,19 @@ onMounted(async () => {
     }
   }
 })
+
+// Watch route.params.id changes to handle URL navigation
+watch(
+  () => route.params.id,
+  async (newId) => {
+    if (newId) {
+      const id = Number(newId)
+      if (id > 0) {
+        await store.selectSession(id)
+      }
+    }
+  }
+)
 </script>
 
 <template>

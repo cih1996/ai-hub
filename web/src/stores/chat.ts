@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import type { Session, Message, Provider, WSMessage, ToolCall, StepsMetadata, TokenUsage } from '../types'
 import * as api from '../composables/api'
 import router from '../router'
@@ -350,9 +350,20 @@ export const useChatStore = defineStore('chat', () => {
       workDir.value = s?.work_dir || ''
     } catch (err: any) {
       // If session doesn't exist (404), redirect to new chat
-      if (err.response?.status === 404) {
+      // Check error message since request() throws plain Error without response property
+      const errorMsg = err.message || String(err)
+      if (errorMsg.includes('session not found') || errorMsg.includes('404')) {
+        console.log('[selectSession] Session not found, redirecting to /chat. Error:', errorMsg)
         newChat()
-        router.replace('/chat')
+        // Use nextTick to ensure router navigation happens after state updates
+        nextTick(() => {
+          console.log('[selectSession] Executing router.replace("/chat")')
+          router.replace('/chat').then(() => {
+            console.log('[selectSession] Router navigation completed')
+          }).catch((navErr) => {
+            console.error('[selectSession] Router navigation failed:', navErr)
+          })
+        })
         return
       }
       // For other errors, still show the session but with empty messages
