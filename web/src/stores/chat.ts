@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { Session, Message, Provider, WSMessage, ToolCall, StepsMetadata, TokenUsage } from '../types'
 import * as api from '../composables/api'
+import router from '../router'
 
 export const useChatStore = defineStore('chat', () => {
   const sessions = ref<Session[]>([])
@@ -333,15 +334,6 @@ export const useChatStore = defineStore('chat', () => {
       return
     }
 
-    // Guard: if sessions have been loaded and this ID isn't in the list,
-    // the session doesn't exist — redirect to new chat instead of showing
-    // a blank "quick actions" panel with no error message.
-    if (sessions.value.length > 0 && !sessions.value.find((s) => s.id === id)) {
-      newChat()
-      window.history.replaceState({}, '', '/chat')
-      return
-    }
-
     currentSessionId.value = id
     streaming.value = false
     streamingContent.value = ''
@@ -349,9 +341,24 @@ export const useChatStore = defineStore('chat', () => {
     toolCalls.value = []
     latestTokenUsage.value = null
     clearUsageLimitWarning()
-    const s = sessions.value.find((s) => s.id === id)
-    workDir.value = s?.work_dir || ''
-    messages.value = await api.getMessages(id)
+
+    // Try to load messages for this session
+    try {
+      messages.value = await api.getMessages(id)
+      // If successful, update workDir from sessions list (if available)
+      const s = sessions.value.find((s) => s.id === id)
+      workDir.value = s?.work_dir || ''
+    } catch (err: any) {
+      // If session doesn't exist (404), redirect to new chat
+      if (err.response?.status === 404) {
+        newChat()
+        router.replace('/chat')
+        return
+      }
+      // For other errors, still show the session but with empty messages
+      messages.value = []
+      console.error('Failed to load messages:', err)
+    }
     // Load token usage for this session's messages
     try {
       const resp = await api.getSessionTokenUsage(id)

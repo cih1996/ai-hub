@@ -279,7 +279,7 @@ func buildRecoverySeed(msgs []model.Message, reason string) string {
 	if strings.TrimSpace(reason) == "" {
 		reason = "会话重置后恢复"
 	}
-	sb.WriteString(fmt.Sprintf("【上下文恢复】本轮因"%s"进入新会话。请先基于以下历史记录恢复上下文，再继续处理当前用户请求。\n\n", reason))
+	sb.WriteString(fmt.Sprintf("【上下文恢复】本轮因\"%s\"进入新会话。请先基于以下历史记录恢复上下文，再继续处理当前用户请求。\n\n", reason))
 
 	for _, m := range recent {
 		role := "用户"

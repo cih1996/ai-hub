@@ -1,0 +1,24 @@
+import { createRouter, createWebHistory } from 'vue-router'
+
+const router = createRouter({
+  history: createWebHistory(),
+  routes: [
+    { path: '/', redirect: '/chat' },
+    {
+      path: '/',
+      component: () => import('./views/MainLayout.vue'),
+      children: [
+        { path: 'chat/:id?', name: 'chat', component: () => import('./views/ChatView.vue') },
+        { path: 'manage', name: 'manage', component: () => import('./views/ManageView.vue') },
+        { path: 'skills', name: 'skills', component: () => import('./views/SkillsView.vue') },
+        { path: 'mcp', name: 'mcp', component: () => import('./views/McpView.vue') },
+        { path: 'triggers', name: 'triggers', component: () => import('./views/TriggersView.vue') },
+        { path: 'channels', name: 'channels', component: () => import('./views/ChannelsView.vue') },
+        { path: 'token-usage', name: 'token-usage', component: () => import('./views/TokenUsageView.vue') },
+      ],
+    },
+    { path: '/settings', name: 'settings', component: () => import('./views/SettingsView.vue') },
+  ],
+})
+
+export default router
