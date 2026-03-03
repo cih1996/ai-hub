@@ -135,6 +135,7 @@ const compressForm = reactive<CompressSettings>({
   auto_enabled: false,
   threshold: 80000,
   mode: 'auto',
+  min_turns: 10,
 })
 const compressSaveOk = ref(false)
 const compressSaveErr = ref('')
@@ -145,6 +146,7 @@ async function loadCompressSettings() {
     compressForm.auto_enabled = cfg.auto_enabled
     compressForm.threshold = cfg.threshold
     compressForm.mode = cfg.mode
+    compressForm.min_turns = cfg.min_turns ?? 10
   } catch { /* ignore */ }
 }
 
@@ -345,6 +347,21 @@ async function saveCompressSettings() {
                 <span class="threshold-label">{{ (compressForm.threshold / 1000).toFixed(0) }}k tokens</span>
               </div>
               <span class="hint">单会话累计 input token 数超过此值时触发压缩。建议：80000（约 80k tokens，对应 200k 上下文窗口的 40%）。</span>
+            </div>
+
+            <div class="form-group">
+              <label>最少对话轮数</label>
+              <div class="threshold-row">
+                <input
+                  type="number"
+                  v-model.number="compressForm.min_turns"
+                  min="0"
+                  max="500"
+                  step="1"
+                />
+                <span class="threshold-label">轮</span>
+              </div>
+              <span class="hint">token 数超过阈值且对话轮数（用户消息数）达到此值，才触发压缩。设为 0 则仅按 token 阈值判断。默认 10 轮，避免会话过短时频繁压缩。</span>
             </div>
 
             <div class="form-group">

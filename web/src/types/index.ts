@@ -112,4 +112,5 @@ export interface CompressSettings {
   auto_enabled: boolean
   threshold: number   // input token 绝对值阈值，如 80000
   mode: 'auto' | 'intelligent' | 'simple'
+  min_turns: number   // 最小对话轮数（user messages），token 与轮数同时满足才压缩
 }
