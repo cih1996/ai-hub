@@ -5,6 +5,7 @@ import (
 	"ai-hub/server/model"
 	"ai-hub/server/store"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -124,6 +125,14 @@ func GetMessages(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid session id"})
 		return
 	}
+
+	// 先检查会话是否存在
+	_, err = store.GetSession(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return
+	}
+
 	msgs, err := store.GetMessages(id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -163,8 +172,7 @@ func TruncateMessages(c *gin.Context) {
 }
 
 // CompressSession handles POST /api/v1/sessions/:id/compress
-// Generates a new claude_session_id, builds a condensed summary from recent messages,
-// and starts a new CLI stream with the summary as the first message.
+// Supports query param ?mode=intelligent|simple|auto (overrides global setting).
 func CompressSession(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
@@ -182,30 +190,86 @@ func CompressSession(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
 		return
 	}
-	// Capture recent messages before reset to build one-shot recovery seed.
-	if msgs, err := store.GetMessages(id); err == nil && len(msgs) > 0 {
-		setPendingRecoverySeed(id, buildRecoverySeed(msgs, "上下文压缩后恢复"))
+
+	// Allow caller to override mode via query param
+	mode := c.Query("mode")
+	if mode == "" {
+		if cfg, e := store.GetCompressSettings(); e == nil {
+			mode = cfg.Mode
+		}
+	}
+	if mode == "" {
+		mode = "auto"
+	}
+
+	compressMode, err := doCompress(session, mode)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"ok": true, "message": "context compressed, session reset", "compress_mode": compressMode})
+}
+
+// doCompress performs the core compression logic: builds recovery seed, resets session UUID,
+// kills pool process, marks force-fresh, and saves the system message.
+// Returns the actual compress mode used ("intelligent" or "simple").
+func doCompress(session *model.Session, mode string) (string, error) {
+	msgs, _ := store.GetMessages(session.ID)
+
+	seed, actualMode := buildCompressedSeed(msgs, session, mode)
+	if seed != "" {
+		setPendingRecoverySeed(session.ID, seed)
 	}
 
 	newUUID := uuid.New().String()
-	core.Pool.Kill(id)
-	if err := store.UpdateClaudeSessionID(id, newUUID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update session id"})
-		return
+	core.Pool.Kill(session.ID)
+	if err := store.UpdateClaudeSessionID(session.ID, newUUID); err != nil {
+		return "", fmt.Errorf("failed to update session id: %w", err)
 	}
-	// Session reset happened: next run must start fresh (no --resume).
-	markForceFreshRun(id)
+	markForceFreshRun(session.ID)
 	session.ClaudeSessionID = newUUID
 
-	// Save a system message indicating compression
 	sysMsg := &model.Message{
 		SessionID: session.ID,
 		Role:      "user",
-		Content:   "【系统】上下文已压缩，会话已重置。",
+		Content:   fmt.Sprintf("【系统】上下文已压缩（%s 模式），会话已重置。", actualMode),
 	}
 	store.AddMessage(sysMsg)
 
-	c.JSON(http.StatusOK, gin.H{"ok": true, "message": "context compressed, session reset"})
+	// Notify all WS clients
+	broadcast(WSMessage{Type: "auto_compressed", SessionID: session.ID, Content: actualMode})
+	return actualMode, nil
+}
+
+// buildCompressedSeed picks intelligent or simple mode, with auto-fallback.
+// Returns the seed string and the mode actually used.
+func buildCompressedSeed(msgs []model.Message, session *model.Session, mode string) (string, string) {
+	if len(msgs) == 0 {
+		return "", "simple"
+	}
+
+	tryIntelligent := mode == "intelligent" || mode == "auto"
+
+	if tryIntelligent {
+		provider, err := store.GetProvider(session.ProviderID)
+		if err != nil || provider == nil {
+			log.Printf("[compress] session %d: provider not found, falling back to simple", session.ID)
+			return buildRecoverySeed(msgs, "上下文压缩后恢复"), "simple"
+		}
+		seed, err := core.BuildIntelligentRecoverySeed(msgs, provider, session.ID)
+		if err == nil && seed != "" {
+			return seed, "intelligent"
+		}
+		log.Printf("[compress] session %d: intelligent failed (%v), falling back to simple", session.ID, err)
+		if mode == "intelligent" {
+			// strict mode: don't fallback
+			return "", "intelligent"
+		}
+		// auto: fallback to simple
+	}
+
+	return buildRecoverySeed(msgs, "上下文压缩后恢复"), "simple"
 }
 
 // buildRecoverySeed takes recent messages and builds a condensed prompt for context recovery.
@@ -223,7 +287,7 @@ func buildRecoverySeed(msgs []model.Message, reason string) string {
 	if strings.TrimSpace(reason) == "" {
 		reason = "会话重置后恢复"
 	}
-	sb.WriteString(fmt.Sprintf("【上下文恢复】本轮因“%s”进入新会话。请先基于以下历史记录恢复上下文，再继续处理当前用户请求。\n\n", reason))
+	sb.WriteString(fmt.Sprintf("【上下文恢复】本轮因\"%s\"进入新会话。请先基于以下历史记录恢复上下文，再继续处理当前用户请求。\n\n", reason))
 
 	for _, m := range recent {
 		role := "用户"
@@ -241,6 +305,37 @@ func buildRecoverySeed(msgs []model.Message, reason string) string {
 	sb.WriteString(fmt.Sprintf("\n---\n如需完整历史，请调用：GET /api/v1/sessions/%d/messages（不要使用不存在的接口）。\n", msgs[len(msgs)-1].SessionID))
 	sb.WriteString("请继续处理上面最后一条用户消息的请求；若存在未完成任务，延续执行。")
 	return sb.String()
+}
+
+// maybeAutoCompress checks auto-compress settings and triggers compression if threshold exceeded.
+// Called asynchronously after each successful runStream; must not block.
+func maybeAutoCompress(session *model.Session, newInputTokens int64) {
+	cfg, err := store.GetCompressSettings()
+	if err != nil || !cfg.AutoEnabled {
+		return
+	}
+
+	// Get total accumulated input tokens for this session
+	stats, err := store.GetSessionTokenStats(session.ID)
+	if err != nil {
+		return
+	}
+	totalInput := stats.TotalInput
+	if totalInput < int64(cfg.Threshold) {
+		return
+	}
+
+	// Don't compress if streaming is in progress
+	if IsSessionStreaming(session.ID) {
+		return
+	}
+
+	log.Printf("[compress] auto-compress triggered for session %d: total_input=%d threshold=%d",
+		session.ID, totalInput, cfg.Threshold)
+
+	if _, err := doCompress(session, cfg.Mode); err != nil {
+		log.Printf("[compress] auto-compress failed for session %d: %v", session.ID, err)
+	}
 }
 
 // SwitchProvider handles PUT /api/v1/sessions/:id/provider

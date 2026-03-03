@@ -107,3 +107,9 @@ export interface TokenUsageStats {
   total_cache_read_tokens: number
   count: number
 }
+
+export interface CompressSettings {
+  auto_enabled: boolean
+  threshold: number   // input token 绝对值阈值，如 80000
+  mode: 'auto' | 'intelligent' | 'simple'
+}

@@ -235,6 +235,10 @@ func main() {
 		v1.GET("/token-usage/ranking", api.GetTokenUsageRanking)
 		v1.GET("/token-usage/hourly", api.GetHourlyTokenUsage)
 
+		// Global settings
+		v1.GET("/settings/compress", api.GetCompressSettings)
+		v1.PUT("/settings/compress", api.UpdateCompressSettings)
+
 		// Anthropic API reverse proxy for precise token metering (Issue #72)
 		v1.Any("/proxy/s/:session_id/anthropic/*path", api.HandleAnthropicProxy)
 		v1.Any("/proxy/anthropic/*path", api.HandleAnthropicProxy) // legacy compat
