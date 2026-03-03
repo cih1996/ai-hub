@@ -328,6 +328,20 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function selectSession(id: number) {
+    if (id === 0) {
+      newChat()
+      return
+    }
+
+    // Guard: if sessions have been loaded and this ID isn't in the list,
+    // the session doesn't exist — redirect to new chat instead of showing
+    // a blank "quick actions" panel with no error message.
+    if (sessions.value.length > 0 && !sessions.value.find((s) => s.id === id)) {
+      newChat()
+      window.history.replaceState({}, '', '/chat')
+      return
+    }
+
     currentSessionId.value = id
     streaming.value = false
     streamingContent.value = ''
@@ -335,24 +349,19 @@ export const useChatStore = defineStore('chat', () => {
     toolCalls.value = []
     latestTokenUsage.value = null
     clearUsageLimitWarning()
-    if (id === 0) {
-      messages.value = []
-      workDir.value = ''
-    } else {
-      const s = sessions.value.find((s) => s.id === id)
-      workDir.value = s?.work_dir || ''
-      messages.value = await api.getMessages(id)
-      // Load token usage for this session's messages
-      try {
-        const resp = await api.getSessionTokenUsage(id)
-        for (const r of resp.records) {
-          if (r.message_id) tokenUsageMap.value[r.message_id] = r
-        }
-      } catch { /* ignore if no usage data */ }
-      // Subscribe to check if this session is still streaming
-      if (ws.value && ws.value.readyState === WebSocket.OPEN) {
-        ws.value.send(JSON.stringify({ type: 'subscribe', session_id: id }))
+    const s = sessions.value.find((s) => s.id === id)
+    workDir.value = s?.work_dir || ''
+    messages.value = await api.getMessages(id)
+    // Load token usage for this session's messages
+    try {
+      const resp = await api.getSessionTokenUsage(id)
+      for (const r of resp.records) {
+        if (r.message_id) tokenUsageMap.value[r.message_id] = r
       }
+    } catch { /* ignore if no usage data */ }
+    // Subscribe to check if this session is still streaming
+    if (ws.value && ws.value.readyState === WebSocket.OPEN) {
+      ws.value.send(JSON.stringify({ type: 'subscribe', session_id: id }))
     }
   }
 

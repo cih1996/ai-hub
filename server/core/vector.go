@@ -207,16 +207,32 @@ func (v *VectorEngine) installDeps() error {
 }
 
 func (v *VectorEngine) downloadModel() error {
+	modelCacheDir := filepath.Join(v.baseDir, "models")
 	script := filepath.Join(v.scriptDir, "download_model.py")
-	cmd := exec.Command(v.pythonPath, script)
-	cmd.Env = append(os.Environ(),
-		"VIRTUAL_ENV="+v.venvDir,
-		"EMBEDDING_MODEL_PATH="+filepath.Join(v.baseDir, "models"),
-	)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("download_model.py failed: %s", err)
+
+	runDownload := func() error {
+		cmd := exec.Command(v.pythonPath, script)
+		cmd.Env = append(os.Environ(),
+			"VIRTUAL_ENV="+v.venvDir,
+			"EMBEDDING_MODEL_PATH="+modelCacheDir,
+		)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		return cmd.Run()
+	}
+
+	if err := runDownload(); err != nil {
+		// First attempt failed — may be caused by a corrupt/partial cache from a
+		// previous interrupted download (e.g. kill -9 during bootstrap).
+		// Clear the cache directory and retry once before giving up.
+		log.Printf("[vector] model download failed (%v), clearing cache and retrying...", err)
+		if rmErr := os.RemoveAll(modelCacheDir); rmErr != nil {
+			log.Printf("[vector] failed to clear model cache: %v", rmErr)
+		}
+		if err2 := runDownload(); err2 != nil {
+			return fmt.Errorf("download_model.py failed: %s", err2)
+		}
+		log.Println("[vector] model download succeeded after cache clear")
 	}
 	return nil
 }

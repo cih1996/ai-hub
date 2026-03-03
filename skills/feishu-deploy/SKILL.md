@@ -188,3 +188,50 @@ cloudflared tunnel --url http://localhost:<端口>
 ```
 
 将 App ID 和 App Secret 回传给任务发起方。
+
+## 绑定 AI Hub 通讯板块
+
+完成飞书应用部署后，必须在 AI Hub 创建频道，才能让飞书消息转发到指定会话。
+
+### 第一步：询问绑定会话
+
+先获取可用会话列表供用户选择：
+
+```bash
+curl -s http://localhost:${AI_HUB_PORT:-8080}/api/v1/sessions | \
+  python3 -c "import sys,json; [print(f'#{s[\"id\"]} {s[\"name\"]}') for s in json.load(sys.stdin)]"
+```
+
+然后问用户：
+
+> 飞书应用已部署完成！现在需要将飞书消息绑定到 AI Hub 的某个会话。
+> 上面是当前的会话列表，请告诉我要绑定到哪个会话（输入会话编号即可）。
+
+### 第二步：创建频道
+
+用户确认会话 ID 后，AI 自动创建频道：
+
+```bash
+curl -s -X POST "http://localhost:${AI_HUB_PORT:-8080}/api/v1/channels" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"name\": \"飞书 Bot\",
+    \"platform\": \"feishu\",
+    \"enabled\": true,
+    \"session_id\": <用户选择的session_id>,
+    \"config\": \"{\\\"app_id\\\":\\\"<app_id>\\\",\\\"app_secret\\\":\\\"<app_secret>\\\"}\"
+  }"
+```
+
+### 第三步：验证绑定
+
+```bash
+# 检查频道是否创建成功
+curl -s http://localhost:${AI_HUB_PORT:-8080}/api/v1/channels | \
+  python3 -c "import sys,json; [print(f'#{c[\"id\"]} {c[\"name\"]} platform={c[\"platform\"]} session={c[\"session_id\"]}') for c in json.load(sys.stdin)]"
+```
+
+确认列表中出现飞书频道后，告诉用户：
+
+> ✅ 绑定完成！飞书发来的消息将转发到会话 #{session_id}。
+> 你可以在飞书中给 Bot 发一条消息测试。

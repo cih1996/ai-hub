@@ -178,45 +178,75 @@ NapCat 启动后自带 WebUI（默认 http://localhost:6099）。
 > - URL：`{webhook_url}`
 > - 远程部署不需要此项
 
-## 在 AI Hub 创建频道
+## 在 AI Hub 创建频道（绑定通讯板块）
 
-AI 通过 API 自动创建频道，不需要用户手动操作：
+### 第一步：询问路由方式
+
+先获取可用会话列表：
+
+```bash
+curl -s http://localhost:${AI_HUB_PORT:-8080}/api/v1/sessions | \
+  python3 -c "import sys,json; [print(f'#{s[\"id\"]} {s[\"name\"]}') for s in json.load(sys.stdin)]"
+```
+
+然后问用户：
+
+> QQ Bot 已配置完成！现在需要决定如何将 QQ 消息路由到 AI Hub。有两种方式：
+>
+> **方式 A：绑定到单一会话**
+> 所有 QQ 消息（私聊 + 群聊）都转发到同一个会话。
+>
+> **方式 B：分流规则（推荐多群场景）**
+> 按群号 / QQ 号将消息分发到不同会话，未匹配的消息走默认会话或丢弃。
+>
+> 上面是当前的会话列表，请告诉我你想用哪种方式？
+
+### 第二步（方式 A）：绑定到单一会话
+
+用户确认会话 ID 后，执行：
 
 ```bash
 curl -s -X POST "http://localhost:${AI_HUB_PORT:-8080}/api/v1/channels" \
   -H "Content-Type: application/json" \
-  -d '{
-    "name": "QQ Bot",
-    "platform": "qq",
-    "enabled": true,
-    "session_id": <session_id>,
-    "config": "{\"napcat_http_url\":\"http://<NapCat地址>:3055\",\"napcat_ws_url\":\"ws://<NapCat地址>:3056\",\"token\":\"<token>\"}"
-  }'
+  -d "{
+    \"name\": \"QQ Bot\",
+    \"platform\": \"qq\",
+    \"enabled\": true,
+    \"session_id\": <用户选择的session_id>,
+    \"config\": \"{\\\"napcat_http_url\\\":\\\"http://<NapCat地址>:3055\\\",\\\"napcat_ws_url\\\":\\\"ws://<NapCat地址>:3056\\\",\\\"token\\\":\\\"<token>\\\"}\"
+  }"
 ```
 
-创建后 AI Hub 会自动通过 WebSocket 连接 NapCat。
+### 第二步（方式 B）：分流规则
 
-### 分流规则配置（可选）
-
-如果需要将不同群/用户的消息分流到不同会话，在 config 中添加 `routing_rules`：
+询问用户需要分流的群号 / QQ 号及对应会话，然后执行：
 
 ```bash
 curl -s -X POST "http://localhost:${AI_HUB_PORT:-8080}/api/v1/channels" \
   -H "Content-Type: application/json" \
-  -d '{
-    "name": "QQ Bot",
-    "platform": "qq",
-    "enabled": true,
-    "session_id": 0,
-    "config": "{\"napcat_http_url\":\"http://<NapCat地址>:3055\",\"napcat_ws_url\":\"ws://<NapCat地址>:3056\",\"token\":\"<token>\",\"routing_rules\":[{\"type\":\"group\",\"ids\":[\"群号1\",\"群号2\"],\"session_id\":10},{\"type\":\"private\",\"ids\":[\"QQ号\"],\"session_id\":20}]}"
-  }'
+  -d "{
+    \"name\": \"QQ Bot\",
+    \"platform\": \"qq\",
+    \"enabled\": true,
+    \"session_id\": 0,
+    \"config\": \"{\\\"napcat_http_url\\\":\\\"http://<NapCat地址>:3055\\\",\\\"napcat_ws_url\\\":\\\"ws://<NapCat地址>:3056\\\",\\\"token\\\":\\\"<token>\\\",\\\"routing_rules\\\":[{\\\"type\\\":\\\"group\\\",\\\"ids\\\":[\\\"群号1\\\",\\\"群号2\\\"],\\\"session_id\\\":10},{\\\"type\\\":\\\"private\\\",\\\"ids\\\":[\\\"QQ号\\\"],\\\"session_id\\\":20}]}\"
+  }"
 ```
 
-说明：
-- `session_id` 可设为 0（不绑定全局会话），仅靠分流规则路由消息
-- `routing_rules` 中 `type` 为 `"group"` 或 `"private"`，`ids` 为群号/QQ号数组
-- 匹配规则的消息转发到对应 session_id，未匹配则 fallback 到频道默认 session_id
+分流规则说明：
+- `session_id` 设为 `0` 时不绑定全局会话，仅靠分流规则路由
+- `routing_rules` 中 `type` 为 `"group"`（群）或 `"private"`（私聊），`ids` 为群号 / QQ 号数组
+- 匹配规则的消息转发到对应 `session_id`，未匹配则 fallback 到频道默认 `session_id`
 - 也可在 AI Hub 前端「频道管理」页面通过 UI 配置分流规则
+
+### 第三步：验证频道创建
+
+```bash
+curl -s http://localhost:${AI_HUB_PORT:-8080}/api/v1/channels | \
+  python3 -c "import sys,json; [print(f'#{c[\"id\"]} {c[\"name\"]} platform={c[\"platform\"]} session={c[\"session_id\"]}') for c in json.load(sys.stdin)]"
+```
+
+创建成功后 AI Hub 会自动通过 WebSocket 连接 NapCat。
 
 ## 验证
 
