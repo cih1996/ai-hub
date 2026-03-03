@@ -1,4 +1,4 @@
-import type { Provider, Session, Message, Trigger, Channel, TokenUsage, TokenUsageStats } from '../types'
+import type { Provider, Session, Message, Trigger, Channel, TokenUsage, TokenUsageStats, CompressSettings } from '../types'
 
 const BASE = '/api/v1'
 
@@ -309,3 +309,8 @@ export async function importArchive(file: File): Promise<ImportResult> {
   }
   return res.json()
 }
+
+// Compress settings
+export const getCompressSettings = () => request<CompressSettings>('/settings/compress')
+export const updateCompressSettings = (s: CompressSettings) =>
+  request<{ ok: boolean }>('/settings/compress', { method: 'PUT', body: JSON.stringify(s) })

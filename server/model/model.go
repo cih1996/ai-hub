@@ -102,6 +102,13 @@ type TokenUsageStats struct {
 	Count              int64 `json:"count"`
 }
 
+// CompressSettings 会话自动压缩配置
+type CompressSettings struct {
+	AutoEnabled bool   `json:"auto_enabled"` // 是否启用自动压缩
+	Threshold   int    `json:"threshold"`    // 触发阈值（累计 input tokens 绝对值，建议 80000）
+	Mode        string `json:"mode"`         // "auto"（智能优先，降级简单）| "intelligent"（仅智能）| "simple"（仅简单截取）
+}
+
 // Channel 通讯频道（IM 网关）
 type Channel struct {
 	ID        int64     `json:"id"`

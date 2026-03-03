@@ -507,6 +507,10 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 			usageJSON, _ := json.Marshal(tu)
 			broadcast(WSMessage{Type: "token_usage", SessionID: session.ID, Content: string(usageJSON)})
 		}
+		// Auto-compress check: run async so it never blocks the response path
+		if usageInput > 0 {
+			go maybeAutoCompress(session, usageInput)
+		}
 	}
 
 	// Broadcast done so even reconnected/new WS clients receive it (stream.Send is single-client)

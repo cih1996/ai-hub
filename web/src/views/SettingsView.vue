@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, watch } from 'vue'
+import { computed, ref, onMounted, watch, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { useChatStore } from '../stores/chat'
-import type { Provider } from '../types'
+import type { Provider, CompressSettings } from '../types'
 import * as api from '../composables/api'
 import type { ClaudeAuthStatus } from '../composables/api'
 import { useTheme, type ThemeMode } from '../composables/theme'
@@ -125,7 +125,40 @@ function maskKey(key: string): string {
   return key.slice(0, 4) + '••••' + key.slice(-4)
 }
 
-onMounted(() => store.loadProviders())
+onMounted(() => {
+  store.loadProviders()
+  loadCompressSettings()
+})
+
+// ---- Auto Compress Settings ----
+const compressForm = reactive<CompressSettings>({
+  auto_enabled: false,
+  threshold: 80000,
+  mode: 'auto',
+})
+const compressSaveOk = ref(false)
+const compressSaveErr = ref('')
+
+async function loadCompressSettings() {
+  try {
+    const cfg = await api.getCompressSettings()
+    compressForm.auto_enabled = cfg.auto_enabled
+    compressForm.threshold = cfg.threshold
+    compressForm.mode = cfg.mode
+  } catch { /* ignore */ }
+}
+
+async function saveCompressSettings() {
+  compressSaveOk.value = false
+  compressSaveErr.value = ''
+  try {
+    await api.updateCompressSettings({ ...compressForm })
+    compressSaveOk.value = true
+    setTimeout(() => { compressSaveOk.value = false }, 3000)
+  } catch (e: unknown) {
+    compressSaveErr.value = e instanceof Error ? e.message : '保存失败'
+  }
+}
 </script>
 
 <template>
@@ -279,6 +312,59 @@ onMounted(() => store.loadProviders())
           </div>
         </div>
       </section>
+
+      <!-- Auto Compress Settings -->
+      <section class="section">
+        <div class="section-header">
+          <div>
+            <h2>自动压缩</h2>
+            <p class="section-desc">Token 使用量达到阈值时自动压缩会话上下文，延长可用会话长度。</p>
+          </div>
+        </div>
+
+        <div class="compress-settings">
+          <div class="form-group checkbox">
+            <label>
+              <input type="checkbox" v-model="compressForm.auto_enabled" />
+              启用自动压缩
+            </label>
+            <span class="hint">开启后，每轮对话结束时检测 token 总量，超过阈值则自动触发压缩并重置会话上下文。</span>
+          </div>
+
+          <template v-if="compressForm.auto_enabled">
+            <div class="form-group">
+              <label>触发阈值（input tokens）</label>
+              <div class="threshold-row">
+                <input
+                  type="number"
+                  v-model.number="compressForm.threshold"
+                  min="10000"
+                  max="500000"
+                  step="5000"
+                />
+                <span class="threshold-label">{{ (compressForm.threshold / 1000).toFixed(0) }}k tokens</span>
+              </div>
+              <span class="hint">单会话累计 input token 数超过此值时触发压缩。建议：80000（约 80k tokens，对应 200k 上下文窗口的 40%）。</span>
+            </div>
+
+            <div class="form-group">
+              <label>压缩模式</label>
+              <select v-model="compressForm.mode">
+                <option value="auto">智能优先（推荐）：先用 Claude 生成摘要，失败自动降级为简单截取</option>
+                <option value="intelligent">仅智能：Claude 生成摘要，失败则跳过压缩</option>
+                <option value="simple">仅简单截取：取最近 10 条消息，无需额外 API 调用</option>
+              </select>
+              <span class="hint">智能模式使用 Claude 生成高质量上下文摘要（消耗少量 token）；简单模式不消耗额外 token。</span>
+            </div>
+          </template>
+
+          <div class="form-actions">
+            <button class="btn-save" @click="saveCompressSettings">保存配置</button>
+            <span v-if="compressSaveOk" class="save-ok">✓ 已保存</span>
+            <span v-if="compressSaveErr" class="save-err">{{ compressSaveErr }}</span>
+          </div>
+        </div>
+      </section>
     </div>
   </div>
 </template>
@@ -427,6 +513,14 @@ onMounted(() => store.loadProviders())
   background: var(--bg-hover);
   color: var(--text-primary);
 }
+/* ---- Auto Compress Settings ---- */
+.compress-settings { display: flex; flex-direction: column; gap: 16px; }
+.threshold-row { display: flex; align-items: center; gap: 10px; }
+.threshold-row input[type="number"] { width: 120px; }
+.threshold-label { font-size: 13px; color: var(--text-secondary); }
+.save-ok { font-size: 13px; color: var(--accent); margin-left: 10px; }
+.save-err { font-size: 13px; color: #e74c3c; margin-left: 10px; }
+
 @media (max-width: 768px) {
   .settings-container { padding: 16px 12px; }
   .form-modal { width: 100vw; max-width: 100vw; height: 100vh; height: 100dvh; max-height: 100vh; max-height: 100dvh; border-radius: 0; display: flex; flex-direction: column; }

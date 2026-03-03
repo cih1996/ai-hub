@@ -123,6 +123,12 @@ func migrate() error {
 	// Provider: optional subprocess proxy URL
 	DB.Exec(`ALTER TABLE providers ADD COLUMN proxy_url TEXT NOT NULL DEFAULT ''`)
 
+	// Global key-value settings table
+	DB.Exec(`CREATE TABLE IF NOT EXISTS settings (
+		key   TEXT PRIMARY KEY,
+		value TEXT NOT NULL DEFAULT ''
+	)`)
+
 	return nil
 }
 
