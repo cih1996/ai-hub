@@ -85,6 +85,27 @@ const sessionRulesContent = ref('')
 const sessionRulesSaving = ref(false)
 const sessionRulesLoading = ref(false)
 
+// Raw request modal state
+const showRawRequestModal = ref(false)
+const rawRequestLoading = ref(false)
+const rawRequestData = ref<{ system_prompt: string; query: string; context_count: number; captured_at: string } | null>(null)
+const rawRequestTab = ref<'system' | 'query'>('system')
+
+async function openRawRequest() {
+  const sid = store.currentSession?.id
+  if (!sid) return
+  showRawRequestModal.value = true
+  rawRequestLoading.value = true
+  rawRequestData.value = null
+  try {
+    rawRequestData.value = await api.getLastRawRequest(sid)
+  } catch {
+    rawRequestData.value = null
+  } finally {
+    rawRequestLoading.value = false
+  }
+}
+
 // Vector engine health banner
 const vectorHealthy = ref(true)
 const vectorError = ref('')
@@ -412,7 +433,7 @@ function formatToolInput(raw: string): string {
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><circle cx="9" cy="9" r="1.5"/><circle cx="15" cy="9" r="1.5"/><circle cx="9" cy="15" r="1.5"/><circle cx="15" cy="15" r="1.5"/></svg>
           {{ formatTokenNum(sessionTokenStats.total_input_tokens + sessionTokenStats.total_output_tokens + (sessionTokenStats.total_cache_creation_tokens || 0) + (sessionTokenStats.total_cache_read_tokens || 0)) }}
         </span>
-        <span class="header-context">{{ contextCount }} 条上下文</span>
+        <span class="header-context header-context-btn" @click="openRawRequest" title="查看最后一次原始请求">{{ contextCount }} 条上下文</span>
         <button
           class="btn-compress"
           @click="store.compressContext()"
@@ -738,6 +759,43 @@ function formatToolInput(raw: string): string {
       </div>
     </Teleport>
 
+    <!-- Raw request modal -->
+    <Teleport to="body">
+      <div v-if="showRawRequestModal" class="modal-overlay" @click="showRawRequestModal = false">
+        <div class="raw-req-modal" @click.stop>
+          <div class="rules-modal-header">
+            <span class="rules-modal-title">原始请求</span>
+            <span class="rules-modal-dir">会话 #{{ store.currentSession?.id }}</span>
+            <button class="rules-modal-close" @click="showRawRequestModal = false">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 6L6 18M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+          <div v-if="rawRequestLoading" class="raw-req-loading">加载中...</div>
+          <div v-else-if="!rawRequestData" class="raw-req-loading">暂无数据（请先发送一条消息）</div>
+          <template v-else>
+            <div class="raw-req-meta">
+              <span>上下文 {{ rawRequestData.context_count }} 条</span>
+              <span>·</span>
+              <span>{{ new Date(rawRequestData.captured_at).toLocaleString('zh-CN') }}</span>
+            </div>
+            <div class="raw-req-tabs">
+              <button :class="['raw-req-tab', rawRequestTab === 'system' && 'active']" @click="rawRequestTab = 'system'">
+                System Prompt
+              </button>
+              <button :class="['raw-req-tab', rawRequestTab === 'query' && 'active']" @click="rawRequestTab = 'query'">
+                Query
+              </button>
+            </div>
+            <div class="raw-req-body">
+              <pre class="raw-req-pre">{{ rawRequestTab === 'system' ? rawRequestData.system_prompt : rawRequestData.query }}</pre>
+            </div>
+          </template>
+        </div>
+      </div>
+    </Teleport>
+
     <!-- Toast -->
     <Teleport to="body">
       <div v-if="toastVisible" class="toast" :class="toastType">{{ toastMsg }}</div>
@@ -905,6 +963,60 @@ function formatToolInput(raw: string): string {
 .header-context {
   font-size: 12px;
   color: var(--text-muted);
+}
+.header-context-btn {
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+  transition: background var(--transition), color var(--transition);
+}
+.header-context-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+.raw-req-modal {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  width: 760px; max-width: 92vw;
+  max-height: 84vh;
+  display: flex; flex-direction: column;
+}
+.raw-req-meta {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 20px;
+  font-size: 12px; color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+.raw-req-tabs {
+  display: flex; gap: 0;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--border);
+}
+.raw-req-tab {
+  padding: 8px 16px;
+  font-size: 13px; color: var(--text-muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: all var(--transition);
+}
+.raw-req-tab:hover { color: var(--text-primary); }
+.raw-req-tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 500; }
+.raw-req-body {
+  flex: 1; min-height: 0;
+  overflow-y: auto;
+  padding: 16px 20px;
+}
+.raw-req-pre {
+  margin: 0;
+  font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+  font-size: 12px; line-height: 1.6;
+  color: var(--text-primary);
+  white-space: pre-wrap; word-break: break-word;
+}
+.raw-req-loading {
+  padding: 40px 20px;
+  text-align: center; color: var(--text-muted); font-size: 13px;
 }
 .header-token-stats {
   display: flex; align-items: center; gap: 4px;

@@ -80,15 +80,19 @@ curl -s http://localhost:$AI_HUB_PORT/api/v1/sessions
 
 - Providers: `GET/POST/PUT/DELETE /api/v1/providers`
 - Sessions: `GET /api/v1/sessions`，`GET /api/v1/sessions/:id`，`DELETE /api/v1/sessions/:id`
+- Session Compress: `POST /api/v1/sessions/:id/compress`（手动压缩会话上下文，body: `{“mode”:”intelligent”}`，mode 可选 `intelligent`/`simple`）
 - Chat: `POST /api/v1/chat/send`，`WS /ws/chat`
 - Session Rules: `GET/PUT/DELETE /api/v1/session-rules/:id`
 - Skills: `GET /api/v1/skills`，`POST /api/v1/skills/toggle`
 - MCP: `GET /api/v1/mcp`，`POST /api/v1/mcp/toggle`
 - Triggers: `GET/POST/PUT/DELETE /api/v1/triggers`
-- Vector: `/api/v1/vector/*`
+- Channels: `GET/POST/PUT/DELETE /api/v1/channels`
+- Vector: `/api/v1/vector/*`（详见「向量知识库」Skill）
 - Status: `GET /api/v1/status`，`GET /api/v1/version`
+- Compress Settings: `GET /api/v1/settings/compress`，`PUT /api/v1/settings/compress`（配置自动压缩阈值）
+- Export/Import: `GET /api/v1/export/session/:id`，`GET /api/v1/export/team/:name`，`POST /api/v1/import`
 
-说明：团队规则由系统动态注入，不在此 Skill 中维护“项目级规则”流程。
+说明：团队规则由系统动态注入，不在此 Skill 中维护”项目级规则”流程。
 
 ## 4. 安全重启流程（推荐）
 
