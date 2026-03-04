@@ -2,6 +2,7 @@ package cli
 
 import (
 	"ai-hub/cli/client"
+	"ai-hub/cli/commands"
 	"flag"
 	"fmt"
 	"os"
@@ -87,7 +88,7 @@ func Run(args []string) int {
 
 	switch command {
 	case "search":
-		return runSearch(c, globalFlags, commandArgs)
+		return commands.RunSearch(c, globalFlags.GroupName, commandArgs)
 	case "write":
 		return runWrite(c, globalFlags, commandArgs)
 	case "read":
@@ -127,11 +128,6 @@ Use "ai-hub <command> --help" for more information about a command.`)
 }
 
 // Placeholder command handlers (to be implemented in subsequent issues)
-
-func runSearch(c *client.Client, g *GlobalFlags, args []string) int {
-	fmt.Println("search command not yet implemented (see Issue #122)")
-	return 1
-}
 
 func runWrite(c *client.Client, g *GlobalFlags, args []string) int {
 	fmt.Println("write command not yet implemented (see Issue #123)")
