@@ -195,6 +195,20 @@ export const vectorHealth = () =>
 export const listVectorFiles = (scope: string) =>
   request<string[]>(`/vector/list?scope=${encodeURIComponent(scope)}`)
 
+// Rich file item returned by /vector/list_files
+export interface VectorFileRich {
+  file_name: string
+  preview: string
+  type: string
+  source_session_id: number
+  updated_at: string  // RFC3339
+  scope: string
+}
+
+// List .md files with metadata (source_session_id, updated_at) sorted by mod time desc
+export const listVectorFilesRich = (scope: string) =>
+  request<{ files: VectorFileRich[]; total: number }>(`/vector/list_files?scope=${encodeURIComponent(scope)}`)
+
 // Read a single file from any valid scope
 export const readVectorFile = (scope: string, fileName: string) =>
   request<{ file_name: string; content: string; scope: string }>('/vector/read', {
