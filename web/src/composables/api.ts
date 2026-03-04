@@ -47,6 +47,10 @@ export const getMessages = (sessionId: number) =>
 export const compressSession = (id: number) =>
   request<{ ok: boolean }>(`/sessions/${id}/compress`, { method: 'POST' })
 
+// Get last raw request sent to Claude Code CLI
+export const getLastRawRequest = (id: number) =>
+  request<{ system_prompt: string; query: string; context_count: number; captured_at: string }>(`/sessions/${id}/last-request`)
+
 // Truncate messages from a given message ID inclusive (used for retry-message feature).
 // Deletes the user message itself AND all subsequent messages (AI reply etc.)
 export const truncateMessages = (sessionId: number, fromMsgId: number) =>

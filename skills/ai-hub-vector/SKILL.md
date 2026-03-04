@@ -299,12 +299,20 @@ curl -X POST http://localhost:$AI_HUB_PORT/api/v1/vector/search_memory \
 ## 引擎状态检查
 
 ```bash
+# 查询向量引擎状态（是否就绪）
 curl "http://localhost:$AI_HUB_PORT/api/v1/vector/status"
+
+# 轻量健康探针（只返回 ok/error，适合快速确认）
+curl "http://localhost:$AI_HUB_PORT/api/v1/vector/health"
+
+# 重启向量引擎（引擎异常时使用）
+curl -X POST "http://localhost:$AI_HUB_PORT/api/v1/vector/restart"
 ```
 
 如果返回 `ready: false`，说明向量引擎未就绪，此时：
 - **搜索功能不可用**，降级用 `GET /api/v1/vector/list` 列出文件后逐一用 `POST /api/v1/vector/read` 读取
 - 读写删除（`read_knowledge` / `write_knowledge` 等）仍可正常使用，不依赖向量引擎
+- 可尝试 `POST /vector/restart` 重启引擎后再重试
 
 ---
 

@@ -23,6 +23,16 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
+// RawRequestSnapshot holds the last raw request sent to Claude Code CLI for a session.
+type RawRequestSnapshot struct {
+	SystemPrompt string    `json:"system_prompt"`
+	Query        string    `json:"query"`
+	CapturedAt   time.Time `json:"captured_at"`
+}
+
+// lastRawRequests stores the most recent raw request per session (sessID → RawRequestSnapshot).
+var lastRawRequests sync.Map
+
 type WSMessage struct {
 	Type      string `json:"type"` // "chat" | "stop" | "subscribe" | "error" | "chunk" | "thinking" | "tool_start" | "tool_input" | "tool_result" | "done" | "session_created" | "streaming_status" | "session_update"
 	SessionID int64  `json:"session_id"`
@@ -619,6 +629,12 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 	if len(promptParts) > 0 {
 		req.SystemPrompt = strings.Join(promptParts, "\n\n---\n\n")
 	}
+	// Capture raw request snapshot for diagnostic purposes (GET /sessions/:id/last-request)
+	lastRawRequests.Store(sessID, RawRequestSnapshot{
+		SystemPrompt: req.SystemPrompt,
+		Query:        query,
+		CapturedAt:   time.Now(),
+	})
 	var fullResponse string
 
 	// Steps accumulator for metadata persistence
@@ -941,4 +957,27 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 	}
 
 	return fullResponse, metadataJSON, usageInput, usageOutput, usageCacheCreation, usageCacheRead, err
+}
+
+// GetLastRawRequest returns the last raw request sent to Claude Code CLI for a session.
+// GET /api/v1/sessions/:id/last-request
+func GetLastRawRequest(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid session id"})
+		return
+	}
+	val, ok := lastRawRequests.Load(id)
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "no request captured yet for this session"})
+		return
+	}
+	snap := val.(RawRequestSnapshot)
+	msgs, _ := store.GetMessages(id)
+	c.JSON(http.StatusOK, gin.H{
+		"system_prompt": snap.SystemPrompt,
+		"query":         snap.Query,
+		"context_count": len(msgs),
+		"captured_at":   snap.CapturedAt,
+	})
 }
