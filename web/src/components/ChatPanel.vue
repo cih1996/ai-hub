@@ -98,9 +98,16 @@ const rawRequestData = ref<{
 const rawRequestTab = ref<'system' | 'query' | 'messages'>('system')
 
 // Format anthropic messages for display
+// Includes the system field (if any) as the first entry so the user sees the complete
+// conversation structure exactly as sent to Anthropic.
 function formatAnthropicMessages(req: api.AnthropicRequest | undefined): string {
   if (!req?.messages) return ''
-  return JSON.stringify(req.messages, null, 2)
+  const result: unknown[] = []
+  if (req.system) {
+    result.push({ role: 'system', content: req.system })
+  }
+  result.push(...req.messages)
+  return JSON.stringify(result, null, 2)
 }
 
 // Get actual messages count from the Anthropic request
