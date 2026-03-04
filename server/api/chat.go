@@ -974,10 +974,20 @@ func GetLastRawRequest(c *gin.Context) {
 	}
 	snap := val.(RawRequestSnapshot)
 	msgs, _ := store.GetMessages(id)
-	c.JSON(http.StatusOK, gin.H{
+
+	resp := gin.H{
 		"system_prompt": snap.SystemPrompt,
 		"query":         snap.Query,
 		"context_count": len(msgs),
 		"captured_at":   snap.CapturedAt,
-	})
+	}
+
+	// Attach the actual Anthropic API request body (captured at the proxy layer).
+	// This contains the complete messages array with full conversation history,
+	// exactly as Claude Code CLI sent it to Anthropic.
+	if proxyBody := GetLastProxyBody(id); proxyBody != nil {
+		resp["anthropic_request"] = proxyBody
+	}
+
+	c.JSON(http.StatusOK, resp)
 }

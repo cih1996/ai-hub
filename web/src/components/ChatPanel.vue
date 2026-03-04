@@ -88,8 +88,26 @@ const sessionRulesLoading = ref(false)
 // Raw request modal state
 const showRawRequestModal = ref(false)
 const rawRequestLoading = ref(false)
-const rawRequestData = ref<{ system_prompt: string; query: string; context_count: number; captured_at: string } | null>(null)
-const rawRequestTab = ref<'system' | 'query'>('system')
+const rawRequestData = ref<{
+  system_prompt: string
+  query: string
+  context_count: number
+  captured_at: string
+  anthropic_request?: api.AnthropicRequest
+} | null>(null)
+const rawRequestTab = ref<'system' | 'query' | 'messages'>('system')
+
+// Format anthropic messages for display
+function formatAnthropicMessages(req: api.AnthropicRequest | undefined): string {
+  if (!req?.messages) return ''
+  return JSON.stringify(req.messages, null, 2)
+}
+
+// Get actual messages count from the Anthropic request
+function getActualMsgCount(req: api.AnthropicRequest | undefined): number | null {
+  if (!req?.messages) return null
+  return req.messages.length
+}
 
 async function openRawRequest() {
   const sid = store.currentSession?.id
@@ -99,8 +117,11 @@ async function openRawRequest() {
   rawRequestData.value = null
   try {
     rawRequestData.value = await api.getLastRawRequest(sid)
+    // Default to Messages tab if proxy data is available (it's the most informative)
+    rawRequestTab.value = rawRequestData.value?.anthropic_request?.messages ? 'messages' : 'system'
   } catch {
     rawRequestData.value = null
+    rawRequestTab.value = 'system'
   } finally {
     rawRequestLoading.value = false
   }
@@ -776,11 +797,20 @@ function formatToolInput(raw: string): string {
           <div v-else-if="!rawRequestData" class="raw-req-loading">暂无数据（请先发送一条消息）</div>
           <template v-else>
             <div class="raw-req-meta">
-              <span>上下文 {{ rawRequestData.context_count }} 条</span>
+              <template v-if="getActualMsgCount(rawRequestData.anthropic_request) !== null">
+                <span class="raw-req-meta-actual">实际发送 {{ getActualMsgCount(rawRequestData.anthropic_request) }} 条消息</span>
+              </template>
+              <template v-else>
+                <span>上下文 {{ rawRequestData.context_count }} 条</span>
+              </template>
               <span>·</span>
               <span>{{ new Date(rawRequestData.captured_at).toLocaleString('zh-CN') }}</span>
             </div>
             <div class="raw-req-tabs">
+              <button :class="['raw-req-tab', rawRequestTab === 'messages' && 'active']" @click="rawRequestTab = 'messages'"
+                v-if="rawRequestData.anthropic_request?.messages">
+                Messages <span class="raw-req-tab-badge">{{ getActualMsgCount(rawRequestData.anthropic_request) }}</span>
+              </button>
               <button :class="['raw-req-tab', rawRequestTab === 'system' && 'active']" @click="rawRequestTab = 'system'">
                 System Prompt
               </button>
@@ -789,7 +819,12 @@ function formatToolInput(raw: string): string {
               </button>
             </div>
             <div class="raw-req-body">
-              <pre class="raw-req-pre">{{ rawRequestTab === 'system' ? rawRequestData.system_prompt : rawRequestData.query }}</pre>
+              <template v-if="rawRequestTab === 'messages' && rawRequestData.anthropic_request?.messages">
+                <pre class="raw-req-pre">{{ formatAnthropicMessages(rawRequestData.anthropic_request) }}</pre>
+              </template>
+              <template v-else>
+                <pre class="raw-req-pre">{{ rawRequestTab === 'system' ? rawRequestData.system_prompt : rawRequestData.query }}</pre>
+              </template>
             </div>
           </template>
         </div>
@@ -1002,6 +1037,16 @@ function formatToolInput(raw: string): string {
 }
 .raw-req-tab:hover { color: var(--text-primary); }
 .raw-req-tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 500; }
+.raw-req-tab-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--accent-soft); color: var(--accent);
+  border-radius: 10px; font-size: 10px; font-weight: 600;
+  padding: 0 5px; min-width: 16px; height: 16px;
+  margin-left: 4px; vertical-align: middle;
+}
+.raw-req-meta-actual {
+  color: var(--accent); font-weight: 500;
+}
 .raw-req-body {
   flex: 1; min-height: 0;
   overflow-y: auto;

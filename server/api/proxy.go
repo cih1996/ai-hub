@@ -39,6 +39,11 @@ type meteringContext struct {
 var (
 	proxyUsageMap = make(map[int64]*ProxyUsage)
 	proxyUsageMu  sync.Mutex
+
+	// lastProxyBodies stores the most recent Anthropic API request body per session.
+	// Claude Code CLI sends the complete conversation history in each request,
+	// so this captures what was ACTUALLY sent (including all historical messages).
+	lastProxyBodies sync.Map // session_id (int64) → []byte
 )
 
 // proxyAccumulate adds usage from one API call to the session accumulator.
@@ -75,6 +80,16 @@ func ResetProxyUsage(sessionID int64) {
 	proxyUsageMu.Lock()
 	defer proxyUsageMu.Unlock()
 	delete(proxyUsageMap, sessionID)
+}
+
+// GetLastProxyBody returns the most recent Anthropic API request body captured for a session.
+// This contains the complete conversation history (messages array) as actually sent to Anthropic.
+func GetLastProxyBody(sessionID int64) json.RawMessage {
+	val, ok := lastProxyBodies.Load(sessionID)
+	if !ok {
+		return nil
+	}
+	return json.RawMessage(val.([]byte))
 }
 
 // ---- Anthropic API Reverse Proxy ----
@@ -125,6 +140,14 @@ func HandleAnthropicProxy(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "read body: " + err.Error()})
 		return
+	}
+
+	// Capture the full Anthropic API request body for diagnostic inspection.
+	// Only capture POST /messages requests — these contain the complete conversation history.
+	if sessionID > 0 && c.Request.Method == http.MethodPost && strings.Contains(subPath, "messages") && len(body) > 0 {
+		clone := make([]byte, len(body))
+		copy(clone, body)
+		lastProxyBodies.Store(sessionID, clone)
 	}
 
 	meter := &meteringContext{Provider: provider, RequestBody: body}

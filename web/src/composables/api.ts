@@ -47,9 +47,28 @@ export const getMessages = (sessionId: number) =>
 export const compressSession = (id: number) =>
   request<{ ok: boolean }>(`/sessions/${id}/compress`, { method: 'POST' })
 
+// Anthropic API request structure (as sent by Claude Code CLI through the proxy)
+export interface AnthropicMessage {
+  role: 'user' | 'assistant'
+  content: string | Array<{ type: string; text?: string; [key: string]: unknown }>
+}
+export interface AnthropicRequest {
+  model?: string
+  max_tokens?: number
+  system?: string | Array<{ type: string; text?: string }>
+  messages?: AnthropicMessage[]
+  [key: string]: unknown
+}
+
 // Get last raw request sent to Claude Code CLI
 export const getLastRawRequest = (id: number) =>
-  request<{ system_prompt: string; query: string; context_count: number; captured_at: string }>(`/sessions/${id}/last-request`)
+  request<{
+    system_prompt: string
+    query: string
+    context_count: number
+    captured_at: string
+    anthropic_request?: AnthropicRequest
+  }>(`/sessions/${id}/last-request`)
 
 // Truncate messages from a given message ID inclusive (used for retry-message feature).
 // Deletes the user message itself AND all subsequent messages (AI reply etc.)
