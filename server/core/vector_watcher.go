@@ -100,6 +100,15 @@ func (w *VectorWatcher) fullSync() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	// Fetch existing metadata per scope once, to preserve source_session_id on restart.
+	// Prevents overwriting valid session IDs with 0 when re-embedding existing files.
+	scopeMeta := make(map[string]map[string]map[string]interface{})
+	for _, scope := range w.dirs {
+		if _, fetched := scopeMeta[scope]; !fetched {
+			scopeMeta[scope] = Vector.ListMetadata(scope) // nil if unavailable
+		}
+	}
+
 	for dir, scope := range w.dirs {
 		os.MkdirAll(dir, 0755)
 		entries, err := os.ReadDir(dir)
@@ -116,7 +125,9 @@ func (w *VectorWatcher) fullSync() {
 				continue
 			}
 			w.snapshots[path] = fileSnapshot{modTime: info.ModTime(), size: info.Size()}
-			syncFileToVector(scope, path, 0) // watcher-originated: session unknown
+			// Preserve existing source_session_id if available in vector DB
+			sessionID := extractSessionID(scopeMeta[scope], e.Name())
+			syncFileToVector(scope, path, sessionID)
 		}
 	}
 	log.Printf("[vector-watcher] initial sync: %d files", len(w.snapshots))
@@ -127,6 +138,9 @@ func (w *VectorWatcher) poll() {
 	defer w.mu.Unlock()
 
 	currentFiles := make(map[string]bool)
+	// Lazy per-scope metadata cache: only fetched when a changed file is found.
+	// Preserves source_session_id for files modified outside the API (e.g., direct FS writes).
+	scopeMetaCache := make(map[string]map[string]map[string]interface{})
 
 	for dir, scope := range w.dirs {
 		entries, err := os.ReadDir(dir)
@@ -147,7 +161,12 @@ func (w *VectorWatcher) poll() {
 			snap, exists := w.snapshots[path]
 			if !exists || info.ModTime().After(snap.modTime) || info.Size() != snap.size {
 				w.snapshots[path] = fileSnapshot{modTime: info.ModTime(), size: info.Size()}
-				syncFileToVector(scope, path, 0) // poll-originated: session unknown
+				// Lazy-fetch scope metadata once per scope per poll cycle
+				if _, fetched := scopeMetaCache[scope]; !fetched {
+					scopeMetaCache[scope] = Vector.ListMetadata(scope)
+				}
+				sessionID := extractSessionID(scopeMetaCache[scope], e.Name())
+				syncFileToVector(scope, path, sessionID)
 			}
 		}
 	}
@@ -194,6 +213,36 @@ func SyncFileToVector(scope, filePath string, sessionID int64) {
 		return
 	}
 	syncFileToVector(scope, filePath, sessionID)
+	// After embedding, update the watcher snapshot so the next poll() cycle won't
+	// treat this file as "changed" and re-embed with sessionID=0, overwriting the
+	// valid sessionID that was just stored.
+	if Watcher != nil {
+		if info, err := os.Stat(filePath); err == nil {
+			Watcher.mu.Lock()
+			Watcher.snapshots[filePath] = fileSnapshot{modTime: info.ModTime(), size: info.Size()}
+			Watcher.mu.Unlock()
+		}
+	}
+}
+
+// extractSessionID returns the source_session_id from existing vector metadata for a doc.
+// Returns 0 if not found or <= 0. JSON numbers are decoded as float64 by Go's json package.
+func extractSessionID(scopeMeta map[string]map[string]interface{}, docID string) int64 {
+	if scopeMeta == nil {
+		return 0
+	}
+	docMeta, ok := scopeMeta[docID]
+	if !ok {
+		return 0
+	}
+	v, ok := docMeta["source_session_id"]
+	if !ok {
+		return 0
+	}
+	if id, ok := v.(float64); ok && id > 0 {
+		return int64(id)
+	}
+	return 0
 }
 
 func syncFileToVector(scope, path string, sessionID int64) {
