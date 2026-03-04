@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -572,7 +573,7 @@ func (v *VectorEngine) ListMetadata(scope string) map[string]map[string]interfac
 	if !v.IsReady() {
 		return nil
 	}
-	resp, err := http.Get(fmt.Sprintf("%s/list_metadata?scope=%s", v.baseURL, scope))
+	resp, err := http.Get(fmt.Sprintf("%s/list_metadata?scope=%s", v.baseURL, url.QueryEscape(scope)))
 	if err != nil {
 		return nil
 	}
@@ -591,7 +592,7 @@ func (v *VectorEngine) Stats(scope string) (map[string]interface{}, error) {
 	if !v.IsReady() {
 		return nil, fmt.Errorf("vector engine not ready")
 	}
-	resp, err := http.Get(fmt.Sprintf("%s/stats?scope=%s", v.baseURL, scope))
+	resp, err := http.Get(fmt.Sprintf("%s/stats?scope=%s", v.baseURL, url.QueryEscape(scope)))
 	if err != nil {
 		return nil, err
 	}

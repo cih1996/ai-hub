@@ -42,6 +42,30 @@ interface FileItem {
   draft: string
   saving: boolean
   deleting: boolean
+  sourceSessionId: number  // 0 = unknown
+  updatedAt: string        // RFC3339 mod time
+}
+
+function formatTime(rfc3339: string): string {
+  if (!rfc3339) return ''
+  try {
+    const d = new Date(rfc3339)
+    const now = new Date()
+    const isToday =
+      d.getFullYear() === now.getFullYear() &&
+      d.getMonth() === now.getMonth() &&
+      d.getDate() === now.getDate()
+    const hh = String(d.getHours()).padStart(2, '0')
+    const mm = String(d.getMinutes()).padStart(2, '0')
+    if (isToday) return `今天 ${hh}:${mm}`
+    const mo = String(d.getMonth() + 1).padStart(2, '0')
+    const dd = String(d.getDate()).padStart(2, '0')
+    // Same year: MM-DD HH:MM, otherwise full date
+    if (d.getFullYear() === now.getFullYear()) return `${mo}-${dd} ${hh}:${mm}`
+    return `${d.getFullYear()}-${mo}-${dd}`
+  } catch {
+    return ''
+  }
 }
 
 const files = ref<FileItem[]>([])
@@ -56,9 +80,9 @@ async function loadFiles() {
   listError.value = ''
   files.value = []
   try {
-    const names = await api.listVectorFiles(scope.value)
-    files.value = names.map((name) => ({
-      name,
+    const res = await api.listVectorFilesRich(scope.value)
+    files.value = res.files.map((f) => ({
+      name: f.file_name,
       content: null,
       expanded: false,
       loading: false,
@@ -66,6 +90,8 @@ async function loadFiles() {
       draft: '',
       saving: false,
       deleting: false,
+      sourceSessionId: f.source_session_id,
+      updatedAt: f.updated_at,
     }))
   } catch (e: any) {
     listError.value = e.message || '加载失败'
@@ -237,6 +263,8 @@ watch(
                 <svg v-if="item.loading" class="tdm-spin tdm-inline-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M21 12a9 9 0 11-6.219-8.56"/>
                 </svg>
+                <span v-if="item.sourceSessionId > 0" class="tdm-meta-badge">会话 #{{ item.sourceSessionId }}</span>
+                <span v-if="item.updatedAt" class="tdm-meta-time" :title="item.updatedAt">{{ formatTime(item.updatedAt) }}</span>
                 <button
                   v-if="activeTab === 'rules'"
                   class="tdm-action-btn"
@@ -439,6 +467,22 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.tdm-meta-badge {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.tdm-meta-time {
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+  opacity: 0.8;
 }
 .tdm-file-content {
   background: var(--bg-primary);
