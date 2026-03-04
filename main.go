@@ -1,6 +1,7 @@
 package main
 
 import (
+	"ai-hub/cli"
 	"ai-hub/server/api"
 	"ai-hub/server/core"
 	"ai-hub/server/store"
@@ -38,6 +39,18 @@ var (
 )
 
 func main() {
+	// CLI mode detection: if first arg is not a server flag, route to CLI
+	// Server flags: -port, -data
+	// CLI triggers: --version, --help, or any non-flag argument
+	if len(os.Args) > 1 {
+		firstArg := os.Args[1]
+		isServerFlag := firstArg == "-port" || firstArg == "-data"
+		if !isServerFlag {
+			cli.Version = Version
+			os.Exit(cli.Run(os.Args[1:]))
+		}
+	}
+
 	port := flag.Int("port", 8080, "server port")
 	dataDir := flag.String("data", "", "data directory (default: ~/.ai-hub)")
 	flag.Parse()
