@@ -95,7 +95,9 @@ const rawRequestData = ref<{
   captured_at: string
   anthropic_request?: api.AnthropicRequest
 } | null>(null)
-const rawRequestTab = ref<'system' | 'query' | 'messages'>('system')
+const rawRequestTab = ref<'messages' | 'raw' | 'system' | 'query'>('system')
+// Track which rows are expanded in the visual Messages tab
+const expandedRows = ref<Set<number>>(new Set())
 
 // Format anthropic messages for display
 // Includes the system field (if any) as the first entry so the user sees the complete
@@ -116,12 +118,68 @@ function getActualMsgCount(req: api.AnthropicRequest | undefined): number | null
   return req.messages.length
 }
 
+// Parsed row for visual Messages tab
+interface ParsedRow {
+  rowIndex: number
+  role: string
+  type: string
+  preview: string
+  full: string
+}
+
+// Build flat list of content rows (system + messages)
+function buildParsedRows(req: api.AnthropicRequest | undefined): ParsedRow[] {
+  if (!req) return []
+  const rows: ParsedRow[] = []
+  let idx = 0
+  function addRow(role: string, type: string, rawContent: unknown, blockData: unknown) {
+    const text = typeof rawContent === 'string' ? rawContent : JSON.stringify(rawContent)
+    const preview = text.replace(/\s+/g, ' ').trim().slice(0, 60) + (text.length > 60 ? '\u2026' : '')
+    const full = typeof blockData === 'string' ? blockData : JSON.stringify(blockData, null, 2)
+    rows.push({ rowIndex: idx++, role, type, preview, full })
+  }
+  if (req.system) {
+    if (typeof req.system === 'string') {
+      addRow('system', 'text', req.system, req.system)
+    } else if (Array.isArray(req.system)) {
+      for (const block of req.system) addRow('system', block.type || 'text', block.text ?? block, block)
+    }
+  }
+  for (const msg of (req.messages || [])) {
+    const content = msg.content
+    if (typeof content === 'string') {
+      addRow(msg.role, 'text', content, content)
+    } else if (Array.isArray(content)) {
+      for (const block of content) {
+        let display: unknown
+        if (block.type === 'text') display = block.text ?? ''
+        else if (block.type === 'tool_use') display = '[' + block.name + '] ' + JSON.stringify(block.input)
+        else if (block.type === 'tool_result') { const c = (block as {content?: unknown}).content; display = typeof c === 'string' ? c : JSON.stringify(c) }
+        else if (block.type === 'thinking') display = (block as {thinking?: string}).thinking ?? ''
+        else display = JSON.stringify(block)
+        addRow(msg.role, block.type || 'text', display, block)
+      }
+    }
+  }
+  return rows
+}
+
+const parsedMessageRows = computed<ParsedRow[]>(() => buildParsedRows(rawRequestData.value?.anthropic_request))
+
+function toggleRowExpand(rowIndex: number) {
+  const s = new Set(expandedRows.value)
+  if (s.has(rowIndex)) s.delete(rowIndex)
+  else s.add(rowIndex)
+  expandedRows.value = s
+}
+
 async function openRawRequest() {
   const sid = store.currentSession?.id
   if (!sid) return
   showRawRequestModal.value = true
   rawRequestLoading.value = true
   rawRequestData.value = null
+  expandedRows.value = new Set()
   try {
     rawRequestData.value = await api.getLastRawRequest(sid)
     // Default to Messages tab if proxy data is available (it's the most informative)
@@ -816,23 +874,42 @@ function formatToolInput(raw: string): string {
             <div class="raw-req-tabs">
               <button :class="['raw-req-tab', rawRequestTab === 'messages' && 'active']" @click="rawRequestTab = 'messages'"
                 v-if="rawRequestData.anthropic_request?.messages">
-                Messages <span class="raw-req-tab-badge">{{ getActualMsgCount(rawRequestData.anthropic_request) }}</span>
+                Messages <span class="raw-req-tab-badge">{{ parsedMessageRows.length }}</span>
+              </button>
+              <button :class="['raw-req-tab', rawRequestTab === 'raw' && 'active']" @click="rawRequestTab = 'raw'"
+                v-if="rawRequestData.anthropic_request?.messages">
+                Raw
               </button>
               <button :class="['raw-req-tab', rawRequestTab === 'system' && 'active']" @click="rawRequestTab = 'system'">
                 System Prompt
               </button>
               <button :class="['raw-req-tab', rawRequestTab === 'query' && 'active']" @click="rawRequestTab = 'query'">
                 Query
-              </button>
-            </div>
+              </button>            </div>
             <div class="raw-req-body">
-              <template v-if="rawRequestTab === 'messages' && rawRequestData.anthropic_request?.messages">
+              <template v-if="rawRequestTab === 'messages'">
+                <div class="raw-msg-list">
+                  <div v-for="row in parsedMessageRows" :key="row.rowIndex"
+                    class="raw-msg-row" @click="toggleRowExpand(row.rowIndex)">
+                    <div class="raw-msg-row-header">
+                      <span :class="['raw-msg-role-badge', 'role-' + row.role]">{{ row.role }}</span>
+                      <span :class="['raw-msg-type-badge', 'type-' + row.type]">{{ row.type }}</span>
+                      <span class="raw-msg-preview">{{ row.preview }}</span>
+                      <svg class="raw-msg-chevron" :class="{ 'is-open': expandedRows.has(row.rowIndex) }"
+                        width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <path d="M6 9l6 6 6-6"/>
+                      </svg>
+                    </div>
+                    <pre v-if="expandedRows.has(row.rowIndex)" class="raw-msg-full-pre" @click.stop>{{ row.full }}</pre>
+                  </div>
+                </div>
+              </template>
+              <template v-else-if="rawRequestTab === 'raw'">
                 <pre class="raw-req-pre">{{ formatAnthropicMessages(rawRequestData.anthropic_request) }}</pre>
               </template>
               <template v-else>
                 <pre class="raw-req-pre">{{ rawRequestTab === 'system' ? rawRequestData.system_prompt : rawRequestData.query }}</pre>
-              </template>
-            </div>
+              </template>            </div>
           </template>
         </div>
       </div>
@@ -1069,6 +1146,49 @@ function formatToolInput(raw: string): string {
 .raw-req-loading {
   padding: 40px 20px;
   text-align: center; color: var(--text-muted); font-size: 13px;
+}
+
+/* ===== Visual Messages Tab ===== */
+.raw-msg-list { display: flex; flex-direction: column; gap: 4px; }
+.raw-msg-row {
+  border: 1px solid var(--border); border-radius: 6px;
+  cursor: pointer; transition: background var(--transition); overflow: hidden;
+}
+.raw-msg-row:hover { background: var(--bg-hover, var(--bg-tertiary)); }
+.raw-msg-row-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 12px; min-height: 36px; flex-wrap: nowrap;
+}
+.raw-msg-role-badge {
+  display: inline-flex; align-items: center;
+  font-size: 10px; font-weight: 600; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 4px; white-space: nowrap; flex-shrink: 0;
+}
+.raw-msg-role-badge.role-user     { background: #e8f0fe; color: #1a73e8; }
+.raw-msg-role-badge.role-assistant{ background: #e6f4ea; color: #1e8e3e; }
+.raw-msg-role-badge.role-system   { background: #f3e8fd; color: #8430ce; }
+.raw-msg-type-badge {
+  display: inline-flex; align-items: center;
+  font-size: 10px; font-weight: 600; padding: 2px 7px;
+  border-radius: 10px; white-space: nowrap; flex-shrink: 0; color: #fff;
+}
+.raw-msg-type-badge.type-text         { background: #1a73e8; }
+.raw-msg-type-badge.type-tool_use     { background: #f28b00; }
+.raw-msg-type-badge.type-tool_result  { background: #34a853; }
+.raw-msg-type-badge.type-thinking     { background: #9334e6; }
+.raw-msg-type-badge:not(.type-text):not(.type-tool_use):not(.type-tool_result):not(.type-thinking) { background: #5f6368; }
+.raw-msg-preview {
+  flex: 1; min-width: 0; font-size: 12px; color: var(--text-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.raw-msg-chevron { flex-shrink: 0; color: var(--text-muted); transition: transform 0.18s ease; }
+.raw-msg-chevron.is-open { transform: rotate(180deg); }
+.raw-msg-full-pre {
+  margin: 0; padding: 10px 14px; border-top: 1px solid var(--border);
+  font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+  font-size: 12px; line-height: 1.6; color: var(--text-primary);
+  white-space: pre-wrap; word-break: break-word;
+  background: var(--bg-primary); max-height: 320px; overflow-y: auto;
 }
 .header-token-stats {
   display: flex; align-items: center; gap: 4px;
