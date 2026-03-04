@@ -237,6 +237,12 @@ func doCompress(session *model.Session, mode string) (string, error) {
 	}
 	store.AddMessage(sysMsg)
 
+	// Record the compress point so subsequent auto-compress only counts incremental data
+	if sysMsg.ID > 0 {
+		store.UpdateLastCompressMsgID(session.ID, sysMsg.ID)
+		session.LastCompressMsgID = sysMsg.ID
+	}
+
 	// Notify all WS clients
 	broadcast(WSMessage{Type: "auto_compressed", SessionID: session.ID, Content: actualMode})
 	return actualMode, nil
@@ -316,8 +322,11 @@ func maybeAutoCompress(session *model.Session, newInputTokens int64) {
 		return
 	}
 
-	// Condition 1: total accumulated input tokens must exceed threshold
-	stats, err := store.GetSessionTokenStats(session.ID)
+	// Use last_compress_msg_id for incremental counting (only data since last compress)
+	afterMsgID := session.LastCompressMsgID
+
+	// Condition 1: incremental input tokens since last compress must exceed threshold
+	stats, err := store.GetSessionTokenStats(session.ID, afterMsgID)
 	if err != nil {
 		return
 	}
@@ -326,12 +335,12 @@ func maybeAutoCompress(session *model.Session, newInputTokens int64) {
 		return
 	}
 
-	// Condition 2: conversation turns (user messages) must reach MinTurns
+	// Condition 2: conversation turns since last compress must reach MinTurns
 	if cfg.MinTurns > 0 {
-		turns := store.CountUserMessages(session.ID)
+		turns := store.CountUserMessages(session.ID, afterMsgID)
 		if turns < cfg.MinTurns {
-			log.Printf("[compress] auto-compress skipped for session %d: turns=%d < min_turns=%d (tokens=%d)",
-				session.ID, turns, cfg.MinTurns, totalInput)
+			log.Printf("[compress] auto-compress skipped for session %d: turns=%d < min_turns=%d (tokens=%d, afterMsgID=%d)",
+				session.ID, turns, cfg.MinTurns, totalInput, afterMsgID)
 			return
 		}
 	}
@@ -341,8 +350,8 @@ func maybeAutoCompress(session *model.Session, newInputTokens int64) {
 		return
 	}
 
-	log.Printf("[compress] auto-compress triggered for session %d: total_input=%d threshold=%d turns>=%d",
-		session.ID, totalInput, cfg.Threshold, cfg.MinTurns)
+	log.Printf("[compress] auto-compress triggered for session %d: total_input=%d threshold=%d turns>=%d afterMsgID=%d",
+		session.ID, totalInput, cfg.Threshold, cfg.MinTurns, afterMsgID)
 
 	if _, err := doCompress(session, cfg.Mode); err != nil {
 		log.Printf("[compress] auto-compress failed for session %d: %v", session.ID, err)

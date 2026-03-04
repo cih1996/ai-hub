@@ -2,6 +2,7 @@ package store
 
 import (
 	"ai-hub/server/model"
+	"database/sql"
 	"strconv"
 )
 
@@ -75,8 +76,14 @@ func SaveCompressSettings(s *model.CompressSettings) error {
 }
 
 // CountUserMessages returns the number of user messages in a session (each = 1 turn).
-func CountUserMessages(sessionID int64) int {
-	row := DB.QueryRow(`SELECT COUNT(*) FROM messages WHERE session_id = ? AND role = 'user'`, sessionID)
+// When afterMsgID > 0, only messages with id > afterMsgID are counted (incremental since last compress).
+func CountUserMessages(sessionID int64, afterMsgID int64) int {
+	var row *sql.Row
+	if afterMsgID > 0 {
+		row = DB.QueryRow(`SELECT COUNT(*) FROM messages WHERE session_id = ? AND role = 'user' AND id > ?`, sessionID, afterMsgID)
+	} else {
+		row = DB.QueryRow(`SELECT COUNT(*) FROM messages WHERE session_id = ? AND role = 'user'`, sessionID)
+	}
 	var count int
 	row.Scan(&count)
 	return count

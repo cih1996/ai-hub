@@ -32,7 +32,7 @@ func CreateSession(s *model.Session) error {
 }
 
 func ListSessions() ([]model.Session, error) {
-	rows, err := DB.Query(`SELECT id, title, provider_id, claude_session_id, work_dir, group_name, created_at, updated_at FROM sessions ORDER BY updated_at DESC`)
+	rows, err := DB.Query(`SELECT id, title, provider_id, claude_session_id, work_dir, group_name, last_compress_msg_id, created_at, updated_at FROM sessions ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -40,7 +40,7 @@ func ListSessions() ([]model.Session, error) {
 	var list []model.Session
 	for rows.Next() {
 		var s model.Session
-		if err := rows.Scan(&s.ID, &s.Title, &s.ProviderID, &s.ClaudeSessionID, &s.WorkDir, &s.GroupName, &s.CreatedAt, &s.UpdatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.Title, &s.ProviderID, &s.ClaudeSessionID, &s.WorkDir, &s.GroupName, &s.LastCompressMsgID, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			return nil, err
 		}
 		list = append(list, s)
@@ -51,8 +51,8 @@ func ListSessions() ([]model.Session, error) {
 func GetSession(id int64) (*model.Session, error) {
 	var s model.Session
 	err := DB.QueryRow(
-		`SELECT id, title, provider_id, claude_session_id, work_dir, group_name, created_at, updated_at FROM sessions WHERE id = ?`, id,
-	).Scan(&s.ID, &s.Title, &s.ProviderID, &s.ClaudeSessionID, &s.WorkDir, &s.GroupName, &s.CreatedAt, &s.UpdatedAt)
+		`SELECT id, title, provider_id, claude_session_id, work_dir, group_name, last_compress_msg_id, created_at, updated_at FROM sessions WHERE id = ?`, id,
+	).Scan(&s.ID, &s.Title, &s.ProviderID, &s.ClaudeSessionID, &s.WorkDir, &s.GroupName, &s.LastCompressMsgID, &s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -198,6 +198,13 @@ func UpdateSessionProvider(id int64, providerID string) error {
 // UpdateClaudeSessionID replaces the Claude CLI session UUID (used for context overflow recovery).
 func UpdateClaudeSessionID(id int64, newUUID string) error {
 	_, err := DB.Exec(`UPDATE sessions SET claude_session_id=?, updated_at=? WHERE id=?`, newUUID, time.Now(), id)
+	return err
+}
+
+// UpdateLastCompressMsgID records the latest message ID at compress time,
+// so subsequent auto-compress checks only count messages/tokens after this point.
+func UpdateLastCompressMsgID(sessionID int64, msgID int64) error {
+	_, err := DB.Exec(`UPDATE sessions SET last_compress_msg_id=?, updated_at=? WHERE id=?`, msgID, time.Now(), sessionID)
 	return err
 }
 

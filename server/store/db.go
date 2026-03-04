@@ -123,6 +123,9 @@ func migrate() error {
 	// Provider: optional subprocess proxy URL
 	DB.Exec(`ALTER TABLE providers ADD COLUMN proxy_url TEXT NOT NULL DEFAULT ''`)
 
+	// Sessions: add last_compress_msg_id column (auto-compress cycle tracking)
+	DB.Exec(`ALTER TABLE sessions ADD COLUMN last_compress_msg_id INTEGER NOT NULL DEFAULT 0`)
+
 	// Global key-value settings table
 	DB.Exec(`CREATE TABLE IF NOT EXISTS settings (
 		key   TEXT PRIMARY KEY,

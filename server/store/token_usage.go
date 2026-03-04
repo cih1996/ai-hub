@@ -34,12 +34,22 @@ func GetTokenUsageByMessage(messageID int64) (*model.TokenUsage, error) {
 	return &t, nil
 }
 
-func GetSessionTokenStats(sessionID int64) (*model.TokenUsageStats, error) {
+// GetSessionTokenStats returns aggregated token usage for a session.
+// When afterMsgID > 0, only records with message_id > afterMsgID are counted (incremental since last compress).
+func GetSessionTokenStats(sessionID int64, afterMsgID int64) (*model.TokenUsageStats, error) {
 	var s model.TokenUsageStats
-	err := DB.QueryRow(
-		`SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_creation_input_tokens),0), COALESCE(SUM(cache_read_input_tokens),0), COUNT(*) FROM token_usage WHERE session_id = ?`,
-		sessionID,
-	).Scan(&s.TotalInput, &s.TotalOutput, &s.TotalCacheCreation, &s.TotalCacheRead, &s.Count)
+	var err error
+	if afterMsgID > 0 {
+		err = DB.QueryRow(
+			`SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_creation_input_tokens),0), COALESCE(SUM(cache_read_input_tokens),0), COUNT(*) FROM token_usage WHERE session_id = ? AND message_id > ?`,
+			sessionID, afterMsgID,
+		).Scan(&s.TotalInput, &s.TotalOutput, &s.TotalCacheCreation, &s.TotalCacheRead, &s.Count)
+	} else {
+		err = DB.QueryRow(
+			`SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_creation_input_tokens),0), COALESCE(SUM(cache_read_input_tokens),0), COUNT(*) FROM token_usage WHERE session_id = ?`,
+			sessionID,
+		).Scan(&s.TotalInput, &s.TotalOutput, &s.TotalCacheCreation, &s.TotalCacheRead, &s.Count)
+	}
 	if err != nil {
 		return nil, err
 	}
