@@ -99,17 +99,11 @@ const rawRequestTab = ref<'messages' | 'raw' | 'system' | 'query'>('system')
 // Track which rows are expanded in the visual Messages tab
 const expandedRows = ref<Set<number>>(new Set())
 
-// Format anthropic messages for display
-// Includes the system field (if any) as the first entry so the user sees the complete
-// conversation structure exactly as sent to Anthropic.
+// Format the complete Anthropic API request body for the Raw tab.
+// Displays the entire POST body (model, max_tokens, tools, temperature, etc.)
 function formatAnthropicMessages(req: api.AnthropicRequest | undefined): string {
-  if (!req?.messages) return ''
-  const result: unknown[] = []
-  if (req.system) {
-    result.push({ role: 'system', content: req.system })
-  }
-  result.push(...req.messages)
-  return JSON.stringify(result, null, 2)
+  if (!req) return ''
+  return JSON.stringify(req, null, 2)
 }
 
 // Get actual messages count from the Anthropic request
@@ -125,6 +119,10 @@ interface ParsedRow {
   type: string
   preview: string
   full: string
+  toolName?: string                      // tool_use: tool name (e.g. Bash, Read)
+  toolId?: string                        // tool_use: block id
+  toolUseId?: string                     // tool_result: linked tool_use_id
+  toolInput?: Record<string, unknown>    // tool_use: input parameters
 }
 
 // Build flat list of content rows (system + messages)
@@ -132,11 +130,12 @@ function buildParsedRows(req: api.AnthropicRequest | undefined): ParsedRow[] {
   if (!req) return []
   const rows: ParsedRow[] = []
   let idx = 0
-  function addRow(role: string, type: string, rawContent: unknown, blockData: unknown) {
+  function addRow(role: string, type: string, rawContent: unknown, blockData: unknown,
+                  toolName?: string, toolId?: string, toolUseId?: string, toolInput?: Record<string, unknown>) {
     const text = typeof rawContent === 'string' ? rawContent : JSON.stringify(rawContent)
     const preview = text.replace(/\s+/g, ' ').trim().slice(0, 60) + (text.length > 60 ? '\u2026' : '')
     const full = typeof blockData === 'string' ? blockData : JSON.stringify(blockData, null, 2)
-    rows.push({ rowIndex: idx++, role, type, preview, full })
+    rows.push({ rowIndex: idx++, role, type, preview, full, toolName, toolId, toolUseId, toolInput })
   }
   if (req.system) {
     if (typeof req.system === 'string') {
@@ -152,12 +151,25 @@ function buildParsedRows(req: api.AnthropicRequest | undefined): ParsedRow[] {
     } else if (Array.isArray(content)) {
       for (const block of content) {
         let display: unknown
-        if (block.type === 'text') display = block.text ?? ''
-        else if (block.type === 'tool_use') display = '[' + block.name + '] ' + JSON.stringify(block.input)
-        else if (block.type === 'tool_result') { const c = (block as {content?: unknown}).content; display = typeof c === 'string' ? c : JSON.stringify(c) }
-        else if (block.type === 'thinking') display = (block as {thinking?: string}).thinking ?? ''
-        else display = JSON.stringify(block)
-        addRow(msg.role, block.type || 'text', display, block)
+        if (block.type === 'text') {
+          display = block.text ?? ''
+          addRow(msg.role, 'text', display, block)
+        } else if (block.type === 'tool_use') {
+          display = (block.name || 'tool') + ': ' + JSON.stringify(block.input).slice(0, 80)
+          addRow(msg.role, 'tool_use', display, block,
+            block.name as string, block.id as string, undefined, block.input as Record<string, unknown>)
+        } else if (block.type === 'tool_result') {
+          const c = (block as { content?: unknown }).content
+          display = typeof c === 'string' ? c : JSON.stringify(c)
+          addRow(msg.role, 'tool_result', display, block,
+            undefined, undefined, (block as { tool_use_id?: string }).tool_use_id)
+        } else if (block.type === 'thinking') {
+          display = (block as { thinking?: string }).thinking ?? ''
+          addRow(msg.role, block.type, display, block)
+        } else {
+          display = JSON.stringify(block)
+          addRow(msg.role, block.type || 'text', display, block)
+        }
       }
     }
   }
@@ -165,6 +177,78 @@ function buildParsedRows(req: api.AnthropicRequest | undefined): ParsedRow[] {
 }
 
 const parsedMessageRows = computed<ParsedRow[]>(() => buildParsedRows(rawRequestData.value?.anthropic_request))
+
+// ---- tool_use ↔ tool_result ID association ----
+const highlightedToolId = ref<string | null>(null)
+
+// Bidirectional map: toolId → { useIdx, resultIdx }
+const toolPairMap = computed(() => {
+  const map = new Map<string, { useIdx?: number; resultIdx?: number }>()
+  for (const row of parsedMessageRows.value) {
+    if (row.type === 'tool_use' && row.toolId) {
+      if (!map.has(row.toolId)) map.set(row.toolId, {})
+      map.get(row.toolId)!.useIdx = row.rowIndex
+    }
+    if (row.type === 'tool_result' && row.toolUseId) {
+      if (!map.has(row.toolUseId)) map.set(row.toolUseId, {})
+      map.get(row.toolUseId)!.resultIdx = row.rowIndex
+    }
+  }
+  return map
+})
+
+// toolId → tool name (for showing name on tool_result cards)
+const toolNameById = computed(() => {
+  const map = new Map<string, string>()
+  for (const row of parsedMessageRows.value) {
+    if (row.type === 'tool_use' && row.toolId && row.toolName) {
+      map.set(row.toolId, row.toolName)
+    }
+  }
+  return map
+})
+
+function truncateId(id?: string): string {
+  if (!id) return ''
+  return id.length > 20 ? id.slice(0, 20) + '…' : id
+}
+
+function hasToolPair(toolId?: string): boolean {
+  if (!toolId) return false
+  const pair = toolPairMap.value.get(toolId)
+  return !!pair && pair.useIdx != null && pair.resultIdx != null
+}
+
+function getLinkedToolName(toolUseId?: string): string | undefined {
+  if (!toolUseId) return undefined
+  return toolNameById.value.get(toolUseId)
+}
+
+function isToolHighlighted(row: ParsedRow): boolean {
+  if (!highlightedToolId.value) return false
+  return row.toolId === highlightedToolId.value || row.toolUseId === highlightedToolId.value
+}
+
+function jumpToPair(fromType: 'tool_use' | 'tool_result', toolId: string | undefined) {
+  if (!toolId) return
+  const pair = toolPairMap.value.get(toolId)
+  if (!pair) return
+  const targetIdx = fromType === 'tool_use' ? pair.resultIdx : pair.useIdx
+  if (targetIdx == null) return
+  // Expand target row so it's visible
+  const s = new Set(expandedRows.value)
+  s.add(targetIdx)
+  expandedRows.value = s
+  // Highlight pair
+  highlightedToolId.value = toolId
+  // Scroll to target
+  nextTick(() => {
+    const el = document.querySelector(`[data-row-index="${targetIdx}"]`)
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  })
+  // Clear highlight after 2.5s
+  setTimeout(() => { if (highlightedToolId.value === toolId) highlightedToolId.value = null }, 2500)
+}
 
 function toggleRowExpand(rowIndex: number) {
   const s = new Set(expandedRows.value)
@@ -890,17 +974,59 @@ function formatToolInput(raw: string): string {
               <template v-if="rawRequestTab === 'messages'">
                 <div class="raw-msg-list">
                   <div v-for="row in parsedMessageRows" :key="row.rowIndex"
-                    class="raw-msg-row" @click="toggleRowExpand(row.rowIndex)">
+                    :data-row-index="row.rowIndex"
+                    :class="['raw-msg-row',
+                             row.type === 'tool_use' && 'raw-msg-row-tool-use',
+                             row.type === 'tool_result' && 'raw-msg-row-tool-result',
+                             isToolHighlighted(row) && 'tool-highlighted']"
+                    @click="toggleRowExpand(row.rowIndex)">
                     <div class="raw-msg-row-header">
                       <span :class="['raw-msg-role-badge', 'role-' + row.role]">{{ row.role }}</span>
                       <span :class="['raw-msg-type-badge', 'type-' + row.type]">{{ row.type }}</span>
-                      <span class="raw-msg-preview">{{ row.preview }}</span>
+
+                      <!-- tool_use: name badge + id + jump button -->
+                      <template v-if="row.type === 'tool_use'">
+                        <span class="tool-name-badge">{{ row.toolName }}</span>
+                        <span class="tool-id-label" :title="row.toolId">{{ truncateId(row.toolId) }}</span>
+                        <button v-if="hasToolPair(row.toolId)" class="tool-jump-btn" @click.stop="jumpToPair('tool_use', row.toolId)" title="跳转到对应 result">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 13l5 5 5-5M7 6l5 5 5-5"/></svg>
+                        </button>
+                      </template>
+
+                      <!-- tool_result: linked name + id + jump button + preview -->
+                      <template v-else-if="row.type === 'tool_result'">
+                        <span v-if="getLinkedToolName(row.toolUseId)" class="tool-name-badge tool-name-result">{{ getLinkedToolName(row.toolUseId) }}</span>
+                        <span class="tool-id-label" :title="row.toolUseId">{{ truncateId(row.toolUseId) }}</span>
+                        <button v-if="hasToolPair(row.toolUseId)" class="tool-jump-btn" @click.stop="jumpToPair('tool_result', row.toolUseId)" title="跳转到对应 call">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 11l5-5 5 5M7 18l5-5 5 5"/></svg>
+                        </button>
+                        <span class="raw-msg-preview">{{ row.preview }}</span>
+                      </template>
+
+                      <!-- Default: preview text -->
+                      <template v-else>
+                        <span class="raw-msg-preview">{{ row.preview }}</span>
+                      </template>
+
                       <svg class="raw-msg-chevron" :class="{ 'is-open': expandedRows.has(row.rowIndex) }"
                         width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                         <path d="M6 9l6 6 6-6"/>
                       </svg>
                     </div>
-                    <pre v-if="expandedRows.has(row.rowIndex)" class="raw-msg-full-pre" @click.stop>{{ row.full }}</pre>
+
+                    <!-- tool_use expanded: structured params card -->
+                    <div v-if="row.type === 'tool_use' && expandedRows.has(row.rowIndex)" class="tool-params-card" @click.stop>
+                      <div v-if="row.toolInput && Object.keys(row.toolInput).length" class="tool-params-list">
+                        <div v-for="(value, key) in row.toolInput" :key="String(key)" class="tool-param-item">
+                          <div class="tool-param-key">{{ key }}</div>
+                          <pre class="tool-param-value">{{ typeof value === 'string' ? value : JSON.stringify(value, null, 2) }}</pre>
+                        </div>
+                      </div>
+                      <pre v-else class="raw-msg-full-pre">{{ row.full }}</pre>
+                    </div>
+
+                    <!-- Other types expanded: raw JSON -->
+                    <pre v-else-if="expandedRows.has(row.rowIndex)" class="raw-msg-full-pre" @click.stop>{{ row.full }}</pre>
                   </div>
                 </div>
               </template>
@@ -1189,6 +1315,76 @@ function formatToolInput(raw: string): string {
   font-size: 12px; line-height: 1.6; color: var(--text-primary);
   white-space: pre-wrap; word-break: break-word;
   background: var(--bg-primary); max-height: 320px; overflow-y: auto;
+}
+
+/* ===== tool_use / tool_result card enhancements ===== */
+.raw-msg-row-tool-use  { border-color: rgba(242, 139, 0, 0.3); }
+.raw-msg-row-tool-result { border-color: rgba(52, 168, 83, 0.3); }
+
+/* Highlight animation when jumping between pairs */
+.tool-highlighted {
+  animation: tool-highlight-pulse 2.5s ease-out;
+}
+@keyframes tool-highlight-pulse {
+  0%   { background: rgba(66, 133, 244, 0.18); box-shadow: 0 0 0 2px rgba(66, 133, 244, 0.4); }
+  100% { background: transparent; box-shadow: none; }
+}
+
+/* Tool name badge */
+.tool-name-badge {
+  display: inline-flex; align-items: center;
+  font-size: 11px; font-weight: 600;
+  padding: 2px 8px; border-radius: 4px;
+  background: rgba(242, 139, 0, 0.12); color: #d47700;
+  white-space: nowrap; flex-shrink: 0;
+}
+.tool-name-badge.tool-name-result {
+  background: rgba(52, 168, 83, 0.12); color: #1e8e3e;
+}
+
+/* Tool ID label (truncated) */
+.tool-id-label {
+  font-size: 10px; color: var(--text-muted);
+  font-family: 'SF Mono', 'Menlo', monospace;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 160px; flex-shrink: 1;
+}
+
+/* Jump button */
+.tool-jump-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 4px; flex-shrink: 0;
+  color: var(--accent); background: var(--accent-soft);
+  transition: all 0.15s ease;
+}
+.tool-jump-btn:hover {
+  background: var(--accent); color: #fff;
+}
+
+/* ===== Structured tool params card ===== */
+.tool-params-card {
+  border-top: 1px solid var(--border);
+  background: var(--bg-primary);
+  max-height: 360px; overflow-y: auto;
+}
+.tool-params-list {
+  display: flex; flex-direction: column;
+}
+.tool-param-item {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.tool-param-item:last-child { border-bottom: none; }
+.tool-param-key {
+  font-size: 10px; font-weight: 600; text-transform: uppercase;
+  color: var(--accent); letter-spacing: 0.5px;
+}
+.tool-param-value {
+  margin: 0;
+  font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+  font-size: 12px; line-height: 1.5; color: var(--text-primary);
+  white-space: pre-wrap; word-break: break-word;
 }
 .header-token-stats {
   display: flex; align-items: center; gap: 4px;
