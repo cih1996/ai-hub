@@ -130,3 +130,58 @@ AI Hub 自检结果
 - API 行为发生变化。
 
 更新记录建议包含：问题、根因、改动点、适用边界、验证方式。
+
+## 7. 常见故障案例
+
+### 案例 1：向量引擎启动卡死（管道阻塞）
+
+**现象**：AI Hub 启动或重启向量引擎时，`download_model.py` 进程挂起，端口 8090 无法监听，`vector/status` 返回 `ready: false`。
+
+**根因**：sentence-transformers 加载模型时 tqdm 进度条向 stderr 输出大量数据，Go 父进程管道缓冲区满后未及时读取，Python 子进程在 `write()` 系统调用上阻塞。HuggingFace Hub 在线检查可能因网络问题额外阻塞。
+
+**修复**：在 `download_model.py` 和 `embedding.py` 的 import 前设置环境变量：
+
+```python
+os.environ["TQDM_DISABLE"] = "1"
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+```
+
+**注意**：首次使用新模型需手动下载（离线模式无法自动下载）。切换模型时需临时移除 OFFLINE 变量完成下载。
+
+**验证**：重启后 `curl /api/v1/vector/status` 应在 5 秒内返回 `ready: true`。
+
+---
+
+### 案例 2：代理 URL 构造错误（远程系统全面不可用）
+
+**现象**：升级后所有会话在 300-500ms 内返回 `error_during_execution`，完全不可用。本地 OAuth 模式正常。
+
+**根因**：`server/core/claude_pool.go` 的 `spawnProcess()` 将 `session_id` 作为 query parameter 嵌入 `ANTHROPIC_BASE_URL`（`?session_id=XX`）。Anthropic SDK 拼接 `/v1/messages` 时 URL 结构被破坏——path 缺少 `/v1/messages`，query 变成 `session_id=XX/v1/messages`，代理转发到上游根路径。
+
+**修复**：将 session_id 编码到 URL 路径中：
+
+```
+旧：http://localhost:PORT/api/v1/proxy/anthropic?session_id=XX
+新：http://localhost:PORT/api/v1/proxy/s/SESSION_ID/anthropic
+```
+
+路由改为 `/api/v1/proxy/s/:session_id/anthropic/*path`，proxy.go 从路径参数获取 session_id。
+
+**教训**：base URL 中不应包含 query parameter；新增代理功能时必须同时测试 api_key 和 oauth 两种模式。
+
+---
+
+### 案例 3：source_session_id 被 watcher 覆盖为 0
+
+**现象**：团队知识库/记忆库列表的会话ID徽章始终不显示，source_session_id 为 0。
+
+**根因**：`vector_watcher.go` 的文件监视逻辑在检测到文件变化时调用 `syncFileToVector(scope, path, 0)`，覆盖了 API 写入时传入的正确 session_id。
+
+流程：
+1. `POST /vector/write` → `SyncFileToVector(scope, path, sessionID=23)` → embed(session_id=23) ✓
+2. watcher 检测变化 → `syncFileToVector(scope, path, 0)` → embed 覆盖为 session_id=0 ✗
+
+**修复方向**：watcher 触发 embed 时，先读现有元数据，若 source_session_id > 0 则保留，不覆盖。
+
+**验证**：写入文件后等待 watcher 触发，检查 `list_files` 接口返回的 source_session_id 是否保持非零值。
