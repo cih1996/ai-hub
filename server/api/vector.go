@@ -3,6 +3,7 @@ package api
 import (
 	"ai-hub/server/core"
 	"ai-hub/server/store"
+	"encoding/json"
 	"log"
 	"net/http"
 	"os"
@@ -123,10 +124,11 @@ func isValidScope(scope string) bool {
 // POST /api/v1/vector/search
 func SearchVector(c *gin.Context) {
 	var req struct {
-		Scope     string `json:"scope"`
-		Query     string `json:"query"`
-		TopK      int    `json:"top_k"`
-		SessionID int64  `json:"session_id"` // optional: auto-resolve team scope
+		Scope     string   `json:"scope"`
+		Query     string   `json:"query"`
+		TopK      int      `json:"top_k"`
+		SessionID int64    `json:"session_id"` // optional: auto-resolve team scope
+		Tags      []string `json:"tags"`       // optional: post-filter by tags
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -149,10 +151,21 @@ func SearchVector(c *gin.Context) {
 	if !waitVectorReady(c) {
 		return
 	}
-	results, err := core.Vector.Search(req.Scope, req.Query, req.TopK)
+	// Fetch extra candidates when filtering by tags
+	fetchK := req.TopK
+	if len(req.Tags) > 0 {
+		fetchK = req.TopK * 3
+	}
+	results, err := core.Vector.Search(req.Scope, req.Query, fetchK)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+	if len(req.Tags) > 0 {
+		results = filterByTags(results, req.Tags)
+		if len(results) > req.TopK {
+			results = results[:req.TopK]
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{"results": results})
 }
@@ -233,10 +246,11 @@ func sortPriority(r map[string]interface{}, sessionID int64) int {
 
 func vectorSearch(c *gin.Context, defaultScope string) {
 	var req struct {
-		Query     string `json:"query"`
-		TopK      int    `json:"top_k"`
-		Scope     string `json:"scope"`      // optional: explicit scope override
-		SessionID int64  `json:"session_id"` // optional: auto-resolve team scope + sorting
+		Query     string   `json:"query"`
+		TopK      int      `json:"top_k"`
+		Scope     string   `json:"scope"`      // optional: explicit scope override
+		SessionID int64    `json:"session_id"` // optional: auto-resolve team scope + sorting
+		Tags      []string `json:"tags"`       // optional: post-filter by tags
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -253,6 +267,12 @@ func vectorSearch(c *gin.Context, defaultScope string) {
 		return
 	}
 
+	// Determine fetch multiplier for tag filtering
+	fetchK := req.TopK
+	if len(req.Tags) > 0 {
+		fetchK = req.TopK * 3
+	}
+
 	// Determine type label from scope suffix
 	scopeType := defaultScope // "memory" or "knowledge"
 
@@ -266,16 +286,22 @@ func vectorSearch(c *gin.Context, defaultScope string) {
 		parts := strings.Split(req.Scope, "/")
 		scopeType = parts[len(parts)-1]
 
-		results, err := core.Vector.Search(req.Scope, req.Query, req.TopK)
+		results, err := core.Vector.Search(req.Scope, req.Query, fetchK)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
+		}
+		if len(req.Tags) > 0 {
+			results = filterByTags(results, req.Tags)
 		}
 		enriched := make([]map[string]interface{}, 0, len(results))
 		for _, r := range results {
 			e := enrichResult(r, scopeType, "global")
 			delete(e, "_origin")
 			enriched = append(enriched, e)
+		}
+		if len(enriched) > req.TopK {
+			enriched = enriched[:req.TopK]
 		}
 		c.JSON(http.StatusOK, gin.H{"results": enriched})
 		return
@@ -295,7 +321,7 @@ func vectorSearch(c *gin.Context, defaultScope string) {
 
 		// 1. Search session scope
 		sessionScope := sessionGroup + "/sessions/" + strconv.FormatInt(req.SessionID, 10) + "/" + defaultScope
-		sessionResults, err := core.Vector.Search(sessionScope, req.Query, req.TopK)
+		sessionResults, err := core.Vector.Search(sessionScope, req.Query, fetchK)
 		if err != nil {
 			log.Printf("[vector] session search error (scope=%s): %v", sessionScope, err)
 		} else {
@@ -309,7 +335,7 @@ func vectorSearch(c *gin.Context, defaultScope string) {
 
 		// 2. Search team scope
 		teamScope := sessionGroup + "/" + defaultScope
-		teamResults, err2 := core.Vector.Search(teamScope, req.Query, req.TopK)
+		teamResults, err2 := core.Vector.Search(teamScope, req.Query, fetchK)
 		if err2 != nil {
 			log.Printf("[vector] team search error (scope=%s): %v", teamScope, err2)
 		} else {
@@ -324,7 +350,7 @@ func vectorSearch(c *gin.Context, defaultScope string) {
 		}
 
 		// 3. Search global scope
-		globalResults, err3 := core.Vector.Search(defaultScope, req.Query, req.TopK)
+		globalResults, err3 := core.Vector.Search(defaultScope, req.Query, fetchK)
 		if err3 != nil {
 			log.Printf("[vector] global search error (scope=%s): %v", defaultScope, err3)
 		} else {
@@ -337,10 +363,18 @@ func vectorSearch(c *gin.Context, defaultScope string) {
 			}
 		}
 
+		// Tag filter before sorting
+		if len(req.Tags) > 0 {
+			merged = filterByTags(merged, req.Tags)
+		}
+
 		// Sort: self(0) > session(1) > team(2) > global(3)
 		sortResults(merged, req.SessionID)
 
-		// Remove internal _origin field
+		// Trim to topK and remove internal _origin field
+		if len(merged) > req.TopK {
+			merged = merged[:req.TopK]
+		}
 		for _, r := range merged {
 			delete(r, "_origin")
 		}
@@ -349,16 +383,22 @@ func vectorSearch(c *gin.Context, defaultScope string) {
 	}
 
 	// Default: search global scope only
-	results, err := core.Vector.Search(defaultScope, req.Query, req.TopK)
+	results, err := core.Vector.Search(defaultScope, req.Query, fetchK)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+	if len(req.Tags) > 0 {
+		results = filterByTags(results, req.Tags)
 	}
 	enriched := make([]map[string]interface{}, 0, len(results))
 	for _, r := range results {
 		e := enrichResult(r, scopeType, "global")
 		delete(e, "_origin")
 		enriched = append(enriched, e)
+	}
+	if len(enriched) > req.TopK {
+		enriched = enriched[:req.TopK]
 	}
 	c.JSON(http.StatusOK, gin.H{"results": enriched})
 }
@@ -376,6 +416,51 @@ func sortResults(results []map[string]interface{}, sessionID int64) {
 			}
 		}
 	}
+}
+
+// filterByTags filters vector results to only include those whose metadata contains
+// at least one of the requested tags. Tags in metadata are stored as a JSON-encoded
+// string array (e.g. "[\"deploy\",\"sop\"]") due to ChromaDB limitations.
+func filterByTags(results []map[string]interface{}, tags []string) []map[string]interface{} {
+	if len(tags) == 0 {
+		return results
+	}
+	tagSet := make(map[string]bool, len(tags))
+	for _, t := range tags {
+		tagSet[strings.TrimSpace(t)] = true
+	}
+
+	var filtered []map[string]interface{}
+	for _, r := range results {
+		meta, ok := r["metadata"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		tagsRaw, ok := meta["mem_tags"]
+		if !ok {
+			// Also check "tags" key for non-mem records
+			tagsRaw, ok = meta["tags"]
+			if !ok {
+				continue
+			}
+		}
+		tagsStr, ok := tagsRaw.(string)
+		if !ok {
+			continue
+		}
+		// Parse JSON array string
+		var docTags []string
+		if err := json.Unmarshal([]byte(tagsStr), &docTags); err != nil {
+			continue
+		}
+		for _, dt := range docTags {
+			if tagSet[dt] {
+				filtered = append(filtered, r)
+				break
+			}
+		}
+	}
+	return filtered
 }
 
 // ReadKnowledge reads a knowledge file's full content
@@ -697,6 +782,7 @@ func ListVectorFilesRich(c *gin.Context) {
 	listGlobal := c.Query("list_global") == "true"
 	typeFilter := strings.TrimSpace(c.Query("type"))   // "memory" | "knowledge" | "all" | ""
 	levelFilter := strings.TrimSpace(c.Query("level")) // "session" | "team" | "global" | "all" | ""
+	tagFilter := strings.TrimSpace(c.Query("tag"))     // optional: filter by tag
 
 	if levelFilter == "" {
 		levelFilter = "all"
@@ -813,6 +899,36 @@ func ListVectorFilesRich(c *gin.Context) {
 							sourceSessionID = v
 						}
 					}
+				}
+			}
+
+			// Tag filter: skip files that don't match the requested tag
+			if tagFilter != "" && metaMap != nil {
+				if meta, ok := metaMap[e.Name()]; ok {
+					matched := false
+					for _, key := range []string{"mem_tags", "tags"} {
+						if tagsRaw, ok := meta[key]; ok {
+							if tagsStr, ok := tagsRaw.(string); ok {
+								var docTags []string
+								if json.Unmarshal([]byte(tagsStr), &docTags) == nil {
+									for _, dt := range docTags {
+										if dt == tagFilter {
+											matched = true
+											break
+										}
+									}
+								}
+							}
+						}
+						if matched {
+							break
+						}
+					}
+					if !matched {
+						continue
+					}
+				} else {
+					continue // no metadata = no tags = skip
 				}
 			}
 
