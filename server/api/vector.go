@@ -297,6 +297,7 @@ func vectorSearch(c *gin.Context, defaultScope string) {
 		enriched := make([]map[string]interface{}, 0, len(results))
 		for _, r := range results {
 			e := enrichResult(r, scopeType, "global")
+			e["origin"] = e["_origin"]
 			delete(e, "_origin")
 			enriched = append(enriched, e)
 		}
@@ -376,6 +377,7 @@ func vectorSearch(c *gin.Context, defaultScope string) {
 			merged = merged[:req.TopK]
 		}
 		for _, r := range merged {
+			r["origin"] = r["_origin"]
 			delete(r, "_origin")
 		}
 		c.JSON(http.StatusOK, gin.H{"results": merged})
@@ -394,6 +396,7 @@ func vectorSearch(c *gin.Context, defaultScope string) {
 	enriched := make([]map[string]interface{}, 0, len(results))
 	for _, r := range results {
 		e := enrichResult(r, scopeType, "global")
+		e["origin"] = e["_origin"]
 		delete(e, "_origin")
 		enriched = append(enriched, e)
 	}
@@ -444,13 +447,20 @@ func filterByTags(results []map[string]interface{}, tags []string) []map[string]
 				continue
 			}
 		}
-		tagsStr, ok := tagsRaw.(string)
-		if !ok {
-			continue
-		}
-		// Parse JSON array string
+		// Parse tags: may be JSON string or []interface{} depending on storage
 		var docTags []string
-		if err := json.Unmarshal([]byte(tagsStr), &docTags); err != nil {
+		switch v := tagsRaw.(type) {
+		case string:
+			if err := json.Unmarshal([]byte(v), &docTags); err != nil {
+				continue
+			}
+		case []interface{}:
+			for _, t := range v {
+				if s, ok := t.(string); ok {
+					docTags = append(docTags, s)
+				}
+			}
+		default:
 			continue
 		}
 		for _, dt := range docTags {
@@ -908,15 +918,21 @@ func ListVectorFilesRich(c *gin.Context) {
 					matched := false
 					for _, key := range []string{"mem_tags", "tags"} {
 						if tagsRaw, ok := meta[key]; ok {
-							if tagsStr, ok := tagsRaw.(string); ok {
-								var docTags []string
-								if json.Unmarshal([]byte(tagsStr), &docTags) == nil {
-									for _, dt := range docTags {
-										if dt == tagFilter {
-											matched = true
-											break
-										}
+							var docTags []string
+							switch v := tagsRaw.(type) {
+							case string:
+								json.Unmarshal([]byte(v), &docTags)
+							case []interface{}:
+								for _, t := range v {
+									if s, ok := t.(string); ok {
+										docTags = append(docTags, s)
 									}
+								}
+							}
+							for _, dt := range docTags {
+								if dt == tagFilter {
+									matched = true
+									break
 								}
 							}
 						}

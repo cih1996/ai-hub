@@ -55,7 +55,7 @@ Examples:
 	if sessionID > 0 {
 		params.Set("session_id", fmt.Sprintf("%d", sessionID))
 	}
-	if group != "" {
+	if group != "" && sessionID == 0 {
 		// If explicit group but no session, build explicit scope
 		params.Set("scope", BuildScope(scope, group))
 	}
