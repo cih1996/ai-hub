@@ -38,12 +38,30 @@ func StartVectorWatcher() *VectorWatcher {
 			if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
 				continue
 			}
+			groupName := e.Name()
 			for _, sub := range []string{"knowledge", "memory"} {
-				subDir := filepath.Join(teamsDir, e.Name(), sub)
+				subDir := filepath.Join(teamsDir, groupName, sub)
 				if info, err2 := os.Stat(subDir); err2 == nil && info.IsDir() {
-					scope := e.Name() + "/" + sub
+					scope := groupName + "/" + sub
 					dirs[subDir] = scope
 					log.Printf("[vector-watcher] discovered team dir: %s -> scope=%s", subDir, scope)
+				}
+			}
+			// Discover session-level directories: teams/<group>/sessions/<id>/<sub>
+			sessionsDir := filepath.Join(teamsDir, groupName, "sessions")
+			if sessionEntries, err2 := os.ReadDir(sessionsDir); err2 == nil {
+				for _, se := range sessionEntries {
+					if !se.IsDir() {
+						continue
+					}
+					for _, sub := range []string{"knowledge", "memory"} {
+						subDir := filepath.Join(sessionsDir, se.Name(), sub)
+						if info, err3 := os.Stat(subDir); err3 == nil && info.IsDir() {
+							scope := groupName + "/sessions/" + se.Name() + "/" + sub
+							dirs[subDir] = scope
+							log.Printf("[vector-watcher] discovered session dir: %s -> scope=%s", subDir, scope)
+						}
+					}
 				}
 			}
 		}

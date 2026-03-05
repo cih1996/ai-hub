@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/gin-gonic/gin"
 )
@@ -54,7 +53,8 @@ func waitVectorReady(c *gin.Context) bool {
 
 // isValidScope returns true if scope is one of the allowed forms:
 //   - "knowledge" or "memory" (global)
-//   - "<groupname>/knowledge", "<groupname>/memory", or "<groupname>/rules" (team-level)
+//   - "<group>/knowledge", "<group>/memory", or "<group>/rules" (team-level)
+//   - "<group>/sessions/<id>/knowledge", "<group>/sessions/<id>/memory" (session-level)
 //
 // groupname supports Unicode letters (including CJK/Chinese), digits, spaces,
 // hyphens and underscores. Path traversal sequences are rejected.
@@ -62,6 +62,22 @@ func isValidScope(scope string) bool {
 	if scope == "knowledge" || scope == "memory" {
 		return true
 	}
+	// Try session-level: <group>/sessions/<id>/<suffix>
+	if parts := strings.Split(scope, "/"); len(parts) == 4 && parts[1] == "sessions" {
+		group, idStr, suffix := parts[0], parts[2], parts[3]
+		if suffix != "knowledge" && suffix != "memory" {
+			return false
+		}
+		if !isValidGroupName(group) {
+			return false
+		}
+		// id must be positive integer
+		if id, err := strconv.ParseInt(idStr, 10, 64); err != nil || id <= 0 {
+			return false
+		}
+		return true
+	}
+	// Team-level: <group>/<suffix>
 	idx := strings.LastIndex(scope, "/")
 	if idx <= 0 {
 		return false
@@ -71,17 +87,10 @@ func isValidScope(scope string) bool {
 		return false
 	}
 	prefix := scope[:idx]
-	// Reject path traversal and null bytes
-	if strings.Contains(prefix, "..") || strings.Contains(prefix, "\x00") || strings.Contains(prefix, "/") {
-		return false
+	if strings.Contains(prefix, "/") {
+		return false // unexpected extra slashes
 	}
-	// Allow Unicode letters (covers Chinese, Japanese, etc.), digits, spaces, hyphens, underscores
-	for _, ch := range prefix {
-		if !unicode.IsLetter(ch) && !unicode.IsDigit(ch) && ch != '-' && ch != '_' && ch != ' ' {
-			return false
-		}
-	}
-	return len(strings.TrimSpace(prefix)) > 0
+	return isValidGroupName(prefix)
 }
 
 // --- Vector MCP tool handlers ---

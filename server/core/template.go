@@ -91,13 +91,19 @@ func TemplateDir() string {
 // ScopeDir returns the filesystem directory for the given vector scope.
 // Global scopes (e.g. "knowledge") resolve to ~/.ai-hub/knowledge.
 // Team scopes (e.g. "团队名/knowledge") resolve to ~/.ai-hub/teams/团队名/knowledge.
+// Session scopes (e.g. "团队名/sessions/21/memory") resolve to ~/.ai-hub/teams/团队名/sessions/21/memory.
 func ScopeDir(scope string) string {
 	home, _ := os.UserHomeDir()
-	if idx := strings.LastIndex(scope, "/"); idx > 0 {
-		groupName := scope[:idx]
-		suffix := scope[idx+1:]
-		return filepath.Join(home, ".ai-hub", "teams", groupName, suffix)
+	parts := strings.Split(scope, "/")
+	// Session-level: <group>/sessions/<id>/<suffix>
+	if len(parts) == 4 && parts[1] == "sessions" {
+		return filepath.Join(home, ".ai-hub", "teams", parts[0], "sessions", parts[2], parts[3])
 	}
+	// Team-level: <group>/<suffix>
+	if len(parts) == 2 {
+		return filepath.Join(home, ".ai-hub", "teams", parts[0], parts[1])
+	}
+	// Global
 	return filepath.Join(home, ".ai-hub", scope)
 }
 
