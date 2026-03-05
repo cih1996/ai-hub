@@ -236,6 +236,8 @@ func main() {
 		v1.GET("/vector/list_knowledge", api.ListKnowledgeFiles)
 		v1.GET("/vector/list_memory", api.ListMemoryFiles)
 		v1.POST("/vector/read", api.ReadVector)
+		v1.POST("/vector/update_metadata", api.UpdateVectorMetadata)
+		v1.POST("/vector/get_doc", api.GetVectorDoc)
 
 		// Export / Import
 		v1.GET("/export/session/:id", api.ExportSession)

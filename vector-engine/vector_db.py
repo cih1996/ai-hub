@@ -89,6 +89,17 @@ class VectorDB:
         meta["last_hit_time"] = time.strftime("%Y-%m-%dT%H:%M:%S")
         self.collection.update(ids=[doc_id], metadatas=[meta])
 
+    def update_metadata(self, doc_id: str, updates: dict) -> dict | None:
+        """Merge updates into existing metadata for a doc. Returns updated metadata or None."""
+        record = self.get(doc_id)
+        if not record:
+            return None
+        meta = record["metadata"]
+        meta.update(updates)
+        meta["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+        self.collection.update(ids=[doc_id], metadatas=[meta])
+        return meta
+
     def stats(self) -> dict:
         """返回统计信息"""
         count = self.collection.count()

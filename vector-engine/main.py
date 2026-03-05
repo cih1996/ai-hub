@@ -71,6 +71,17 @@ class DeleteRequest(BaseModel):
     doc_id: str
 
 
+class UpdateMetadataRequest(BaseModel):
+    scope: str
+    doc_id: str
+    metadata: dict  # fields to merge into existing metadata
+
+
+class GetDocRequest(BaseModel):
+    scope: str
+    doc_id: str
+
+
 @app.post("/embed")
 def embed(req: EmbedRequest):
     db = _get_db(req.scope)
@@ -93,6 +104,24 @@ def delete(req: DeleteRequest):
     db = _get_db(req.scope)
     db.delete(doc_id=req.doc_id)
     return {"status": "ok", "doc_id": req.doc_id}
+
+
+@app.post("/update_metadata")
+def update_metadata(req: UpdateMetadataRequest):
+    db = _get_db(req.scope)
+    updated = db.update_metadata(doc_id=req.doc_id, updates=req.metadata)
+    if updated is None:
+        raise HTTPException(status_code=404, detail=f"doc not found: {req.doc_id}")
+    return {"status": "ok", "doc_id": req.doc_id, "metadata": updated}
+
+
+@app.post("/get_doc")
+def get_doc(req: GetDocRequest):
+    db = _get_db(req.scope)
+    record = db.get(doc_id=req.doc_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"doc not found: {req.doc_id}")
+    return record
 
 
 @app.get("/health")

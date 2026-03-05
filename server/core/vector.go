@@ -514,6 +514,38 @@ func (v *VectorEngine) Embed(scope, docID, text string, metadata map[string]inte
 	return err
 }
 
+// UpdateMetadata merges updates into existing metadata for a doc.
+func (v *VectorEngine) UpdateMetadata(scope, docID string, updates map[string]interface{}) (map[string]interface{}, error) {
+	if !v.IsReady() {
+		return nil, fmt.Errorf("vector engine not ready")
+	}
+	body := map[string]interface{}{
+		"scope":    scope,
+		"doc_id":   docID,
+		"metadata": updates,
+	}
+	resp, err := v.post("/update_metadata", body)
+	if err != nil {
+		return nil, err
+	}
+	if meta, ok := resp["metadata"].(map[string]interface{}); ok {
+		return meta, nil
+	}
+	return nil, nil
+}
+
+// GetDoc retrieves a single document with its metadata.
+func (v *VectorEngine) GetDoc(scope, docID string) (map[string]interface{}, error) {
+	if !v.IsReady() {
+		return nil, fmt.Errorf("vector engine not ready")
+	}
+	body := map[string]interface{}{
+		"scope":  scope,
+		"doc_id": docID,
+	}
+	return v.post("/get_doc", body)
+}
+
 // Search performs semantic search with automatic retry on transient errors.
 func (v *VectorEngine) Search(scope, query string, topK int) ([]map[string]interface{}, error) {
 	if !v.IsReady() {

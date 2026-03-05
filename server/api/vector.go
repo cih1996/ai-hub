@@ -388,10 +388,11 @@ func WriteVector(c *gin.Context) {
 
 func vectorWrite(c *gin.Context, defaultScope string) {
 	var req struct {
-		FileName  string `json:"file_name"`
-		Content   string `json:"content"`
-		Scope     string `json:"scope"`      // optional: explicit scope override
-		SessionID int64  `json:"session_id"` // optional: auto-resolve team scope
+		FileName      string                 `json:"file_name"`
+		Content       string                 `json:"content"`
+		Scope         string                 `json:"scope"`           // optional: explicit scope override
+		SessionID     int64                  `json:"session_id"`      // optional: auto-resolve team scope
+		ExtraMetadata map[string]interface{} `json:"extra_metadata"`  // optional: structured memory fields (tags/type/status/version etc.)
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -425,6 +426,13 @@ func vectorWrite(c *gin.Context, defaultScope string) {
 	// Trigger vector sync (also registers the dir for watching if new group scope)
 	// Pass session_id so it's stored as source_session_id in vector metadata.
 	core.SyncFileToVector(scope, path, req.SessionID)
+
+	// If extra_metadata provided, merge into vector record after sync
+	if len(req.ExtraMetadata) > 0 && core.Vector != nil {
+		docID := filepath.Base(path)
+		core.Vector.UpdateMetadata(scope, docID, req.ExtraMetadata)
+	}
+
 	c.JSON(http.StatusOK, gin.H{"ok": true, "file_name": req.FileName, "scope": scope})
 }
 
@@ -830,4 +838,69 @@ func ReadVector(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"file_name": req.FileName, "content": string(data), "scope": req.Scope})
+}
+
+// UpdateVectorMetadata merges metadata updates into an existing vector record.
+// POST /api/v1/vector/update_metadata
+func UpdateVectorMetadata(c *gin.Context) {
+	var req struct {
+		DocID    string                 `json:"doc_id"`
+		Scope    string                 `json:"scope"`
+		Metadata map[string]interface{} `json:"metadata"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !isValidScope(req.Scope) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid scope"})
+		return
+	}
+	if req.DocID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "doc_id is required"})
+		return
+	}
+	if req.Metadata == nil || len(req.Metadata) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "metadata is required"})
+		return
+	}
+	if !waitVectorReady(c) {
+		return
+	}
+	updated, err := core.Vector.UpdateMetadata(req.Scope, req.DocID, req.Metadata)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "doc_id": req.DocID, "metadata": updated})
+}
+
+// GetVectorDoc retrieves a single vector document with its metadata.
+// POST /api/v1/vector/get_doc
+func GetVectorDoc(c *gin.Context) {
+	var req struct {
+		DocID string `json:"doc_id"`
+		Scope string `json:"scope"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !isValidScope(req.Scope) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid scope"})
+		return
+	}
+	if req.DocID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "doc_id is required"})
+		return
+	}
+	if !waitVectorReady(c) {
+		return
+	}
+	doc, err := core.Vector.GetDoc(req.Scope, req.DocID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, doc)
 }
