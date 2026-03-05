@@ -28,6 +28,29 @@ func resolveTeamScope(sessionID int64, defaultScope string) string {
 	return sess.GroupName + "/" + defaultScope
 }
 
+// resolveSessionScope returns the session-level scope for a given session.
+// e.g. "团队名/sessions/21/memory". Returns "" if session has no group_name.
+func resolveSessionScope(sessionID int64, defaultScope string) string {
+	if sessionID <= 0 {
+		return ""
+	}
+	sess, err := store.GetSession(sessionID)
+	if err != nil || sess.GroupName == "" {
+		return ""
+	}
+	return sess.GroupName + "/sessions/" + strconv.FormatInt(sessionID, 10) + "/" + defaultScope
+}
+
+// extractScopeGroup extracts the group name from a scope string.
+// Returns "" for global scopes ("knowledge", "memory").
+func extractScopeGroup(scope string) string {
+	parts := strings.Split(scope, "/")
+	if len(parts) >= 2 {
+		return parts[0]
+	}
+	return ""
+}
+
 // waitVectorReady waits for the vector engine to become ready during bootstrap.
 // Returns true if ready; returns false and writes 503 response if not.
 func waitVectorReady(c *gin.Context) bool {
@@ -400,22 +423,39 @@ func vectorWrite(c *gin.Context, defaultScope string) {
 		FileName      string                 `json:"file_name"`
 		Content       string                 `json:"content"`
 		Scope         string                 `json:"scope"`           // optional: explicit scope override
-		SessionID     int64                  `json:"session_id"`      // optional: auto-resolve team scope
+		SessionID     int64                  `json:"session_id"`      // optional: auto-resolve session/team scope
 		ExtraMetadata map[string]interface{} `json:"extra_metadata"`  // optional: structured memory fields (tags/type/status/version etc.)
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+
+	// Resolve scope with three-layer isolation
 	scope := defaultScope
+	var sessionGroup string // group of the requesting session
+	if req.SessionID > 0 {
+		if sess, err := store.GetSession(req.SessionID); err == nil && sess.GroupName != "" {
+			sessionGroup = sess.GroupName
+		}
+	}
+
 	if req.Scope != "" {
+		// Explicit scope provided
 		if !isValidScope(req.Scope) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid scope"})
 			return
 		}
+		// Cross-team write check: session belongs to groupA but scope targets groupB → 403
+		scopeGroup := extractScopeGroup(req.Scope)
+		if sessionGroup != "" && scopeGroup != "" && sessionGroup != scopeGroup {
+			c.JSON(http.StatusForbidden, gin.H{"error": "cross-team write denied"})
+			return
+		}
 		scope = req.Scope
-	} else if teamScope := resolveTeamScope(req.SessionID, defaultScope); teamScope != "" {
-		scope = teamScope
+	} else if sessionGroup != "" {
+		// No explicit scope + session has group → default to session-level scope
+		scope = sessionGroup + "/sessions/" + strconv.FormatInt(req.SessionID, 10) + "/" + defaultScope
 	}
 	if req.FileName == "" || !validatePath(req.FileName) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "valid file_name is required"})
