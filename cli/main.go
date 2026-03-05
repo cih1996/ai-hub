@@ -90,13 +90,13 @@ func Run(args []string) int {
 	case "search":
 		return commands.RunSearch(c, globalFlags.GroupName, commandArgs)
 	case "write":
-		return runWrite(c, globalFlags, commandArgs)
+		return commands.RunWrite(c, globalFlags.GroupName, commandArgs)
 	case "read":
-		return runRead(c, globalFlags, commandArgs)
+		return commands.RunRead(c, globalFlags.GroupName, commandArgs)
 	case "delete":
-		return runDelete(c, globalFlags, commandArgs)
+		return commands.RunDelete(c, globalFlags.GroupName, commandArgs)
 	case "list":
-		return runList(c, globalFlags, commandArgs)
+		return commands.RunList(c, globalFlags.GroupName, commandArgs)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", command)
 		printHelp()
@@ -125,26 +125,4 @@ Commands:
   list               List knowledge/memory files
 
 Use "ai-hub <command> --help" for more information about a command.`)
-}
-
-// Placeholder command handlers (to be implemented in subsequent issues)
-
-func runWrite(c *client.Client, g *GlobalFlags, args []string) int {
-	fmt.Println("write command not yet implemented (see Issue #123)")
-	return 1
-}
-
-func runRead(c *client.Client, g *GlobalFlags, args []string) int {
-	fmt.Println("read command not yet implemented (see Issue #124)")
-	return 1
-}
-
-func runDelete(c *client.Client, g *GlobalFlags, args []string) int {
-	fmt.Println("delete command not yet implemented (see Issue #125)")
-	return 1
-}
-
-func runList(c *client.Client, g *GlobalFlags, args []string) int {
-	fmt.Println("list command not yet implemented (see Issue #126)")
-	return 1
 }

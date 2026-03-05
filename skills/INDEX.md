@@ -70,6 +70,9 @@
 - `POST /api/v1/vector/write_knowledge` — 写入知识库
 - `POST /api/v1/vector/write_memory` — 写入记忆库
 - `GET /api/v1/vector/list_files` — 列出文件（富文本版）
+- `GET /api/v1/vector/status` — 查询向量引擎状态
+- `GET /api/v1/vector/health` — 轻量健康探针
+- `POST /api/v1/vector/restart` — 重启向量引擎
 
 **重要原则**：
 - 知识库和记忆库的唯一操作入口，禁止通过「文件管理」Skill 操作

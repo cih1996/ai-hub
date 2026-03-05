@@ -19,27 +19,7 @@ type SearchFlags struct {
 
 // RunSearch executes the search command
 func RunSearch(c *client.Client, globalGroup string, args []string) int {
-	// First, extract query (first non-flag argument)
-	var query string
-	var flagArgs []string
-
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if strings.HasPrefix(arg, "-") {
-			// This is a flag, add it and its value
-			flagArgs = append(flagArgs, arg)
-			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-				i++
-				flagArgs = append(flagArgs, args[i])
-			}
-		} else if query == "" {
-			// First non-flag argument is the query
-			query = arg
-		} else {
-			// Additional non-flag arguments are part of query
-			query += " " + arg
-		}
-	}
+	query, flagArgs := SplitQueryAndFlags(args)
 
 	flags := &SearchFlags{}
 	fs := flag.NewFlagSet("search", flag.ExitOnError)
