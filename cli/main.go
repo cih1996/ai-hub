@@ -114,7 +114,7 @@ func Run(args []string) int {
 	case "delete":
 		return commands.RunDelete(c, globalFlags.GroupName, commandArgs)
 	case "list":
-		return commands.RunList(c, globalFlags.GroupName, commandArgs)
+		return commands.RunList(c, globalFlags.GroupName, int64(globalFlags.SessionID), commandArgs)
 	case "mem":
 		return runMem(c, globalFlags.GroupName, commandArgs)
 	default:

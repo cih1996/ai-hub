@@ -678,22 +678,29 @@ type VectorFileItem struct {
 	SourceSessionID int64  `json:"source_session_id"` // session that wrote this file (0 if unknown)
 	UpdatedAt       string `json:"updated_at"`        // RFC3339 mod time
 	Scope           string `json:"scope"`
+	Origin          string `json:"origin"`            // "session" | "team" | "global"
 }
 
-// ListVectorFilesRich lists .md files with preview, type, source_session_id, and updated_at.
-// GET /api/v1/vector/list_files?session_id=<id>&scope=<optional>&list_global=<bool>&type=<memory|knowledge|all>
+// ListVectorFilesRich lists .md files with preview, type, source_session_id, origin, and updated_at.
+// GET /api/v1/vector/list_files?session_id=<id>&scope=<optional>&list_global=<bool>&type=<memory|knowledge|all>&level=<session|team|global|all>
 //
-// Default behaviour:
-//   - Team session:  lists team scope (both knowledge+memory unless type is specified)
-//   - No team:       lists files where source_session_id == current session
-//   - list_global=true: additionally includes global scope files
+// level parameter:
+//   - "session": only session-level files
+//   - "team": only team-level files
+//   - "global": only global files
+//   - "all" (default): all three layers, each tagged with origin
 //
-// Sorting: self (source_session_id == session_id) > team > global; same level by updated_at desc.
+// Sorting: self > session > team > global; same level by updated_at desc.
 func ListVectorFilesRich(c *gin.Context) {
 	sessionIDStr := strings.TrimSpace(c.Query("session_id"))
 	explicitScope := strings.TrimSpace(c.Query("scope"))
 	listGlobal := c.Query("list_global") == "true"
-	typeFilter := strings.TrimSpace(c.Query("type")) // "memory" | "knowledge" | "all" | ""
+	typeFilter := strings.TrimSpace(c.Query("type"))   // "memory" | "knowledge" | "all" | ""
+	levelFilter := strings.TrimSpace(c.Query("level")) // "session" | "team" | "global" | "all" | ""
+
+	if levelFilter == "" {
+		levelFilter = "all"
+	}
 
 	var sessionID int64
 	if sessionIDStr != "" {
@@ -704,7 +711,7 @@ func ListVectorFilesRich(c *gin.Context) {
 
 	type scopeEntry struct {
 		scope  string
-		origin string // "team" | "global"
+		origin string // "session" | "team" | "global"
 	}
 	var scopesToList []scopeEntry
 
@@ -723,19 +730,31 @@ func ListVectorFilesRich(c *gin.Context) {
 			types = []string{"knowledge"}
 		}
 
-		teamScope := ""
+		var groupName string
 		if sessionID > 0 {
 			if sess, err := store.GetSession(sessionID); err == nil && sess.GroupName != "" {
-				teamScope = sess.GroupName
+				groupName = sess.GroupName
 			}
 		}
 
-		if teamScope != "" {
-			for _, t := range types {
-				scopesToList = append(scopesToList, scopeEntry{scope: teamScope + "/" + t, origin: "team"})
+		wantSession := levelFilter == "all" || levelFilter == "session"
+		wantTeam := levelFilter == "all" || levelFilter == "team"
+		wantGlobal := levelFilter == "all" || levelFilter == "global" || listGlobal
+
+		if groupName != "" {
+			if wantSession && sessionID > 0 {
+				sidStr := strconv.FormatInt(sessionID, 10)
+				for _, t := range types {
+					scopesToList = append(scopesToList, scopeEntry{scope: groupName + "/sessions/" + sidStr + "/" + t, origin: "session"})
+				}
+			}
+			if wantTeam {
+				for _, t := range types {
+					scopesToList = append(scopesToList, scopeEntry{scope: groupName + "/" + t, origin: "team"})
+				}
 			}
 		}
-		if listGlobal || teamScope == "" {
+		if wantGlobal || groupName == "" {
 			for _, t := range types {
 				scopesToList = append(scopesToList, scopeEntry{scope: t, origin: "global"})
 			}
@@ -746,10 +765,8 @@ func ListVectorFilesRich(c *gin.Context) {
 
 	for _, se := range scopesToList {
 		// Derive type label from scope suffix
-		scopeType := se.scope
-		if idx := strings.LastIndex(se.scope, "/"); idx >= 0 {
-			scopeType = se.scope[idx+1:]
-		}
+		parts := strings.Split(se.scope, "/")
+		scopeType := parts[len(parts)-1]
 
 		dir := core.ScopeDir(se.scope)
 		entries, err := os.ReadDir(dir)
@@ -806,19 +823,24 @@ func ListVectorFilesRich(c *gin.Context) {
 				SourceSessionID: sourceSessionID,
 				UpdatedAt:       info.ModTime().Format(time.RFC3339),
 				Scope:           se.scope,
+				Origin:          se.origin,
 			})
 		}
 	}
 
-	// Sort: self > team > global; same level by updated_at desc
+	// Sort: self(0) > session(1) > team(2) > global(3); same level by updated_at desc
 	filePriority := func(item VectorFileItem) int {
 		if sessionID > 0 && item.SourceSessionID == sessionID {
 			return 0
 		}
-		if strings.Contains(item.Scope, "/") {
-			return 1 // team scope
+		switch item.Origin {
+		case "session":
+			return 1
+		case "team":
+			return 2
+		default:
+			return 3
 		}
-		return 2
 	}
 	n := len(allItems)
 	for i := 0; i < n-1; i++ {
