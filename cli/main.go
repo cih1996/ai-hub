@@ -3,6 +3,7 @@ package cli
 import (
 	"ai-hub/cli/client"
 	"ai-hub/cli/commands"
+	"ai-hub/cli/mem"
 	"flag"
 	"fmt"
 	"os"
@@ -97,11 +98,62 @@ func Run(args []string) int {
 		return commands.RunDelete(c, globalFlags.GroupName, commandArgs)
 	case "list":
 		return commands.RunList(c, globalFlags.GroupName, commandArgs)
+	case "mem":
+		return runMem(c, globalFlags.GroupName, commandArgs)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", command)
 		printHelp()
 		return 1
 	}
+}
+
+func runMem(c *client.Client, group string, args []string) int {
+	if len(args) == 0 {
+		printMemHelp()
+		return 0
+	}
+	subCmd := args[0]
+	subArgs := args[1:]
+
+	switch subCmd {
+	case "add":
+		return mem.RunAdd(c, group, subArgs)
+	case "retrieve":
+		return mem.RunRetrieve(c, group, subArgs)
+	case "feedback":
+		return mem.RunFeedback(c, group, subArgs)
+	case "revise":
+		return mem.RunRevise(c, group, subArgs)
+	case "deprecate":
+		return mem.RunDeprecate(c, group, subArgs)
+	case "spec":
+		return mem.RunSpec(subArgs)
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown mem subcommand: %s\n", subCmd)
+		printMemHelp()
+		return 1
+	}
+}
+
+func printMemHelp() {
+	fmt.Println(`AI Hub Memory Runtime - Structured memory management
+
+Usage:
+  ai-hub mem <subcommand> [args]
+
+Subcommands:
+  add          Write a new structured memory record
+  retrieve     Search memories with semantic + statistical reranking
+  feedback     Report success/fail for a memory record
+  revise       Create a new version of an existing memory
+  deprecate    Mark a memory as deprecated
+  spec         Output JSON Schema for a subcommand
+
+Examples:
+  echo '{"type":"procedure","title":"Deploy SOP",...}' | ai-hub mem add
+  ai-hub mem retrieve --query "deploy" --types procedure
+  ai-hub mem feedback --id mem_20260305_0001 --result success
+  ai-hub mem spec add`)
 }
 
 func printHelp() {
@@ -123,6 +175,7 @@ Commands:
   read               Read knowledge/memory file
   delete             Delete knowledge/memory file
   list               List knowledge/memory files
+  mem                Structured memory management (add/retrieve/feedback/revise/deprecate/spec)
 
 Use "ai-hub <command> --help" for more information about a command.`)
 }
