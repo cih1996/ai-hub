@@ -202,8 +202,9 @@ func enrichResult(r map[string]interface{}, scopeType, origin string) map[string
 	return out
 }
 
-// sortPriority returns 0 (self) / 1 (team) / 2 (global) for sorting.
+// sortPriority returns 0 (self) / 1 (session scope) / 2 (team) / 3 (global) for sorting.
 func sortPriority(r map[string]interface{}, sessionID int64) int {
+	origin, _ := r["_origin"].(string)
 	if sessionID > 0 {
 		if sid, ok := r["source_session_id"]; ok {
 			var sidInt int64
@@ -220,10 +221,14 @@ func sortPriority(r map[string]interface{}, sessionID int64) int {
 			}
 		}
 	}
-	if origin, ok := r["_origin"].(string); ok && origin == "team" {
+	switch origin {
+	case "session":
 		return 1
+	case "team":
+		return 2
+	default:
+		return 3 // global
 	}
-	return 2 // global
 }
 
 func vectorSearch(c *gin.Context, defaultScope string) {
@@ -276,28 +281,52 @@ func vectorSearch(c *gin.Context, defaultScope string) {
 		return
 	}
 
-	// Auto-resolve: if session has group_name, search team scope first then global, merge & sort
-	if teamScope := resolveTeamScope(req.SessionID, defaultScope); teamScope != "" {
+	// Auto-resolve: three-layer merge (session → team → global)
+	var sessionGroup string
+	if req.SessionID > 0 {
+		if sess, err := store.GetSession(req.SessionID); err == nil && sess.GroupName != "" {
+			sessionGroup = sess.GroupName
+		}
+	}
+
+	if sessionGroup != "" {
 		var merged []map[string]interface{}
 		seen := make(map[string]bool)
 
-		// 1. Search team scope
-		teamResults, err := core.Vector.Search(teamScope, req.Query, req.TopK)
+		// 1. Search session scope
+		sessionScope := sessionGroup + "/sessions/" + strconv.FormatInt(req.SessionID, 10) + "/" + defaultScope
+		sessionResults, err := core.Vector.Search(sessionScope, req.Query, req.TopK)
 		if err != nil {
-			log.Printf("[vector] team search error (scope=%s): %v", teamScope, err)
+			log.Printf("[vector] session search error (scope=%s): %v", sessionScope, err)
 		} else {
-			for _, r := range teamResults {
-				e := enrichResult(r, scopeType, "team")
+			for _, r := range sessionResults {
+				e := enrichResult(r, scopeType, "session")
 				id, _ := e["id"].(string)
 				seen[id] = true
 				merged = append(merged, e)
 			}
 		}
 
-		// 2. Search global scope
-		globalResults, err2 := core.Vector.Search(defaultScope, req.Query, req.TopK)
+		// 2. Search team scope
+		teamScope := sessionGroup + "/" + defaultScope
+		teamResults, err2 := core.Vector.Search(teamScope, req.Query, req.TopK)
 		if err2 != nil {
-			log.Printf("[vector] global search error (scope=%s): %v", defaultScope, err2)
+			log.Printf("[vector] team search error (scope=%s): %v", teamScope, err2)
+		} else {
+			for _, r := range teamResults {
+				id, _ := r["id"].(string)
+				if !seen[id] {
+					e := enrichResult(r, scopeType, "team")
+					seen[id] = true
+					merged = append(merged, e)
+				}
+			}
+		}
+
+		// 3. Search global scope
+		globalResults, err3 := core.Vector.Search(defaultScope, req.Query, req.TopK)
+		if err3 != nil {
+			log.Printf("[vector] global search error (scope=%s): %v", defaultScope, err3)
 		} else {
 			for _, r := range globalResults {
 				id, _ := r["id"].(string)
@@ -308,7 +337,7 @@ func vectorSearch(c *gin.Context, defaultScope string) {
 			}
 		}
 
-		// Sort: self(0) > team(1) > global(2), same priority keeps search similarity order
+		// Sort: self(0) > session(1) > team(2) > global(3)
 		sortResults(merged, req.SessionID)
 
 		// Remove internal _origin field
