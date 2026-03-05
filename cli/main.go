@@ -4,7 +4,6 @@ import (
 	"ai-hub/cli/client"
 	"ai-hub/cli/commands"
 	"ai-hub/cli/mem"
-	"flag"
 	"fmt"
 	"os"
 	"strconv"
@@ -25,17 +24,35 @@ type GlobalFlags struct {
 
 // ParseGlobalFlags parses global flags from args
 func ParseGlobalFlags(args []string) (*GlobalFlags, []string, error) {
-	flags := &GlobalFlags{}
-	fs := flag.NewFlagSet("ai-hub", flag.ContinueOnError)
+	flags := &GlobalFlags{Port: 8080}
 
-	fs.IntVar(&flags.SessionID, "session", 0, "Session ID (env: AI_HUB_SESSION_ID)")
-	fs.StringVar(&flags.GroupName, "group", "", "Group name (env: AI_HUB_GROUP_NAME)")
-	fs.IntVar(&flags.Port, "port", 8080, "Server port (env: AI_HUB_PORT)")
-	fs.BoolVar(&flags.Help, "help", false, "Show help")
-	fs.BoolVar(&flags.Version, "version", false, "Show version")
-
-	if err := fs.Parse(args); err != nil {
-		return nil, nil, err
+	// Manual parsing: extract global flags from anywhere in args, leave the rest as remaining.
+	// This allows: ai-hub mem add --port 8081  (not just: ai-hub --port 8081 mem add)
+	var remaining []string
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--session":
+			if i+1 < len(args) {
+				i++
+				fmt.Sscanf(args[i], "%d", &flags.SessionID)
+			}
+		case "--group":
+			if i+1 < len(args) {
+				i++
+				flags.GroupName = args[i]
+			}
+		case "--port":
+			if i+1 < len(args) {
+				i++
+				fmt.Sscanf(args[i], "%d", &flags.Port)
+			}
+		case "--help":
+			flags.Help = true
+		case "--version":
+			flags.Version = true
+		default:
+			remaining = append(remaining, args[i])
+		}
 	}
 
 	// Environment variable fallback
@@ -57,7 +74,7 @@ func ParseGlobalFlags(args []string) (*GlobalFlags, []string, error) {
 		}
 	}
 
-	return flags, fs.Args(), nil
+	return flags, remaining, nil
 }
 
 // Run is the CLI entry point
