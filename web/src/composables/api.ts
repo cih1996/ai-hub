@@ -233,13 +233,19 @@ export interface VectorFileRich {
   preview: string
   type: string
   source_session_id: number
+  created_at: string  // RFC3339
   updated_at: string  // RFC3339
   scope: string
+  origin: string      // "session" | "team" | "global"
 }
 
 // List .md files with metadata (source_session_id, updated_at) sorted by mod time desc
-export const listVectorFilesRich = (scope: string) =>
-  request<{ files: VectorFileRich[]; total: number }>(`/vector/list_files?scope=${encodeURIComponent(scope)}`)
+export const listVectorFilesRich = (scope: string, opts?: { session_id?: number; level?: string }) => {
+  const params = new URLSearchParams({ scope })
+  if (opts?.session_id) params.set('session_id', String(opts.session_id))
+  if (opts?.level) params.set('level', opts.level)
+  return request<{ files: VectorFileRich[]; total: number }>(`/vector/list_files?${params}`)
+}
 
 // Read a single file from any valid scope
 export const readVectorFile = (scope: string, fileName: string) =>

@@ -85,6 +85,19 @@ const sessionRulesContent = ref('')
 const sessionRulesSaving = ref(false)
 const sessionRulesLoading = ref(false)
 
+// Memory modal state
+const showMemoryModal = ref(false)
+const memoryLoading = ref(false)
+const memoryFiles = ref<api.VectorFileRich[]>([])
+const memoryLevelFilter = ref<'all' | 'session' | 'team' | 'global'>('all')
+const memorySelectedFile = ref<api.VectorFileRich | null>(null)
+const memoryFileContent = ref('')
+const memoryFileLoading = ref(false)
+const memoryFileSaving = ref(false)
+const memoryEditing = ref(false)
+const memoryCreating = ref(false)
+const memoryNewFileName = ref('')
+
 // Raw request modal state
 const showRawRequestModal = ref(false)
 const rawRequestLoading = ref(false)
@@ -527,6 +540,126 @@ async function deleteSessionRules() {
   sessionRulesContent.value = ''
 }
 
+// Memory functions
+const filteredMemoryFiles = computed(() => {
+  if (memoryLevelFilter.value === 'all') return memoryFiles.value
+  return memoryFiles.value.filter(f => f.origin === memoryLevelFilter.value)
+})
+
+async function openMemoryModal() {
+  const sid = store.currentSession?.id
+  if (!sid) return
+  showMemoryModal.value = true
+  memorySelectedFile.value = null
+  memoryFileContent.value = ''
+  memoryEditing.value = false
+  memoryCreating.value = false
+  await loadMemoryFiles()
+}
+
+async function loadMemoryFiles() {
+  const sid = store.currentSession?.id
+  if (!sid) return
+  memoryLoading.value = true
+  try {
+    const res = await api.listVectorFilesRich('', { session_id: sid, level: 'all' })
+    memoryFiles.value = res.files || []
+  } catch {
+    memoryFiles.value = []
+  } finally {
+    memoryLoading.value = false
+  }
+}
+
+async function selectMemoryFile(file: api.VectorFileRich) {
+  memorySelectedFile.value = file
+  memoryEditing.value = false
+  memoryCreating.value = false
+  memoryFileLoading.value = true
+  try {
+    const res = await api.readVectorFile(file.scope, file.file_name)
+    memoryFileContent.value = res.content || ''
+  } catch {
+    memoryFileContent.value = ''
+  } finally {
+    memoryFileLoading.value = false
+  }
+}
+
+async function saveMemoryFile() {
+  if (!memorySelectedFile.value) return
+  memoryFileSaving.value = true
+  try {
+    await api.writeVectorFile(memorySelectedFile.value.scope, memorySelectedFile.value.file_name, memoryFileContent.value)
+    showToast('保存成功')
+    memoryEditing.value = false
+    await loadMemoryFiles()
+  } catch (e: any) {
+    showToast('保存失败: ' + (e.message || '未知错误'), 'error')
+  } finally {
+    memoryFileSaving.value = false
+  }
+}
+
+async function deleteMemoryFile() {
+  if (!memorySelectedFile.value) return
+  if (!confirm(`确定删除「${memorySelectedFile.value.file_name}」？`)) return
+  try {
+    await api.deleteVectorFile(memorySelectedFile.value.scope, memorySelectedFile.value.file_name)
+    showToast('已删除')
+    memorySelectedFile.value = null
+    memoryFileContent.value = ''
+    await loadMemoryFiles()
+  } catch (e: any) {
+    showToast('删除失败: ' + (e.message || '未知错误'), 'error')
+  }
+}
+
+function startCreateMemory() {
+  memoryCreating.value = true
+  memoryEditing.value = false
+  memorySelectedFile.value = null
+  memoryNewFileName.value = ''
+  memoryFileContent.value = ''
+}
+
+async function createMemoryFile() {
+  const sid = store.currentSession?.id
+  if (!sid || !memoryNewFileName.value.trim()) return
+  let fileName = memoryNewFileName.value.trim()
+  if (!fileName.endsWith('.md')) fileName += '.md'
+  // Determine scope: use session-level scope
+  const sess = store.currentSession
+  const groupName = sess?.group_name
+  let scope = 'memory'
+  if (groupName) {
+    scope = `${groupName}/sessions/${sid}/memory`
+  }
+  memoryFileSaving.value = true
+  try {
+    await api.writeVectorFile(scope, fileName, memoryFileContent.value)
+    showToast('创建成功')
+    memoryCreating.value = false
+    await loadMemoryFiles()
+    // Select the newly created file
+    const newFile = memoryFiles.value.find(f => f.file_name === fileName && f.scope === scope)
+    if (newFile) selectMemoryFile(newFile)
+  } catch (e: any) {
+    showToast('创建失败: ' + (e.message || '未知错误'), 'error')
+  } finally {
+    memoryFileSaving.value = false
+  }
+}
+
+function memoryOriginLabel(origin: string): string {
+  switch (origin) {
+    case 'session': return '会话'
+    case 'team': return '团队'
+    case 'global': return '全局'
+    default: return origin
+  }
+}
+
 function formatToolInput(raw: string): string {
   if (!raw) return ''
   try {
@@ -652,6 +785,17 @@ function formatToolInput(raw: string): string {
           </svg>
           角色
         </button>
+        <button
+          class="btn-rules"
+          @click="openMemoryModal"
+          title="记忆库"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/>
+            <path d="M12 6v6l4 2"/>
+          </svg>
+          记忆
+        </button>
       </div>
       <!-- Mobile: more menu -->
       <div v-if="isMobile" class="header-right-mobile">
@@ -668,6 +812,7 @@ function formatToolInput(raw: string): string {
           <div v-if="moreMenuOpen" class="more-menu" @click="moreMenuOpen = false">
             <button @click="store.compressContext()" :disabled="store.streaming">压缩上下文</button>
             <button @click="openSessionRulesModal">会话角色</button>
+            <button @click="openMemoryModal">记忆库</button>
             <div class="more-menu-divider"></div>
             <div class="more-menu-label">切换模型</div>
             <button
@@ -952,6 +1097,102 @@ function formatToolInput(raw: string): string {
                 </button>
               </div>
             </template>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Memory modal -->
+    <Teleport to="body">
+      <div v-if="showMemoryModal" class="modal-overlay" @click="showMemoryModal = false">
+        <div class="memory-modal" @click.stop>
+          <div class="rules-modal-header">
+            <span class="rules-modal-title">记忆库</span>
+            <span class="rules-modal-dir">会话 #{{ store.currentSession?.id }}</span>
+            <button class="rules-modal-close" @click="showMemoryModal = false">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 6L6 18M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+          <div class="memory-body">
+            <!-- Left: file list -->
+            <div class="memory-sidebar">
+              <div class="memory-filter-bar">
+                <button
+                  v-for="lv in (['all', 'session', 'team', 'global'] as const)"
+                  :key="lv"
+                  :class="['memory-filter-btn', { active: memoryLevelFilter === lv }]"
+                  @click="memoryLevelFilter = lv"
+                >{{ lv === 'all' ? '全部' : memoryOriginLabel(lv) }}</button>
+                <button class="memory-add-btn" @click="startCreateMemory" title="新建记忆">+</button>
+              </div>
+              <div v-if="memoryLoading" class="rules-empty">加载中...</div>
+              <div v-else-if="filteredMemoryFiles.length === 0" class="rules-empty">暂无记忆文件</div>
+              <div v-else class="memory-file-list">
+                <div
+                  v-for="f in filteredMemoryFiles"
+                  :key="f.scope + '/' + f.file_name"
+                  :class="['memory-file-item', { active: memorySelectedFile?.file_name === f.file_name && memorySelectedFile?.scope === f.scope }]"
+                  @click="selectMemoryFile(f)"
+                >
+                  <div class="memory-file-name">{{ f.file_name }}</div>
+                  <div class="memory-file-meta">
+                    <span :class="'memory-origin memory-origin-' + f.origin">{{ memoryOriginLabel(f.origin) }}</span>
+                    <span class="memory-file-time">{{ f.updated_at ? new Date(f.updated_at).toLocaleDateString() : '' }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <!-- Right: content -->
+            <div class="memory-content">
+              <template v-if="memoryCreating">
+                <div class="memory-create-header">
+                  <input
+                    v-model="memoryNewFileName"
+                    class="memory-filename-input"
+                    placeholder="文件名（如：工作总结.md）"
+                  />
+                </div>
+                <textarea
+                  v-model="memoryFileContent"
+                  class="rules-textarea memory-textarea"
+                  placeholder="输入记忆内容..."
+                />
+                <div class="rules-editor-actions memory-actions">
+                  <button class="btn-delete-rule" @click="memoryCreating = false">取消</button>
+                  <button
+                    class="btn-save-rule"
+                    :disabled="!memoryNewFileName.trim() || memoryFileSaving"
+                    @click="createMemoryFile"
+                  >{{ memoryFileSaving ? '创建中...' : '创建' }}</button>
+                </div>
+              </template>
+              <template v-else-if="memorySelectedFile">
+                <div v-if="memoryFileLoading" class="rules-empty">加载中...</div>
+                <template v-else>
+                  <textarea
+                    v-model="memoryFileContent"
+                    class="rules-textarea memory-textarea"
+                    :readonly="!memoryEditing"
+                    :placeholder="memoryEditing ? '编辑记忆内容...' : ''"
+                  />
+                  <div class="rules-editor-actions memory-actions">
+                    <button class="btn-delete-rule" @click="deleteMemoryFile">删除</button>
+                    <template v-if="memoryEditing">
+                      <button class="btn-delete-rule" @click="memoryEditing = false; selectMemoryFile(memorySelectedFile!)">取消</button>
+                      <button
+                        class="btn-save-rule"
+                        :disabled="memoryFileSaving"
+                        @click="saveMemoryFile"
+                      >{{ memoryFileSaving ? '保存中...' : '保存' }}</button>
+                    </template>
+                    <button v-else class="btn-save-rule" @click="memoryEditing = true">编辑</button>
+                  </div>
+                </template>
+              </template>
+              <div v-else class="rules-empty">← 选择一个记忆文件查看</div>
+            </div>
           </div>
         </div>
       </div>
@@ -1748,6 +1989,96 @@ function formatToolInput(raw: string): string {
 }
 .btn-delete-rule:hover:not(:disabled) { opacity: 0.8; }
 .btn-delete-rule:disabled { opacity: 0.4; cursor: not-allowed; }
+/* Memory modal */
+.memory-modal {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  width: 900px; max-width: 95vw;
+  max-height: 80vh;
+  display: flex; flex-direction: column;
+}
+.memory-body {
+  display: flex; flex: 1; min-height: 0; overflow: hidden;
+}
+.memory-sidebar {
+  width: 260px; min-width: 200px;
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column;
+}
+.memory-filter-bar {
+  display: flex; gap: 4px; padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap; align-items: center;
+}
+.memory-filter-btn {
+  padding: 3px 10px; border-radius: 12px;
+  font-size: 11px; font-weight: 500;
+  background: var(--bg-tertiary); color: var(--text-secondary);
+  transition: all var(--transition);
+}
+.memory-filter-btn.active {
+  background: var(--accent); color: var(--btn-text);
+}
+.memory-add-btn {
+  margin-left: auto; width: 24px; height: 24px;
+  border-radius: 50%; font-size: 16px; font-weight: 600;
+  background: var(--accent); color: var(--btn-text);
+  display: flex; align-items: center; justify-content: center;
+  line-height: 1;
+}
+.memory-file-list {
+  flex: 1; overflow-y: auto; padding: 4px 0;
+}
+.memory-file-item {
+  padding: 8px 12px; cursor: pointer;
+  border-bottom: 1px solid var(--border-light, rgba(128,128,128,0.08));
+  transition: background var(--transition);
+}
+.memory-file-item:hover { background: var(--bg-hover); }
+.memory-file-item.active { background: var(--accent-soft); }
+.memory-file-name {
+  font-size: 12px; font-weight: 500; color: var(--text-primary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.memory-file-meta {
+  display: flex; align-items: center; gap: 6px; margin-top: 3px;
+}
+.memory-origin {
+  font-size: 10px; padding: 1px 6px; border-radius: 8px; font-weight: 500;
+}
+.memory-origin-session { background: rgba(59,130,246,0.15); color: #3b82f6; }
+.memory-origin-team { background: rgba(168,85,247,0.15); color: #a855f7; }
+.memory-origin-global { background: rgba(34,197,94,0.15); color: #22c55e; }
+.memory-file-time {
+  font-size: 10px; color: var(--text-muted);
+}
+.memory-content {
+  flex: 1; display: flex; flex-direction: column; min-width: 0;
+}
+.memory-textarea {
+  min-height: 200px;
+}
+.memory-textarea[readonly] {
+  cursor: default; opacity: 0.85;
+}
+.memory-actions {
+  gap: 8px;
+}
+.memory-create-header {
+  padding: 10px 16px; border-bottom: 1px solid var(--border);
+}
+.memory-filename-input {
+  width: 100%; padding: 6px 10px;
+  font-size: 13px; border-radius: var(--radius);
+  background: var(--bg-tertiary); color: var(--text-primary);
+  border: 1px solid var(--border);
+}
+@media (max-width: 640px) {
+  .memory-modal { width: 98vw; max-height: 90vh; }
+  .memory-sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--border); max-height: 40vh; }
+  .memory-body { flex-direction: column; }
+}
 /* Toast */
 .toast {
   position: fixed;
