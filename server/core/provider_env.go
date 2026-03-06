@@ -2,6 +2,8 @@ package core
 
 import (
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -92,4 +94,21 @@ func applyProviderProxyEnv(env []string, proxyURL string) []string {
 	env = upsertEnv(env, "NO_PROXY", merged)
 	env = upsertEnv(env, "no_proxy", merged)
 	return env
+}
+
+// injectCLIPath prepends ~/.ai-hub/bin to PATH so Claude subprocesses
+// can execute `ai-hub` CLI commands directly.
+func injectCLIPath(env []string) []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return env
+	}
+	binDir := filepath.Join(home, ".ai-hub", "bin")
+	for i, e := range env {
+		if strings.HasPrefix(e, "PATH=") {
+			env[i] = "PATH=" + binDir + ":" + e[5:]
+			return env
+		}
+	}
+	return append(env, "PATH="+binDir)
 }
