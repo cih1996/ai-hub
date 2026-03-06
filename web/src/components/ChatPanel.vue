@@ -392,7 +392,30 @@ function scrollToBottom() {
   })
 }
 
-watch(() => allMessages.value.length, scrollToBottom)
+// Scroll-to-top detection for loading more messages
+function onMessagesScroll() {
+  if (!messagesEl.value || !store.hasMoreMessages || store.loadingMore) return
+  if (messagesEl.value.scrollTop < 80) {
+    loadMore()
+  }
+}
+
+async function loadMore() {
+  if (!messagesEl.value) return
+  const el = messagesEl.value
+  const prevScrollHeight = el.scrollHeight
+  await store.loadMoreMessages()
+  // Preserve scroll position: after prepending, restore relative position
+  nextTick(() => {
+    const newScrollHeight = el.scrollHeight
+    el.scrollTop = newScrollHeight - prevScrollHeight
+  })
+}
+
+watch(() => allMessages.value.length, (newLen, oldLen) => {
+  // Only auto-scroll when new messages are appended (not prepended via loadMore)
+  if (!store.loadingMore && newLen > oldLen) scrollToBottom()
+})
 watch(() => store.streamingContent, scrollToBottom)
 watch(() => store.thinkingContent, scrollToBottom)
 watch(() => store.toolCalls.length, scrollToBottom)
@@ -659,9 +682,14 @@ function formatToolInput(raw: string): string {
       </div>
     </div>
 
-    <div class="messages" ref="messagesEl">
+    <div class="messages" ref="messagesEl" @scroll="onMessagesScroll">
       <!-- __CONTINUE_HERE__ -->
       <div class="messages-inner">
+        <!-- Load more indicator -->
+        <div v-if="store.hasMoreMessages" class="load-more-hint" @click="loadMore">
+          <span v-if="store.loadingMore" class="load-more-spinner"></span>
+          <span v-else>↑ 加载更早的消息</span>
+        </div>
         <!-- Quick action cards for empty chat -->
         <div v-if="allMessages.length === 0 && !store.streaming" class="quick-actions">
           <div class="quick-actions-title">快捷操作</div>
@@ -1435,6 +1463,29 @@ function formatToolInput(raw: string): string {
   max-width: 720px;
   margin: 0 auto;
   padding: 0 24px;
+}
+.load-more-hint {
+  text-align: center;
+  padding: 12px 0;
+  color: var(--text-secondary, #888);
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+}
+.load-more-hint:hover {
+  color: var(--text-primary, #333);
+}
+.load-more-spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--text-secondary, #888);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 .message {
   display: flex;

@@ -16,6 +16,8 @@ export const useChatStore = defineStore('chat', () => {
   const tokenUsageMap = ref<Record<number, TokenUsage>>({})
   const latestTokenUsage = ref<TokenUsage | null>(null)
   const sessionTokenTotals = ref<Record<number, number>>() // session_id -> total tokens
+  const hasMoreMessages = ref(false)
+  const loadingMore = ref(false)
   const ws = ref<WebSocket | null>(null)
   const wsConnected = ref(false)
   let wsReconnectDelay = 1000 // exponential backoff: 1s → 2s → 4s → ... → 30s
@@ -135,8 +137,9 @@ export const useChatStore = defineStore('chat', () => {
             streamingContent.value = ''
             thinkingContent.value = ''
             toolCalls.value = []
-            api.getMessages(msg.session_id).then((msgs) => {
-              messages.value = msgs
+            api.getMessagesPaginated(msg.session_id, 50).then((resp) => {
+              messages.value = resp.messages
+              hasMoreMessages.value = resp.has_more
             })
           }
         }
@@ -367,9 +370,11 @@ export const useChatStore = defineStore('chat', () => {
     // before subscribe so the replay lands on a clean slate.
     _suppressChunksFor = id
 
-    // Try to load messages for this session
+    // Try to load messages for this session (paginated: latest 50)
     try {
-      messages.value = await api.getMessages(id)
+      const resp = await api.getMessagesPaginated(id, 50)
+      messages.value = resp.messages
+      hasMoreMessages.value = resp.has_more
       // If successful, update workDir from sessions list (if available)
       const s = sessions.value.find((s) => s.id === id)
       workDir.value = s?.work_dir || ''
@@ -415,9 +420,27 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  async function loadMoreMessages() {
+    if (!hasMoreMessages.value || loadingMore.value || currentSessionId.value <= 0) return
+    loadingMore.value = true
+    try {
+      const oldestId = messages.value.length > 0 ? messages.value[0]!.id : 0
+      const resp = await api.getMessagesPaginated(currentSessionId.value, 50, oldestId)
+      if (resp.messages.length > 0) {
+        messages.value = [...resp.messages, ...messages.value]
+      }
+      hasMoreMessages.value = resp.has_more
+    } catch (e) {
+      console.error('Failed to load more messages:', e)
+    } finally {
+      loadingMore.value = false
+    }
+  }
+
   function newChat(providerId?: string, groupName?: string) {
     currentSessionId.value = 0
     messages.value = []
+    hasMoreMessages.value = false
     streaming.value = false
     streamingContent.value = ''
     thinkingContent.value = ''
@@ -555,6 +578,9 @@ export const useChatStore = defineStore('chat', () => {
     loadProviders,
     loadSessions,
     selectSession,
+    loadMoreMessages,
+    hasMoreMessages,
+    loadingMore,
     newChat,
     deleteSessionById,
     sendMessage,

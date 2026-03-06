@@ -116,6 +116,68 @@ func GetMessages(sessionID int64) ([]model.Message, error) {
 	return list, nil
 }
 
+// GetMessagesPaginated returns messages for a session with cursor-based pagination.
+// beforeID > 0: return messages with id < beforeID (older messages).
+// limit <= 0: defaults to 50.
+// Results are ordered by id ASC (oldest first) so the frontend can prepend them.
+func GetMessagesPaginated(sessionID int64, beforeID int64, limit int) ([]model.Message, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	var rows interface{ Next() bool; Scan(...interface{}) error; Close() error; Err() error }
+	var err error
+	if beforeID > 0 {
+		// Subquery: get the last `limit` rows before beforeID, then re-order ASC
+		rows2, err2 := DB.Query(
+			`SELECT id, session_id, role, content, metadata, created_at FROM (
+				SELECT id, session_id, role, content, metadata, created_at FROM messages
+				WHERE session_id = ? AND id < ? ORDER BY id DESC LIMIT ?
+			) sub ORDER BY id ASC`,
+			sessionID, beforeID, limit,
+		)
+		rows = rows2
+		err = err2
+	} else {
+		// No cursor: get the latest `limit` messages
+		rows2, err2 := DB.Query(
+			`SELECT id, session_id, role, content, metadata, created_at FROM (
+				SELECT id, session_id, role, content, metadata, created_at FROM messages
+				WHERE session_id = ? ORDER BY id DESC LIMIT ?
+			) sub ORDER BY id ASC`,
+			sessionID, limit,
+		)
+		rows = rows2
+		err = err2
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var list []model.Message
+	for rows.Next() {
+		var m model.Message
+		if err := rows.Scan(&m.ID, &m.SessionID, &m.Role, &m.Content, &m.Metadata, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		list = append(list, m)
+	}
+	return list, nil
+}
+
+// GetMessagesCount returns the total number of messages in a session.
+func GetMessagesCount(sessionID int64) (int64, error) {
+	var count int64
+	err := DB.QueryRow(`SELECT COUNT(*) FROM messages WHERE session_id = ?`, sessionID).Scan(&count)
+	return count, err
+}
+
+// GetMessagesCountBefore returns the number of messages with id < beforeID.
+func GetMessagesCountBefore(sessionID int64, beforeID int64) (int64, error) {
+	var count int64
+	err := DB.QueryRow(`SELECT COUNT(*) FROM messages WHERE session_id = ? AND id < ?`, sessionID, beforeID).Scan(&count)
+	return count, err
+}
+
 func CreateSessionWithMessage(providerID string, content string, workDir string, groupName string) (*model.Session, error) {
 	s := &model.Session{
 		Title:      truncateTitle(content),

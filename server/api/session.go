@@ -133,6 +133,52 @@ func GetMessages(c *gin.Context) {
 		return
 	}
 
+	// Check for pagination parameters
+	limitStr := c.Query("limit")
+	beforeIDStr := c.Query("before_id")
+
+	if limitStr != "" || beforeIDStr != "" {
+		// Paginated mode
+		limit := 50
+		if limitStr != "" {
+			if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+				limit = l
+			}
+		}
+		var beforeID int64
+		if beforeIDStr != "" {
+			if bid, err := strconv.ParseInt(beforeIDStr, 10, 64); err == nil && bid > 0 {
+				beforeID = bid
+			}
+		}
+
+		msgs, err := store.GetMessagesPaginated(id, beforeID, limit)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if msgs == nil {
+			msgs = []model.Message{}
+		}
+
+		// Determine has_more: if we got `limit` messages and the oldest one is not the first message
+		hasMore := false
+		if len(msgs) >= limit && len(msgs) > 0 {
+			// Check if there are messages before the oldest returned
+			oldestID := msgs[0].ID
+			var countBefore int64
+			countBefore, _ = store.GetMessagesCountBefore(id, oldestID)
+			hasMore = countBefore > 0
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"messages": msgs,
+			"has_more": hasMore,
+		})
+		return
+	}
+
+	// Legacy mode: return all messages (backward compatible)
 	msgs, err := store.GetMessages(id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

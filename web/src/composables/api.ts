@@ -43,6 +43,15 @@ export const deleteSession = (id: number) =>
 export const getMessages = (sessionId: number) =>
   request<Message[]>(`/sessions/${sessionId}/messages`)
 
+// Paginated messages: returns { messages, has_more }
+export const getMessagesPaginated = (sessionId: number, limit = 50, beforeId?: number) => {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (beforeId && beforeId > 0) params.set('before_id', String(beforeId))
+  return request<{ messages: Message[]; has_more: boolean }>(
+    `/sessions/${sessionId}/messages?${params.toString()}`
+  )
+}
+
 // Compress session context
 export const compressSession = (id: number) =>
   request<{ ok: boolean }>(`/sessions/${id}/compress`, { method: 'POST' })
