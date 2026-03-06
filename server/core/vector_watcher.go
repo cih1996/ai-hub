@@ -92,9 +92,7 @@ func (w *VectorWatcher) Stop() {
 }
 
 func (w *VectorWatcher) loop() {
-	// Initial full sync
-	w.fullSync()
-
+	synced := false
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -104,6 +102,10 @@ func (w *VectorWatcher) loop() {
 		case <-ticker.C:
 			if Vector == nil || !Vector.IsReady() {
 				continue
+			}
+			if !synced {
+				w.fullSync()
+				synced = true
 			}
 			w.poll()
 		}
