@@ -199,7 +199,9 @@ func (v *VectorEngine) ensureVenv(pyPath string) error {
 func (v *VectorEngine) installDeps() error {
 	reqFile := filepath.Join(v.scriptDir, "requirements.txt")
 	pip := venvBinPath(v.venvDir, "pip")
-	cmd := exec.Command(pip, "install", "-q", "-r", reqFile)
+	cmd := exec.Command(pip, "install", "-q", "-r", reqFile,
+		"-i", "https://mirrors.aliyun.com/pypi/simple/",
+		"--trusted-host", "mirrors.aliyun.com")
 	cmd.Env = append(os.Environ(), "VIRTUAL_ENV="+v.venvDir)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("%s: %s", err, strings.TrimSpace(string(out)))

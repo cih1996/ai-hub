@@ -125,19 +125,18 @@ def get_doc(req: GetDocRequest):
 def health():
     return {
         "status": "ok",
-        "knowledge_count": knowledge_db.collection.count(),
         "memory_count": memory_db.collection.count(),
     }
 
 
 @app.get("/stats")
-def stats(scope: str = "knowledge"):
+def stats(scope: str = "memory"):
     db = _get_db(scope)
     return db.stats()
 
 
 @app.get("/list_metadata")
-def list_metadata(scope: str = "knowledge"):
+def list_metadata(scope: str = "memory"):
     """Return all records with full metadata for the given scope."""
     db = _get_db(scope)
     return db.list_metadata()
