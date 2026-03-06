@@ -275,6 +275,8 @@ func (p *ProcessPool) spawnProcess(req ClaudeCodeRequest, isResume bool) (*Persi
 	if port := GetPort(); port != "" {
 		cmd.Env = append(cmd.Env, "AI_HUB_PORT="+port)
 	}
+	// Inject ~/.ai-hub/bin into PATH so subprocess can use `ai-hub` CLI
+	cmd.Env = injectCLIPath(cmd.Env)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

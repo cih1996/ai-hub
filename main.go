@@ -116,6 +116,9 @@ func main() {
 	// Install default rules (skip if already exists)
 	installClaudeRules(*dataDir)
 
+	// Create symlink: ~/.ai-hub/bin/ai-hub → self binary (for CLI in Claude subprocess)
+	installCLISymlink(*dataDir)
+
 	// No longer render templates to ~/.claude/ — system prompt is built on-the-fly
 
 	// Clean up legacy ~/.claude/rules/ and ~/.claude/skills/ (migrated to ~/.ai-hub/ since v1.17.0)
@@ -522,4 +525,32 @@ func installClaudeRules(dataDir string) {
 		return nil
 	})
 	log.Printf("[rules] done, installed/updated %d template(s)", count)
+}
+
+// installCLISymlink creates a symlink ~/.ai-hub/bin/ai-hub → current binary.
+// This allows Claude subprocesses (with PATH injection) to use `ai-hub` CLI commands.
+// The symlink is recreated on every startup so it always points to the current version.
+func installCLISymlink(dataDir string) {
+	binDir := filepath.Join(dataDir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		log.Printf("[cli-symlink] mkdir error: %v", err)
+		return
+	}
+	selfPath, err := os.Executable()
+	if err != nil {
+		log.Printf("[cli-symlink] cannot resolve self path: %v", err)
+		return
+	}
+	selfPath, err = filepath.EvalSymlinks(selfPath)
+	if err != nil {
+		log.Printf("[cli-symlink] cannot eval symlinks: %v", err)
+		return
+	}
+	link := filepath.Join(binDir, "ai-hub")
+	os.Remove(link)
+	if err := os.Symlink(selfPath, link); err != nil {
+		log.Printf("[cli-symlink] symlink error: %v", err)
+		return
+	}
+	log.Printf("[cli-symlink] %s → %s", link, selfPath)
 }

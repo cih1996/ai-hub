@@ -140,6 +140,8 @@ func (c *ClaudeCodeClient) Stream(ctx context.Context, req ClaudeCodeRequest, on
 	if p := GetPort(); p != "" {
 		cmd.Env = append(cmd.Env, "AI_HUB_PORT="+p)
 	}
+	// Inject ~/.ai-hub/bin into PATH so subprocess can use `ai-hub` CLI
+	cmd.Env = injectCLIPath(cmd.Env)
 
 	log.Printf("[claude] cmd: %s %s", c.BinaryPath, strings.Join(args, " "))
 	log.Printf("[claude] env: ANTHROPIC_BASE_URL=%s ANTHROPIC_API_KEY=%s...", req.BaseURL, maskKey(req.APIKey))
