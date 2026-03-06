@@ -67,7 +67,7 @@ Examples:
 		reqBody["session_id"], _ = json.Number(sessionID).Int64()
 	}
 
-	respData, err := c.POST("/vector/search", reqBody)
+	respData, err := c.POST("/vector/search_memory", reqBody)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 1
