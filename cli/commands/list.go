@@ -10,27 +10,24 @@ import (
 )
 
 // RunList executes the list command
-func RunList(c *client.Client, globalGroup string, sessionID int64, args []string) int {
-	var scope, group, level string
+func RunList(c *client.Client, args []string) int {
+	var level string
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
-	fs.StringVar(&scope, "scope", "memory", "Scope: memory (default)")
-	fs.StringVar(&group, "group", globalGroup, "Group name")
-	fs.StringVar(&level, "level", "all", "Level filter: session, team, global, all")
+	fs.StringVar(&level, "level", "", "Level: session, team, or global (required)")
 
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, `Usage: ai-hub list --scope <type> [flags]
+		fmt.Fprintf(os.Stderr, `Usage: ai-hub list --level <level>
 
-List files in memory store.
+List memory files at the specified level.
 
 Flags:
-  --scope <type>       Scope: memory (default)
-  --group <name>       Group name (optional)
-  --level <level>      Level: session, team, global, all (default: all)
-
+`)
+		PrintLevelUsage()
+		fmt.Fprintf(os.Stderr, `
 Examples:
-  ai-hub list --scope memory
-  ai-hub list --scope memory --level session
-  ai-hub list --scope memory --group "AI Hub 维护团队" --level team
+  ai-hub list --level session
+  ai-hub list --level team
+  ai-hub list --level global
 `)
 	}
 
@@ -38,26 +35,20 @@ Examples:
 		return 1
 	}
 
-	if scope == "" {
-		scope = "memory"
-	}
-	if !ValidateScope(scope) {
-		fmt.Fprintf(os.Stderr, "Error: --scope must be 'memory'\n")
+	if level == "" {
+		fmt.Fprintf(os.Stderr, "Error: --level is required (session / team / global)\n\n")
+		fs.Usage()
 		return 1
 	}
 
-	// Use rich list endpoint with level support
-	params := url.Values{}
-	params.Set("type", scope)
-	params.Set("level", level)
-	if sessionID > 0 {
-		params.Set("session_id", fmt.Sprintf("%d", sessionID))
-	}
-	if group != "" && sessionID == 0 {
-		// If explicit group but no session, build explicit scope
-		params.Set("scope", BuildScope(scope, group))
+	scope, errMsg := LevelToScope(level)
+	if errMsg != "" {
+		fmt.Fprintf(os.Stderr, "%s\n", errMsg)
+		return 1
 	}
 
+	params := url.Values{}
+	params.Set("scope", scope)
 	path := "/vector/list_files?" + params.Encode()
 	respData, err := c.GET(path)
 	if err != nil {
@@ -67,10 +58,10 @@ Examples:
 
 	var resp struct {
 		Files []struct {
-			FileName string `json:"file_name"`
-			Origin   string `json:"origin"`
-			Type     string `json:"type"`
-			Scope    string `json:"scope"`
+			FileName  string `json:"file_name"`
+			Preview   string `json:"preview"`
+			CreatedAt string `json:"created_at"`
+			UpdatedAt string `json:"updated_at"`
 		} `json:"files"`
 		Total int `json:"total"`
 	}
@@ -80,13 +71,16 @@ Examples:
 	}
 
 	if resp.Total == 0 {
-		fmt.Printf("No files found (level=%s, type=%s)\n", level, scope)
+		fmt.Printf("No files found (level=%s)\n", level)
 		return 0
 	}
 
-	fmt.Printf("%d files (level=%s, type=%s):\n", resp.Total, level, scope)
+	fmt.Printf("%d files (level=%s):\n\n", resp.Total, level)
 	for i, f := range resp.Files {
-		fmt.Printf("  %d. [%s] %s  (%s)\n", i+1, f.Origin, f.FileName, f.Scope)
+		fmt.Printf("%d. %s\n", i+1, f.FileName)
+		fmt.Printf("   预览: %s\n", TruncatePreview(f.Preview, 100))
+		fmt.Printf("   创建: %s  更新: %s\n", FormatTime(f.CreatedAt), FormatTime(f.UpdatedAt))
+		fmt.Println("---")
 	}
 	return 0
 }

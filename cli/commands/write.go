@@ -11,33 +11,27 @@ import (
 )
 
 // RunWrite executes the write command
-func RunWrite(c *client.Client, globalGroup string, args []string) int {
+func RunWrite(c *client.Client, args []string) int {
 	filename, flagArgs := SplitQueryAndFlags(args)
 
-	var scope, group, content string
+	var level, content string
 	fs := flag.NewFlagSet("write", flag.ExitOnError)
-	fs.StringVar(&scope, "scope", "memory", "Scope: memory (default)")
-	fs.StringVar(&group, "group", globalGroup, "Group name")
+	fs.StringVar(&level, "level", "", "Level: session, team, or global (required)")
 	fs.StringVar(&content, "content", "", "Content to write (or use stdin)")
 
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, `Usage: ai-hub write <filename> --scope <type> [flags]
+		fmt.Fprintf(os.Stderr, `Usage: ai-hub write <filename> --level <level> [flags]
 
-Write a file to memory store.
-
-Content can be provided via:
-  --content "text"     Inline content
-  echo "text" | ai-hub write <filename> --scope memory   Pipe from stdin
+Write a memory file.
 
 Flags:
-  --scope <type>       Scope: memory (default)
-  --group <name>       Group name (optional)
-  --content <text>     Content to write (or pipe via stdin)
+`)
+		PrintLevelUsage()
+		fmt.Fprintf(os.Stderr, `  --content <text>    Content to write (or pipe via stdin)
 
 Examples:
-  ai-hub write "my-note.md" --scope memory --content "# My Note"
-  echo "hello" | ai-hub write "note.md" --scope memory
-  cat file.md | ai-hub write "doc.md" --scope memory --group "MyTeam"
+  ai-hub write "note.md" --level session --content "# My Note"
+  echo "hello" | ai-hub write "note.md" --level team
 `)
 	}
 
@@ -50,15 +44,16 @@ Examples:
 		fs.Usage()
 		return 1
 	}
-	if !strings.HasSuffix(filename, ".md") {
-		filename += ".md"
+
+	if level == "" {
+		fmt.Fprintf(os.Stderr, "Error: --level is required (session / team / global)\n\n")
+		fs.Usage()
+		return 1
 	}
 
-	if scope == "" {
-		scope = "memory"
-	}
-	if !ValidateScope(scope) {
-		fmt.Fprintf(os.Stderr, "Error: --scope must be 'memory'\n")
+	scope, errMsg := LevelToScope(level)
+	if errMsg != "" {
+		fmt.Fprintf(os.Stderr, "%s\n", errMsg)
 		return 1
 	}
 
@@ -71,19 +66,19 @@ Examples:
 				fmt.Fprintf(os.Stderr, "Error reading stdin: %v\n", err)
 				return 1
 			}
-			content = string(data)
+			content = strings.TrimRight(string(data), "\n")
 		}
 	}
+
 	if content == "" {
 		fmt.Fprintf(os.Stderr, "Error: content is required (use --content or pipe via stdin)\n")
 		return 1
 	}
 
-	fullScope := BuildScope(scope, group)
 	reqBody := map[string]interface{}{
+		"scope":     scope,
 		"file_name": filename,
 		"content":   content,
-		"scope":     fullScope,
 	}
 
 	respData, err := c.POST("/vector/write", reqBody)
@@ -92,16 +87,8 @@ Examples:
 		return 1
 	}
 
-	var resp struct {
-		OK       bool   `json:"ok"`
-		FileName string `json:"file_name"`
-		Scope    string `json:"scope"`
-	}
-	if err := json.Unmarshal(respData, &resp); err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing response: %v\n", err)
-		return 1
-	}
-
-	fmt.Printf("Written: %s (scope: %s)\n", resp.FileName, resp.Scope)
+	var resp map[string]interface{}
+	json.Unmarshal(respData, &resp)
+	fmt.Printf("Written: %s (level=%s)\n", filename, level)
 	return 0
 }

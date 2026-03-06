@@ -6,43 +6,31 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strings"
 )
 
-// SearchFlags holds search command flags
-type SearchFlags struct {
-	Scope     string
-	Group     string
-	Top       int
-	Threshold float64
-}
-
 // RunSearch executes the search command
-func RunSearch(c *client.Client, globalGroup string, args []string) int {
+func RunSearch(c *client.Client, args []string) int {
 	query, flagArgs := SplitQueryAndFlags(args)
 
-	flags := &SearchFlags{}
+	var level string
+	var top int
 	fs := flag.NewFlagSet("search", flag.ExitOnError)
-
-	fs.StringVar(&flags.Scope, "scope", "memory", "Scope: memory (default)")
-	fs.StringVar(&flags.Group, "group", globalGroup, "Group name (inherits from global --group)")
-	fs.IntVar(&flags.Top, "top", 5, "Number of results to return")
-	fs.Float64Var(&flags.Threshold, "threshold", 0.7, "Similarity threshold (0.0-1.0)")
+	fs.StringVar(&level, "level", "", "Level: session, team, or global (required)")
+	fs.IntVar(&top, "top", 10, "Number of results to return")
 
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, `Usage: ai-hub search <query> [flags]
+		fmt.Fprintf(os.Stderr, `Usage: ai-hub search <query> --level <level> [flags]
 
 Search memory files by semantic similarity.
 
 Flags:
-  --scope <type>       Scope: memory (default)
-  --group <name>       Group name (optional, inherits from global --group)
-  --top <n>            Number of results to return (default: 5)
-  --threshold <float>  Similarity threshold 0.0-1.0 (default: 0.7)
+`)
+		PrintLevelUsage()
+		fmt.Fprintf(os.Stderr, `  --top <n>           Number of results (default: 10)
 
 Examples:
-  ai-hub search "BUG修复" --scope memory --group "AI Hub维护团队"
-  ai-hub search "BUG修复" --scope memory --top 3
+  ai-hub search "BUG修复" --level session
+  ai-hub search "部署流程" --level team --top 5
 `)
 	}
 
@@ -50,42 +38,41 @@ Examples:
 		return 1
 	}
 
-	// Validate query
 	if query == "" {
 		fmt.Fprintf(os.Stderr, "Error: query is required\n\n")
 		fs.Usage()
 		return 1
 	}
 
-	// Validate scope
-	if flags.Scope == "" {
-		flags.Scope = "memory"
-	}
-	if flags.Scope != "memory" {
-		fmt.Fprintf(os.Stderr, "Error: --scope must be 'memory'\n")
+	if level == "" {
+		fmt.Fprintf(os.Stderr, "Error: --level is required (session / team / global)\n\n")
+		fs.Usage()
 		return 1
 	}
 
-	// Build full scope with group prefix if provided
-	fullScope := flags.Scope
-	if flags.Group != "" {
-		fullScope = flags.Group + "/" + flags.Scope
+	scope, errMsg := LevelToScope(level)
+	if errMsg != "" {
+		fmt.Fprintf(os.Stderr, "%s\n", errMsg)
+		return 1
 	}
 
-	// Call API
+	sessionID := os.Getenv("AI_HUB_SESSION_ID")
+
 	reqBody := map[string]interface{}{
-		"scope": fullScope,
+		"scope": scope,
 		"query": query,
-		"top_k": flags.Top,
+		"top_k": top,
+	}
+	if sessionID != "" {
+		reqBody["session_id"], _ = json.Number(sessionID).Int64()
 	}
 
-	respData, err := c.POST("/vector/search", reqBody)
+	respData, err := c.POST("/vector/search_memory", reqBody)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 1
 	}
 
-	// Parse response
 	var resp struct {
 		Results []map[string]interface{} `json:"results"`
 	}
@@ -94,47 +81,23 @@ Examples:
 		return 1
 	}
 
-	// Filter by threshold and display results
-	filtered := 0
-	for i, result := range resp.Results {
-		// API returns "similarity" not "score"
-		similarity, _ := result["similarity"].(float64)
-		if similarity < flags.Threshold {
-			continue
-		}
-
-		filtered++
-		// API returns "id" (filename) and "document" (full content)
-		filename, _ := result["id"].(string)
-		document, _ := result["document"].(string)
-
-		// Extract path from metadata if available
-		path := ""
-		if metadata, ok := result["metadata"].(map[string]interface{}); ok {
-			if filePath, ok := metadata["file_path"].(string); ok {
-				path = filePath
-			}
-		}
-
-		// Truncate content to 200 chars
-		preview := document
-		if len(preview) > 200 {
-			preview = preview[:200] + "..."
-		}
-
-		fmt.Printf("%d. %s (score: %.3f)\n", i+1, filename, similarity)
-		if path != "" {
-			fmt.Printf("   Path: %s\n", path)
-		}
-		fmt.Printf("   Preview: %s\n", preview)
-		if i < len(resp.Results)-1 {
-			fmt.Println("   " + strings.Repeat("-", 60))
-		}
+	if len(resp.Results) == 0 {
+		fmt.Println("No results found")
+		return 0
 	}
 
-	if filtered == 0 {
-		fmt.Printf("No results found above threshold %.2f\n", flags.Threshold)
-	}
+	fmt.Printf("%d results (level=%s):\n\n", len(resp.Results), level)
+	for i, r := range resp.Results {
+		filename, _ := r["id"].(string)
+		similarity, _ := r["similarity"].(float64)
+		document, _ := r["document"].(string)
+		createdAt, _ := r["created_at"].(string)
+		updatedAt, _ := r["updated_at"].(string)
 
+		fmt.Printf("%d. %s (相似度: %.3f)\n", i+1, filename, similarity)
+		fmt.Printf("   预览: %s\n", TruncatePreview(document, 100))
+		fmt.Printf("   创建: %s  更新: %s\n", FormatTime(createdAt), FormatTime(updatedAt))
+		fmt.Println("---")
+	}
 	return 0
 }

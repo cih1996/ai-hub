@@ -2,6 +2,7 @@ package commands
 
 import (
 	"ai-hub/cli/client"
+	"bufio"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -10,29 +11,28 @@ import (
 )
 
 // RunDelete executes the delete command
-func RunDelete(c *client.Client, globalGroup string, args []string) int {
+func RunDelete(c *client.Client, args []string) int {
 	filename, flagArgs := SplitQueryAndFlags(args)
 
-	var scope, group string
+	var level string
 	var force bool
 	fs := flag.NewFlagSet("delete", flag.ExitOnError)
-	fs.StringVar(&scope, "scope", "memory", "Scope: memory (default)")
-	fs.StringVar(&group, "group", globalGroup, "Group name")
+	fs.StringVar(&level, "level", "", "Level: session, team, or global (required)")
 	fs.BoolVar(&force, "force", false, "Skip confirmation prompt")
 
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, `Usage: ai-hub delete <filename> --scope <type> [flags]
+		fmt.Fprintf(os.Stderr, `Usage: ai-hub delete <filename> --level <level> [flags]
 
-Delete a file from memory store.
+Delete a memory file.
 
 Flags:
-  --scope <type>       Scope: memory (default)
-  --group <name>       Group name (optional)
-  --force              Skip confirmation prompt
+`)
+		PrintLevelUsage()
+		fmt.Fprintf(os.Stderr, `  --force             Skip confirmation prompt
 
 Examples:
-  ai-hub delete "old-note.md" --scope memory --force
-  ai-hub delete "temp.md" --scope memory --group "MyTeam"
+  ai-hub delete "old-note.md" --level session --force
+  ai-hub delete "temp.md" --level team
 `)
 	}
 
@@ -45,34 +45,33 @@ Examples:
 		fs.Usage()
 		return 1
 	}
-	if !strings.HasSuffix(filename, ".md") {
-		filename += ".md"
-	}
 
-	if scope == "" {
-		scope = "memory"
-	}
-	if !ValidateScope(scope) {
-		fmt.Fprintf(os.Stderr, "Error: --scope must be 'memory'\n")
+	if level == "" {
+		fmt.Fprintf(os.Stderr, "Error: --level is required (session / team / global)\n\n")
+		fs.Usage()
 		return 1
 	}
 
-	fullScope := BuildScope(scope, group)
+	scope, errMsg := LevelToScope(level)
+	if errMsg != "" {
+		fmt.Fprintf(os.Stderr, "%s\n", errMsg)
+		return 1
+	}
 
-	// Confirmation prompt unless --force
 	if !force {
-		fmt.Printf("Delete %s from %s? [y/N] ", filename, fullScope)
-		var answer string
-		fmt.Scanln(&answer)
-		if answer != "y" && answer != "Y" {
-			fmt.Println("Cancelled.")
+		fmt.Printf("Delete '%s' from %s? [y/N] ", filename, level)
+		reader := bufio.NewReader(os.Stdin)
+		answer, _ := reader.ReadString('\n')
+		answer = strings.TrimSpace(strings.ToLower(answer))
+		if answer != "y" && answer != "yes" {
+			fmt.Println("Cancelled")
 			return 0
 		}
 	}
 
 	reqBody := map[string]interface{}{
+		"scope":     scope,
 		"file_name": filename,
-		"scope":     fullScope,
 	}
 
 	respData, err := c.POST("/vector/delete", reqBody)
@@ -81,15 +80,8 @@ Examples:
 		return 1
 	}
 
-	var resp struct {
-		OK       bool   `json:"ok"`
-		FileName string `json:"file_name"`
-	}
-	if err := json.Unmarshal(respData, &resp); err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing response: %v\n", err)
-		return 1
-	}
-
-	fmt.Printf("Deleted: %s (scope: %s)\n", resp.FileName, fullScope)
+	var resp map[string]interface{}
+	json.Unmarshal(respData, &resp)
+	fmt.Printf("Deleted: %s (level=%s)\n", filename, level)
 	return 0
 }

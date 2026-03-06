@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -186,7 +187,7 @@ func ListMemoryFiles(c *gin.Context) {
 // enrichResult adds type and source_session_id to a vector search result.
 // origin: "self" | "team" | "global" (used for sorting priority).
 func enrichResult(r map[string]interface{}, scopeType, origin string) map[string]interface{} {
-	out := make(map[string]interface{}, len(r)+3)
+	out := make(map[string]interface{}, len(r)+5)
 	for k, v := range r {
 		out[k] = v
 	}
@@ -195,6 +196,13 @@ func enrichResult(r map[string]interface{}, scopeType, origin string) map[string
 	if meta, ok := r["metadata"].(map[string]interface{}); ok {
 		if sid, ok := meta["source_session_id"]; ok {
 			out["source_session_id"] = sid
+		}
+		// Add created_at / updated_at from file stat
+		if fp, ok := meta["file_path"].(string); ok && fp != "" {
+			if info, err := os.Stat(fp); err == nil {
+				out["updated_at"] = info.ModTime().Format(time.RFC3339)
+				out["created_at"] = fileBirthTime(info).Format(time.RFC3339)
+			}
 		}
 	}
 	if _, exists := out["source_session_id"]; !exists {
@@ -736,12 +744,25 @@ func ListVectorFiles(c *gin.Context) {
 	c.JSON(http.StatusOK, files)
 }
 
+// fileBirthTime returns the file's birth time (creation time).
+// Falls back to modification time if birth time is unavailable.
+func fileBirthTime(info os.FileInfo) time.Time {
+	if stat, ok := info.Sys().(*syscall.Stat_t); ok {
+		bt := time.Unix(stat.Birthtimespec.Sec, stat.Birthtimespec.Nsec)
+		if !bt.IsZero() {
+			return bt
+		}
+	}
+	return info.ModTime()
+}
+
 // VectorFileItem represents one file entry in the rich list response.
 type VectorFileItem struct {
 	FileName        string `json:"file_name"`
 	Preview         string `json:"preview"`           // first 100 chars of content
 	Type            string `json:"type"`              // "memory"
 	SourceSessionID int64  `json:"source_session_id"` // session that wrote this file (0 if unknown)
+	CreatedAt       string `json:"created_at"`        // RFC3339 birth time (fallback to mod time)
 	UpdatedAt       string `json:"updated_at"`        // RFC3339 mod time
 	Scope           string `json:"scope"`
 	Origin          string `json:"origin"`            // "session" | "team" | "global"
@@ -922,6 +943,7 @@ func ListVectorFilesRich(c *gin.Context) {
 				Preview:         preview,
 				Type:            scopeType,
 				SourceSessionID: sourceSessionID,
+				CreatedAt:       fileBirthTime(info).Format(time.RFC3339),
 				UpdatedAt:       info.ModTime().Format(time.RFC3339),
 				Scope:           se.scope,
 				Origin:          se.origin,
