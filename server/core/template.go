@@ -194,6 +194,8 @@ func BuildSystemPromptWithVars(extra map[string]string) string {
 
 // buildSkillsSummary scans ~/.ai-hub/skills/*/SKILL.md, extracts YAML
 // frontmatter (name + description), and returns a summary block.
+// ai-hub-core's CLI usage is already injected via CLI-REFERENCE.md in rules/,
+// so it does not prompt "Read SKILL.md". Other skills still prompt Read.
 func buildSkillsSummary() string {
 	home, _ := os.UserHomeDir()
 	skillsDir := filepath.Join(home, ".ai-hub", "skills")
@@ -201,7 +203,8 @@ func buildSkillsSummary() string {
 	if err != nil {
 		return ""
 	}
-	var lines []string
+	var coreLines []string
+	var otherLines []string
 	for _, d := range dirs {
 		if !d.IsDir() {
 			continue
@@ -215,13 +218,29 @@ func buildSkillsSummary() string {
 		if name == "" {
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("- %s（%s）：%s", name, d.Name(), desc))
+		if d.Name() == "ai-hub-core" {
+			coreLines = append(coreLines, fmt.Sprintf("- %s（%s）：%s", name, d.Name(), desc))
+		} else {
+			otherLines = append(otherLines, fmt.Sprintf("- %s（%s）：%s", name, d.Name(), desc))
+		}
 	}
-	if len(lines) == 0 {
+	allLines := append(coreLines, otherLines...)
+	if len(allLines) == 0 {
 		return ""
 	}
-	header := "可用技能（触发后 Read ~/.ai-hub/skills/<目录名>/SKILL.md 获取完整操作手册）："
-	return header + "\n" + strings.Join(lines, "\n")
+	var sb strings.Builder
+	if len(coreLines) > 0 {
+		sb.WriteString("可用技能：\n")
+		sb.WriteString(strings.Join(coreLines, "\n"))
+	}
+	if len(otherLines) > 0 {
+		if sb.Len() > 0 {
+			sb.WriteString("\n\n")
+		}
+		sb.WriteString("可用技能（触发后 Read ~/.ai-hub/skills/<目录名>/SKILL.md 获取完整操作手册）：\n")
+		sb.WriteString(strings.Join(otherLines, "\n"))
+	}
+	return sb.String()
 }
 
 // parseSkillYAML extracts name and description from YAML frontmatter.
