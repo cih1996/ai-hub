@@ -4,6 +4,13 @@
 
 单文件部署，前端通过 Go `embed` 打包进二进制文件。
 
+## 截图预览
+
+| | |
+|:---:|:---:|
+| ![会话列表](docs/screenshots/cap1.png) | ![对话界面](docs/screenshots/cap2.png) |
+| ![多会话管理](docs/screenshots/cap3.png) | ![系统设置](docs/screenshots/cap4.png) |
+
 ## 架构
 
 ```
