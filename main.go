@@ -217,14 +217,10 @@ func main() {
 
 		// Vector engine (Skill tools)
 		v1.POST("/vector/search", api.SearchVector)
-		v1.POST("/vector/search_knowledge", api.SearchKnowledge)
 		v1.POST("/vector/search_memory", api.SearchMemory)
-		v1.POST("/vector/read_knowledge", api.ReadKnowledge)
 		v1.POST("/vector/read_memory", api.ReadMemory)
-		v1.POST("/vector/write_knowledge", api.WriteKnowledge)
 		v1.POST("/vector/write_memory", api.WriteMemory)
 		v1.POST("/vector/write", api.WriteVector)
-		v1.POST("/vector/delete_knowledge", api.DeleteKnowledge)
 		v1.POST("/vector/delete_memory", api.DeleteMemory)
 		v1.POST("/vector/delete", api.DeleteVector)
 		v1.GET("/vector/stats", api.StatsVector)
@@ -233,7 +229,6 @@ func main() {
 		v1.POST("/vector/restart", api.RestartVector)
 		v1.GET("/vector/list", api.ListVectorFiles)
 		v1.GET("/vector/list_files", api.ListVectorFilesRich) // Issue #109: rich list with preview+type+source_session_id
-		v1.GET("/vector/list_knowledge", api.ListKnowledgeFiles)
 		v1.GET("/vector/list_memory", api.ListMemoryFiles)
 		v1.POST("/vector/read", api.ReadVector)
 		v1.POST("/vector/update_metadata", api.UpdateVectorMetadata)
@@ -434,9 +429,9 @@ func migrateTeamDirs(dataDir string) {
 			continue
 		}
 		oldPath := filepath.Join(dataDir, e.Name())
-		// Check if it has team subdirectories (knowledge/, memory/, or rules/)
+		// Check if it has team subdirectories (memory/ or rules/)
 		hasTeamContent := false
-		for _, sub := range []string{"knowledge", "memory", "rules"} {
+		for _, sub := range []string{"memory", "rules"} {
 			if info, err2 := os.Stat(filepath.Join(oldPath, sub)); err2 == nil && info.IsDir() {
 				hasTeamContent = true
 				break

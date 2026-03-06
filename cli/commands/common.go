@@ -33,7 +33,7 @@ func BuildScope(scope, group string) string {
 	return scope
 }
 
-// ValidateScope checks if scope is "knowledge" or "memory".
+// ValidateScope checks if scope is "memory".
 func ValidateScope(scope string) bool {
-	return scope == "knowledge" || scope == "memory"
+	return scope == "memory"
 }

@@ -187,11 +187,11 @@ Global Flags:
   --version          Show version
 
 Commands:
-  search             Search knowledge/memory by semantic similarity
-  write              Write knowledge/memory file
-  read               Read knowledge/memory file
-  delete             Delete knowledge/memory file
-  list               List knowledge/memory files
+  search             Search memory by semantic similarity
+  write              Write memory file
+  read               Read memory file
+  delete             Delete memory file
+  list               List memory files
   mem                Structured memory management (add/retrieve/feedback/revise/deprecate/spec)
 
 Use "ai-hub <command> --help" for more information about a command.`)

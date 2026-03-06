@@ -21,7 +21,6 @@ func TemplateVars() map[string]string {
 		"HOME_DIR":      home,
 		"CLAUDE_DIR":    aiHubBase,
 		"MEMORY_DIR":    filepath.Join(aiHubBase, "memory"),
-		"KNOWLEDGE_DIR": filepath.Join(aiHubBase, "knowledge"),
 		"RULES_DIR":     filepath.Join(aiHubBase, "rules"),
 		"OS":            runtime.GOOS,
 		"PORT":          hubPort,
@@ -89,8 +88,8 @@ func TemplateDir() string {
 }
 
 // ScopeDir returns the filesystem directory for the given vector scope.
-// Global scopes (e.g. "knowledge") resolve to ~/.ai-hub/knowledge.
-// Team scopes (e.g. "团队名/knowledge") resolve to ~/.ai-hub/teams/团队名/knowledge.
+// Global scopes (e.g. "memory") resolve to ~/.ai-hub/memory.
+// Team scopes (e.g. "团队名/memory") resolve to ~/.ai-hub/teams/团队名/memory.
 // Session scopes (e.g. "团队名/sessions/21/memory") resolve to ~/.ai-hub/teams/团队名/sessions/21/memory.
 func ScopeDir(scope string) string {
 	home, _ := os.UserHomeDir()

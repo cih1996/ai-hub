@@ -18,7 +18,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{ (e: 'close'): void }>()
 
-type TabKey = 'knowledge' | 'memory' | 'rules'
+type TabKey = 'memory' | 'rules'
 
 interface TabDef {
   key: TabKey
@@ -26,12 +26,11 @@ interface TabDef {
 }
 
 const tabs: TabDef[] = [
-  { key: 'knowledge', label: '知识库' },
   { key: 'memory', label: '记忆库' },
   { key: 'rules', label: '团队规则' },
 ]
 
-const activeTab = ref<TabKey>('knowledge')
+const activeTab = ref<TabKey>('memory')
 
 interface FileItem {
   name: string
