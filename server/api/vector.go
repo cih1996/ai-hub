@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -744,17 +743,7 @@ func ListVectorFiles(c *gin.Context) {
 	c.JSON(http.StatusOK, files)
 }
 
-// fileBirthTime returns the file's birth time (creation time).
-// Falls back to modification time if birth time is unavailable.
-func fileBirthTime(info os.FileInfo) time.Time {
-	if stat, ok := info.Sys().(*syscall.Stat_t); ok {
-		bt := time.Unix(stat.Birthtimespec.Sec, stat.Birthtimespec.Nsec)
-		if !bt.IsZero() {
-			return bt
-		}
-	}
-	return info.ModTime()
-}
+// fileBirthTime is defined in birthtime_darwin.go / birthtime_other.go
 
 // VectorFileItem represents one file entry in the rich list response.
 type VectorFileItem struct {
