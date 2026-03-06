@@ -117,6 +117,21 @@ func Run(args []string) int {
 		return commands.RunList(c, commandArgs)
 	case "edit":
 		return commands.RunEdit(c, commandArgs)
+	case "sessions":
+		return commands.RunSessions(c, commandArgs)
+	case "send":
+		return commands.RunSend(c, commandArgs)
+	case "rules":
+		return commands.RunRules(c, commandArgs)
+	case "notes":
+		return commands.RunNotes(c, commandArgs)
+	case "triggers":
+		return commands.RunTriggers(c, commandArgs)
+	case "status":
+		return commands.RunStatus(c, commandArgs)
+	case "version":
+		fmt.Printf("ai-hub version %s\n", Version)
+		return 0
 	case "mem":
 		return runMem(c, globalFlags.GroupName, commandArgs)
 	default:
@@ -176,7 +191,7 @@ Examples:
 }
 
 func printHelp() {
-	fmt.Println(`AI Hub CLI - Unified data layer interface
+	fmt.Println(`AI Hub CLI - Unified system interface
 
 Usage:
   ai-hub [global flags] <command> [command flags]
@@ -188,14 +203,27 @@ Global Flags:
   --help             Show this help
   --version          Show version
 
-Commands:
+Memory:
   search             Search memory by semantic similarity
   list               List memory files
   read               Read memory file
   write              Write memory file
   edit               Edit memory file (find and replace)
   delete             Delete memory file
-  mem                Structured memory management (add/retrieve/feedback/revise/deprecate/spec)
+  mem                Structured memory runtime (add/retrieve/feedback/revise/deprecate/spec)
+
+Sessions:
+  sessions           List all sessions
+  sessions <id>      Session detail
+  sessions <id> messages   View recent messages
+  send               Send message to a session (0=new)
+
+System:
+  rules              Manage session rules (get/set/delete)
+  notes              Manage notes (list/read/write/delete)
+  triggers           Manage triggers (list/create/update/delete)
+  status             System status
+  version            Show version
 
 Use "ai-hub <command> --help" for more information about a command.`)
 }
