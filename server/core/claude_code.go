@@ -66,6 +66,7 @@ func (c *ClaudeCodeClient) Stream(ctx context.Context, req ClaudeCodeRequest, on
 		"--verbose",
 		"--output-format", "stream-json",
 		"--include-partial-messages",
+		"--disallowed-tools", "EnterPlanMode,ExitPlanMode",
 	}
 
 	if req.SessionID != "" {

@@ -205,6 +205,7 @@ func (p *ProcessPool) spawnProcess(req ClaudeCodeRequest, isResume bool) (*Persi
 		"--input-format", "stream-json",
 		"--output-format", "stream-json",
 		"--include-partial-messages",
+		"--disallowed-tools", "EnterPlanMode,ExitPlanMode",
 	}
 	if req.SessionID != "" {
 		if isResume {
