@@ -15,20 +15,20 @@ func RunRead(c *client.Client, globalGroup string, args []string) int {
 
 	var scope, group string
 	fs := flag.NewFlagSet("read", flag.ExitOnError)
-	fs.StringVar(&scope, "scope", "", "Scope: knowledge or memory (required)")
+	fs.StringVar(&scope, "scope", "memory", "Scope: memory (default)")
 	fs.StringVar(&group, "group", globalGroup, "Group name")
 
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, `Usage: ai-hub read <filename> --scope <type> [flags]
 
-Read a file from knowledge or memory store.
+Read a file from memory store.
 
 Flags:
-  --scope <type>       Scope: knowledge or memory (required)
+  --scope <type>       Scope: memory (default)
   --group <name>       Group name (optional)
 
 Examples:
-  ai-hub read "my-note.md" --scope knowledge
+  ai-hub read "my-note.md" --scope memory
   ai-hub read "bug-fix.md" --scope memory --group "AI Hub 维护团队"
 `)
 	}
@@ -47,12 +47,10 @@ Examples:
 	}
 
 	if scope == "" {
-		fmt.Fprintf(os.Stderr, "Error: --scope is required (knowledge or memory)\n\n")
-		fs.Usage()
-		return 1
+		scope = "memory"
 	}
 	if !ValidateScope(scope) {
-		fmt.Fprintf(os.Stderr, "Error: --scope must be 'knowledge' or 'memory'\n")
+		fmt.Fprintf(os.Stderr, "Error: --scope must be 'memory'\n")
 		return 1
 	}
 

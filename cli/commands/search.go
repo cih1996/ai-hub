@@ -24,7 +24,7 @@ func RunSearch(c *client.Client, globalGroup string, args []string) int {
 	flags := &SearchFlags{}
 	fs := flag.NewFlagSet("search", flag.ExitOnError)
 
-	fs.StringVar(&flags.Scope, "scope", "", "Scope: knowledge or memory (required)")
+	fs.StringVar(&flags.Scope, "scope", "memory", "Scope: memory (default)")
 	fs.StringVar(&flags.Group, "group", globalGroup, "Group name (inherits from global --group)")
 	fs.IntVar(&flags.Top, "top", 5, "Number of results to return")
 	fs.Float64Var(&flags.Threshold, "threshold", 0.7, "Similarity threshold (0.0-1.0)")
@@ -32,16 +32,16 @@ func RunSearch(c *client.Client, globalGroup string, args []string) int {
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, `Usage: ai-hub search <query> [flags]
 
-Search knowledge or memory files by semantic similarity.
+Search memory files by semantic similarity.
 
 Flags:
-  --scope <type>       Scope: knowledge or memory (required)
+  --scope <type>       Scope: memory (default)
   --group <name>       Group name (optional, inherits from global --group)
   --top <n>            Number of results to return (default: 5)
   --threshold <float>  Similarity threshold 0.0-1.0 (default: 0.7)
 
 Examples:
-  ai-hub search "向量搜索" --scope knowledge --group "AI Hub维护团队"
+  ai-hub search "BUG修复" --scope memory --group "AI Hub维护团队"
   ai-hub search "BUG修复" --scope memory --top 3
 `)
 	}
@@ -59,12 +59,10 @@ Examples:
 
 	// Validate scope
 	if flags.Scope == "" {
-		fmt.Fprintf(os.Stderr, "Error: --scope is required (knowledge or memory)\n\n")
-		fs.Usage()
-		return 1
+		flags.Scope = "memory"
 	}
-	if flags.Scope != "knowledge" && flags.Scope != "memory" {
-		fmt.Fprintf(os.Stderr, "Error: --scope must be 'knowledge' or 'memory'\n")
+	if flags.Scope != "memory" {
+		fmt.Fprintf(os.Stderr, "Error: --scope must be 'memory'\n")
 		return 1
 	}
 

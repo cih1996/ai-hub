@@ -169,7 +169,7 @@ func ImportArchive(c *gin.Context) {
 	var manifest *exportManifest
 	sessionInfos := map[string]*sessionExportData{} // "sessions/<id>/info.json" key=<id>
 	sessionRules := map[string]string{}              // key=<id>, value=rules content
-	teamFiles := map[string][]byte{}                 // key="team/knowledge/file.md", value=content
+	teamFiles := map[string][]byte{}                 // key="team/memory/file.md", value=content
 	var totalSize int64
 
 	for {
@@ -273,7 +273,7 @@ func ImportArchive(c *gin.Context) {
 	if len(teamFiles) > 0 && manifest.GroupName != "" {
 		teamBase := core.TeamDir(manifest.GroupName)
 		for archivePath, data := range teamFiles {
-			// archivePath is like "team/knowledge/file.md"
+			// archivePath is like "team/memory/file.md"
 			relPath := strings.TrimPrefix(archivePath, "team/")
 			destPath := filepath.Join(teamBase, relPath)
 			destDir := filepath.Dir(destPath)
@@ -296,9 +296,9 @@ func ImportArchive(c *gin.Context) {
 			}
 			teamFilesImported++
 
-			// Trigger vector sync for knowledge/memory files
+			// Trigger vector sync for memory files
 			parts := strings.SplitN(relPath, "/", 2)
-			if len(parts) == 2 && (parts[0] == "knowledge" || parts[0] == "memory") {
+			if len(parts) == 2 && parts[0] == "memory" {
 				scope := manifest.GroupName + "/" + parts[0]
 				core.SyncFileToVector(scope, destPath, 0) // import: no source session
 			}
@@ -358,7 +358,7 @@ func buildTarGz(w io.Writer, manifest exportManifest, sessions []sessionExportDa
 
 	// Write team files
 	if teamDir != "" {
-		for _, sub := range []string{"knowledge", "memory", "rules"} {
+		for _, sub := range []string{"memory", "rules"} {
 			subDir := filepath.Join(teamDir, sub)
 			entries, err := os.ReadDir(subDir)
 			if err != nil {

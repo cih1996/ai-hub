@@ -16,22 +16,22 @@ func RunDelete(c *client.Client, globalGroup string, args []string) int {
 	var scope, group string
 	var force bool
 	fs := flag.NewFlagSet("delete", flag.ExitOnError)
-	fs.StringVar(&scope, "scope", "", "Scope: knowledge or memory (required)")
+	fs.StringVar(&scope, "scope", "memory", "Scope: memory (default)")
 	fs.StringVar(&group, "group", globalGroup, "Group name")
 	fs.BoolVar(&force, "force", false, "Skip confirmation prompt")
 
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, `Usage: ai-hub delete <filename> --scope <type> [flags]
 
-Delete a file from knowledge or memory store.
+Delete a file from memory store.
 
 Flags:
-  --scope <type>       Scope: knowledge or memory (required)
+  --scope <type>       Scope: memory (default)
   --group <name>       Group name (optional)
   --force              Skip confirmation prompt
 
 Examples:
-  ai-hub delete "old-note.md" --scope knowledge --force
+  ai-hub delete "old-note.md" --scope memory --force
   ai-hub delete "temp.md" --scope memory --group "MyTeam"
 `)
 	}
@@ -50,12 +50,10 @@ Examples:
 	}
 
 	if scope == "" {
-		fmt.Fprintf(os.Stderr, "Error: --scope is required (knowledge or memory)\n\n")
-		fs.Usage()
-		return 1
+		scope = "memory"
 	}
 	if !ValidateScope(scope) {
-		fmt.Fprintf(os.Stderr, "Error: --scope must be 'knowledge' or 'memory'\n")
+		fmt.Fprintf(os.Stderr, "Error: --scope must be 'memory'\n")
 		return 1
 	}
 

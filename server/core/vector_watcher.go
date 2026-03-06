@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// VectorWatcher polls knowledge/ and memory/ directories for changes
+// VectorWatcher polls memory/ directories for changes
 // and syncs files to the vector engine.
 type VectorWatcher struct {
 	mu       sync.Mutex
@@ -24,14 +24,13 @@ type fileSnapshot struct {
 }
 
 // StartVectorWatcher begins polling watched directories.
-// Also discovers existing team-level knowledge/memory dirs under ~/.ai-hub/<groupname>/.
+// Also discovers existing team-level memory dirs under ~/.ai-hub/teams/<groupname>/.
 func StartVectorWatcher() *VectorWatcher {
 	home, _ := os.UserHomeDir()
 	dirs := map[string]string{
-		filepath.Join(home, ".ai-hub", "knowledge"): "knowledge",
-		filepath.Join(home, ".ai-hub", "memory"):    "memory",
+		filepath.Join(home, ".ai-hub", "memory"): "memory",
 	}
-	// Discover existing team-level knowledge/memory directories under ~/.ai-hub/teams/
+	// Discover existing team-level memory directories under ~/.ai-hub/teams/
 	teamsDir := filepath.Join(home, ".ai-hub", "teams")
 	if entries, err := os.ReadDir(teamsDir); err == nil {
 		for _, e := range entries {
@@ -39,7 +38,7 @@ func StartVectorWatcher() *VectorWatcher {
 				continue
 			}
 			groupName := e.Name()
-			for _, sub := range []string{"knowledge", "memory"} {
+			for _, sub := range []string{"memory"} {
 				subDir := filepath.Join(teamsDir, groupName, sub)
 				if info, err2 := os.Stat(subDir); err2 == nil && info.IsDir() {
 					scope := groupName + "/" + sub
@@ -54,7 +53,7 @@ func StartVectorWatcher() *VectorWatcher {
 					if !se.IsDir() {
 						continue
 					}
-					for _, sub := range []string{"knowledge", "memory"} {
+					for _, sub := range []string{"memory"} {
 						subDir := filepath.Join(sessionsDir, se.Name(), sub)
 						if info, err3 := os.Stat(subDir); err3 == nil && info.IsDir() {
 							scope := groupName + "/sessions/" + se.Name() + "/" + sub

@@ -13,24 +13,24 @@ import (
 func RunList(c *client.Client, globalGroup string, sessionID int64, args []string) int {
 	var scope, group, level string
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
-	fs.StringVar(&scope, "scope", "", "Scope: knowledge or memory (required)")
+	fs.StringVar(&scope, "scope", "memory", "Scope: memory (default)")
 	fs.StringVar(&group, "group", globalGroup, "Group name")
 	fs.StringVar(&level, "level", "all", "Level filter: session, team, global, all")
 
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, `Usage: ai-hub list --scope <type> [flags]
 
-List files in knowledge or memory store.
+List files in memory store.
 
 Flags:
-  --scope <type>       Scope: knowledge or memory (required)
+  --scope <type>       Scope: memory (default)
   --group <name>       Group name (optional)
   --level <level>      Level: session, team, global, all (default: all)
 
 Examples:
-  ai-hub list --scope knowledge
+  ai-hub list --scope memory
   ai-hub list --scope memory --level session
-  ai-hub list --scope knowledge --group "AI Hub 维护团队" --level team
+  ai-hub list --scope memory --group "AI Hub 维护团队" --level team
 `)
 	}
 
@@ -39,12 +39,10 @@ Examples:
 	}
 
 	if scope == "" {
-		fmt.Fprintf(os.Stderr, "Error: --scope is required (knowledge or memory)\n\n")
-		fs.Usage()
-		return 1
+		scope = "memory"
 	}
 	if !ValidateScope(scope) {
-		fmt.Fprintf(os.Stderr, "Error: --scope must be 'knowledge' or 'memory'\n")
+		fmt.Fprintf(os.Stderr, "Error: --scope must be 'memory'\n")
 		return 1
 	}
 

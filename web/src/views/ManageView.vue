@@ -17,12 +17,11 @@ function getLabel(f: FileItem): string {
 
 const tabs: { key: string; label: string; desc: string }[] = [
   { key: 'rules', label: '全局', desc: '~/.ai-hub/rules/' },
-  { key: 'knowledge', label: '知识库', desc: '~/.ai-hub/knowledge/' },
   { key: 'memory', label: '记忆', desc: '~/.ai-hub/memory/' },
   { key: 'notes', label: '笔记', desc: '~/.ai-hub/notes/' },
 ]
 
-type Scope = 'rules' | 'knowledge' | 'memory' | 'notes'
+type Scope = 'rules' | 'memory' | 'notes'
 
 const activeTab = ref<Scope>('rules')
 const activeTabDesc = ref('~/.ai-hub/rules/')
@@ -39,7 +38,6 @@ const restoringDefault = ref(false)
 
 // Vector search
 const searchQuery = ref('')
-const searchScope = ref<'knowledge' | 'memory' | 'all'>('all')
 const searching = ref(false)
 const searchResults = ref<(VectorSearchResult & { scope: string })[]>([])
 const searchDone = ref(false)
@@ -58,21 +56,8 @@ async function onSearch() {
   searchResults.value = []
   searchDone.value = false
   try {
-    if (searchScope.value === 'all') {
-      const [k, m] = await Promise.all([
-        vectorSearch('knowledge', q, 10),
-        vectorSearch('memory', q, 10),
-      ])
-      const merged = [
-        ...k.results.map(r => ({ ...r, scope: 'knowledge' })),
-        ...m.results.map(r => ({ ...r, scope: 'memory' })),
-      ]
-      merged.sort((a, b) => b.similarity - a.similarity)
-      searchResults.value = merged
-    } else {
-      const res = await vectorSearch(searchScope.value, q, 10)
-      searchResults.value = res.results.map(r => ({ ...r, scope: searchScope.value }))
-    }
+    const res = await vectorSearch('memory', q, 10)
+    searchResults.value = res.results.map(r => ({ ...r, scope: 'memory' }))
   } catch (e: any) {
     searchResults.value = []
   }
@@ -84,8 +69,8 @@ function toggleExpand(id: string) {
   expandedResult.value = expandedResult.value === id ? null : id
 }
 
-function scopeLabel(s: string): string {
-  return s === 'knowledge' ? '知识库' : '记忆库'
+function scopeLabel(_s: string): string {
+  return '记忆库'
 }
 
 async function restoreDefault() {
@@ -209,11 +194,6 @@ onMounted(async () => {
             placeholder="输入关键词进行语义搜索"
             @keyup.enter="onSearch"
           />
-          <select v-model="searchScope" class="search-scope">
-            <option value="all">全部</option>
-            <option value="knowledge">知识库</option>
-            <option value="memory">记忆库</option>
-          </select>
           <button class="btn-search" :disabled="searching || !searchQuery.trim()" @click="onSearch">
             <svg v-if="searching" class="spinning" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
             <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
@@ -422,7 +402,6 @@ onMounted(async () => {
 .result-scope {
   font-size: 10px; padding: 1px 6px; border-radius: 9999px; flex-shrink: 0;
 }
-.scope-knowledge { background: rgba(59,130,246,0.15); color: var(--info); }
 .scope-memory { background: rgba(168,85,247,0.15); color: #a855f7; }
 .result-filename {
   font-size: 12px; color: var(--text-primary); font-weight: 500;

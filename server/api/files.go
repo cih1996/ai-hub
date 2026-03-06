@@ -52,8 +52,6 @@ func aiHubDir() string {
 
 func scopeDir(base, scope string) string {
 	switch scope {
-	case "knowledge":
-		return filepath.Join(base, "knowledge")
 	case "memory":
 		return filepath.Join(base, "memory")
 	case "rules":
@@ -189,8 +187,8 @@ func WriteFile(c *gin.Context) {
 		return
 	}
 
-	// Trigger vector sync for knowledge/memory
-	if req.Scope == "knowledge" || req.Scope == "memory" {
+	// Trigger vector sync for memory
+	if req.Scope == "memory" {
 		core.SyncFileToVector(req.Scope, writePath, 0) // files API: no session context
 	}
 
@@ -226,8 +224,8 @@ func CreateFile(c *gin.Context) {
 		return
 	}
 
-	// Trigger vector sync for knowledge/memory
-	if req.Scope == "knowledge" || req.Scope == "memory" {
+	// Trigger vector sync for memory
+	if req.Scope == "memory" {
 		core.SyncFileToVector(req.Scope, writePath, 0) // files API: no session context
 	}
 
@@ -251,8 +249,8 @@ func DeleteFile(c *gin.Context) {
 		os.Remove(dataPath)
 	}
 
-	// Clean vector record for knowledge/memory
-	if scope == "knowledge" || scope == "memory" {
+	// Clean vector record for memory
+	if scope == "memory" {
 		docID := filepath.Base(tplPath)
 		core.Vector.Delete(scope, docID)
 	}

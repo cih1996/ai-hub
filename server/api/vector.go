@@ -43,7 +43,7 @@ func resolveSessionScope(sessionID int64, defaultScope string) string {
 }
 
 // extractScopeGroup extracts the group name from a scope string.
-// Returns "" for global scopes ("knowledge", "memory").
+// Returns "" for global scopes ("memory").
 func extractScopeGroup(scope string) string {
 	parts := strings.Split(scope, "/")
 	if len(parts) >= 2 {
@@ -76,20 +76,21 @@ func waitVectorReady(c *gin.Context) bool {
 }
 
 // isValidScope returns true if scope is one of the allowed forms:
-//   - "knowledge" or "memory" (global)
-//   - "<group>/knowledge", "<group>/memory", or "<group>/rules" (team-level)
-//   - "<group>/sessions/<id>/knowledge", "<group>/sessions/<id>/memory" (session-level)
+//   - "memory" (global)
+//   - "memory" (global)
+//   - "<group>/memory" or "<group>/rules" (team-level)
+//   - "<group>/sessions/<id>/memory" (session-level)
 //
 // groupname supports Unicode letters (including CJK/Chinese), digits, spaces,
 // hyphens and underscores. Path traversal sequences are rejected.
 func isValidScope(scope string) bool {
-	if scope == "knowledge" || scope == "memory" {
+	if scope == "memory" {
 		return true
 	}
 	// Try session-level: <group>/sessions/<id>/<suffix>
 	if parts := strings.Split(scope, "/"); len(parts) == 4 && parts[1] == "sessions" {
 		group, idStr, suffix := parts[0], parts[2], parts[3]
-		if suffix != "knowledge" && suffix != "memory" {
+		if suffix != "memory" {
 			return false
 		}
 		if !isValidGroupName(group) {
@@ -107,7 +108,7 @@ func isValidScope(scope string) bool {
 		return false
 	}
 	suffix := scope[idx+1:]
-	if suffix != "knowledge" && suffix != "memory" && suffix != "rules" {
+	if suffix != "memory" && suffix != "rules" {
 		return false
 	}
 	prefix := scope[:idx]
@@ -135,7 +136,7 @@ func SearchVector(c *gin.Context) {
 		return
 	}
 	if req.Scope != "" && !isValidScope(req.Scope) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "scope must be 'knowledge', 'memory', or '<groupname>/knowledge', '<groupname>/memory'"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "scope must be 'memory' or '<groupname>/memory'"})
 		return
 	}
 	if req.Query == "" {
@@ -146,7 +147,7 @@ func SearchVector(c *gin.Context) {
 		req.TopK = 5
 	}
 	if req.Scope == "" {
-		req.Scope = "knowledge" // default scope for generic search
+		req.Scope = "memory" // default scope for generic search
 	}
 	if !waitVectorReady(c) {
 		return
@@ -170,22 +171,10 @@ func SearchVector(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"results": results})
 }
 
-// SearchKnowledge performs semantic search on knowledge files
-// POST /api/v1/vector/search_knowledge
-func SearchKnowledge(c *gin.Context) {
-	vectorSearch(c, "knowledge")
-}
-
 // SearchMemory performs semantic search on memory files
 // POST /api/v1/vector/search_memory
 func SearchMemory(c *gin.Context) {
 	vectorSearch(c, "memory")
-}
-
-// ListKnowledgeFiles lists knowledge files with optional session_id auto-scope.
-// GET /api/v1/vector/list_knowledge?session_id=<id>&scope=<optional>
-func ListKnowledgeFiles(c *gin.Context) {
-	vectorList(c, "knowledge")
 }
 
 // ListMemoryFiles lists memory files with optional session_id auto-scope.
@@ -201,7 +190,7 @@ func enrichResult(r map[string]interface{}, scopeType, origin string) map[string
 	for k, v := range r {
 		out[k] = v
 	}
-	out["type"] = scopeType // "memory" | "knowledge"
+	out["type"] = scopeType // "memory"
 	// Extract source_session_id from metadata (stored as float64 in JSON)
 	if meta, ok := r["metadata"].(map[string]interface{}); ok {
 		if sid, ok := meta["source_session_id"]; ok {
@@ -274,7 +263,7 @@ func vectorSearch(c *gin.Context, defaultScope string) {
 	}
 
 	// Determine type label from scope suffix
-	scopeType := defaultScope // "memory" or "knowledge"
+	scopeType := defaultScope // "memory"
 
 	// Explicit scope takes priority
 	if req.Scope != "" {
@@ -473,12 +462,6 @@ func filterByTags(results []map[string]interface{}, tags []string) []map[string]
 	return filtered
 }
 
-// ReadKnowledge reads a knowledge file's full content
-// POST /api/v1/vector/read_knowledge
-func ReadKnowledge(c *gin.Context) {
-	vectorRead(c, "knowledge")
-}
-
 // ReadMemory reads a memory file's full content
 // POST /api/v1/vector/read_memory
 func ReadMemory(c *gin.Context) {
@@ -523,12 +506,6 @@ func vectorRead(c *gin.Context, defaultScope string) {
 	c.JSON(http.StatusOK, gin.H{"file_name": req.FileName, "content": string(data), "scope": scope})
 }
 
-// WriteKnowledge writes/updates a knowledge file
-// POST /api/v1/vector/write_knowledge
-func WriteKnowledge(c *gin.Context) {
-	vectorWrite(c, "knowledge")
-}
-
 // WriteMemory writes/updates a memory file
 // POST /api/v1/vector/write_memory
 func WriteMemory(c *gin.Context) {
@@ -539,7 +516,7 @@ func WriteMemory(c *gin.Context) {
 // POST /api/v1/vector/write
 func WriteVector(c *gin.Context) {
 	// Default scope is only used when request omits scope.
-	vectorWrite(c, "knowledge")
+	vectorWrite(c, "memory")
 }
 
 func vectorWrite(c *gin.Context, defaultScope string) {
@@ -609,12 +586,6 @@ func vectorWrite(c *gin.Context, defaultScope string) {
 	c.JSON(http.StatusOK, gin.H{"ok": true, "file_name": req.FileName, "scope": scope})
 }
 
-// DeleteKnowledge deletes a knowledge file
-// POST /api/v1/vector/delete_knowledge
-func DeleteKnowledge(c *gin.Context) {
-	vectorDelete(c, "knowledge")
-}
-
 // DeleteMemory deletes a memory file
 // POST /api/v1/vector/delete_memory
 func DeleteMemory(c *gin.Context) {
@@ -625,7 +596,7 @@ func DeleteMemory(c *gin.Context) {
 // POST /api/v1/vector/delete
 func DeleteVector(c *gin.Context) {
 	// Default scope is only used when request omits scope.
-	vectorDelete(c, "knowledge")
+	vectorDelete(c, "memory")
 }
 
 func vectorDelete(c *gin.Context, defaultScope string) {
@@ -667,9 +638,9 @@ func vectorDelete(c *gin.Context, defaultScope string) {
 }
 
 // StatsVector returns vector hit statistics
-// GET /api/v1/vector/stats?scope=knowledge
+// GET /api/v1/vector/stats?scope=memory
 func StatsVector(c *gin.Context) {
-	scope := c.DefaultQuery("scope", "knowledge")
+	scope := c.DefaultQuery("scope", "memory")
 	if !isValidScope(scope) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid scope"})
 		return
@@ -769,7 +740,7 @@ func ListVectorFiles(c *gin.Context) {
 type VectorFileItem struct {
 	FileName        string `json:"file_name"`
 	Preview         string `json:"preview"`           // first 100 chars of content
-	Type            string `json:"type"`              // "memory" | "knowledge"
+	Type            string `json:"type"`              // "memory"
 	SourceSessionID int64  `json:"source_session_id"` // session that wrote this file (0 if unknown)
 	UpdatedAt       string `json:"updated_at"`        // RFC3339 mod time
 	Scope           string `json:"scope"`
@@ -777,7 +748,7 @@ type VectorFileItem struct {
 }
 
 // ListVectorFilesRich lists .md files with preview, type, source_session_id, origin, and updated_at.
-// GET /api/v1/vector/list_files?session_id=<id>&scope=<optional>&list_global=<bool>&type=<memory|knowledge|all>&level=<session|team|global|all>
+// GET /api/v1/vector/list_files?session_id=<id>&scope=<optional>&list_global=<bool>&type=<memory|all>&level=<session|team|global|all>
 //
 // level parameter:
 //   - "session": only session-level files
@@ -790,7 +761,7 @@ func ListVectorFilesRich(c *gin.Context) {
 	sessionIDStr := strings.TrimSpace(c.Query("session_id"))
 	explicitScope := strings.TrimSpace(c.Query("scope"))
 	listGlobal := c.Query("list_global") == "true"
-	typeFilter := strings.TrimSpace(c.Query("type"))   // "memory" | "knowledge" | "all" | ""
+	typeFilter := strings.TrimSpace(c.Query("type"))   // "memory" | "all" | ""
 	levelFilter := strings.TrimSpace(c.Query("level")) // "session" | "team" | "global" | "all" | ""
 	tagFilter := strings.TrimSpace(c.Query("tag"))     // optional: filter by tag
 
@@ -819,11 +790,9 @@ func ListVectorFilesRich(c *gin.Context) {
 		scopesToList = append(scopesToList, scopeEntry{scope: explicitScope, origin: "global"})
 	} else {
 		// Auto-resolve scopes
-		types := []string{"memory", "knowledge"}
+		types := []string{"memory"}
 		if typeFilter == "memory" {
 			types = []string{"memory"}
-		} else if typeFilter == "knowledge" {
-			types = []string{"knowledge"}
 		}
 
 		var groupName string
