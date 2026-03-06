@@ -132,10 +132,12 @@ func (w *VectorWatcher) fullSync() {
 		if err != nil {
 			continue
 		}
+		localFiles := make(map[string]bool)
 		for _, e := range entries {
 			if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
 				continue
 			}
+			localFiles[e.Name()] = true
 			path := filepath.Join(dir, e.Name())
 			info, err := e.Info()
 			if err != nil {
@@ -145,6 +147,18 @@ func (w *VectorWatcher) fullSync() {
 			// Preserve existing source_session_id if available in vector DB
 			sessionID := extractSessionID(scopeMeta[scope], e.Name())
 			syncFileToVector(scope, path, sessionID)
+		}
+		// Reverse cleanup: delete vector records that have no corresponding local file
+		if meta := scopeMeta[scope]; meta != nil {
+			for docID := range meta {
+				if !localFiles[docID] {
+					if err := Vector.Delete(scope, docID); err != nil {
+						log.Printf("[vector-watcher] orphan delete error %s/%s: %v", scope, docID, err)
+					} else {
+						log.Printf("[vector-watcher] orphan deleted: %s/%s", scope, docID)
+					}
+				}
+			}
 		}
 	}
 	log.Printf("[vector-watcher] initial sync: %d files", len(w.snapshots))
