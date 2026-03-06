@@ -56,18 +56,16 @@
 
 ## 数据管理类
 
-### 一号向量知识库（ai-hub-vector）
-**触发场景**：需要语义搜索、读写知识库/记忆库时
+### 一号向量记忆库（ai-hub-vector）
+**触发场景**：需要语义搜索、读写记忆库时
 **核心能力**：
-- 语义搜索知识库和记忆库
-- 读写删除知识/记忆文件
+- 语义搜索记忆库
+- 读写删除记忆文件
 - 自动推断团队 scope（传 session_id）
 - 命中统计和文件列表
 
 **关键接口**：
-- `POST /api/v1/vector/search_knowledge` — 搜索知识库
 - `POST /api/v1/vector/search_memory` — 搜索记忆库
-- `POST /api/v1/vector/write_knowledge` — 写入知识库
 - `POST /api/v1/vector/write_memory` — 写入记忆库
 - `GET /api/v1/vector/list_files` — 列出文件（富文本版）
 - `GET /api/v1/vector/status` — 查询向量引擎状态
@@ -75,7 +73,7 @@
 - `POST /api/v1/vector/restart` — 重启向量引擎
 
 **重要原则**：
-- 知识库和记忆库的唯一操作入口，禁止通过「文件管理」Skill 操作
+- 记忆库的唯一操作入口，禁止通过「文件管理」Skill 操作
 - 写入前必须先搜索，避免重复
 - 推荐传 `session_id` 自动推断团队 scope
 
