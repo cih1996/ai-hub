@@ -106,15 +106,17 @@ func Run(args []string) int {
 
 	switch command {
 	case "search":
-		return commands.RunSearch(c, globalFlags.GroupName, commandArgs)
+		return commands.RunSearch(c, commandArgs)
 	case "write":
-		return commands.RunWrite(c, globalFlags.GroupName, commandArgs)
+		return commands.RunWrite(c, commandArgs)
 	case "read":
-		return commands.RunRead(c, globalFlags.GroupName, commandArgs)
+		return commands.RunRead(c, commandArgs)
 	case "delete":
-		return commands.RunDelete(c, globalFlags.GroupName, commandArgs)
+		return commands.RunDelete(c, commandArgs)
 	case "list":
-		return commands.RunList(c, globalFlags.GroupName, int64(globalFlags.SessionID), commandArgs)
+		return commands.RunList(c, commandArgs)
+	case "edit":
+		return commands.RunEdit(c, commandArgs)
 	case "mem":
 		return runMem(c, globalFlags.GroupName, commandArgs)
 	default:
@@ -188,10 +190,11 @@ Global Flags:
 
 Commands:
   search             Search memory by semantic similarity
-  write              Write memory file
-  read               Read memory file
-  delete             Delete memory file
   list               List memory files
+  read               Read memory file
+  write              Write memory file
+  edit               Edit memory file (find and replace)
+  delete             Delete memory file
   mem                Structured memory management (add/retrieve/feedback/revise/deprecate/spec)
 
 Use "ai-hub <command> --help" for more information about a command.`)

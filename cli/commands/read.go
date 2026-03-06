@@ -6,30 +6,28 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strings"
 )
 
 // RunRead executes the read command
-func RunRead(c *client.Client, globalGroup string, args []string) int {
+func RunRead(c *client.Client, args []string) int {
 	filename, flagArgs := SplitQueryAndFlags(args)
 
-	var scope, group string
+	var level string
 	fs := flag.NewFlagSet("read", flag.ExitOnError)
-	fs.StringVar(&scope, "scope", "memory", "Scope: memory (default)")
-	fs.StringVar(&group, "group", globalGroup, "Group name")
+	fs.StringVar(&level, "level", "", "Level: session, team, or global (required)")
 
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, `Usage: ai-hub read <filename> --scope <type> [flags]
+		fmt.Fprintf(os.Stderr, `Usage: ai-hub read <filename> --level <level>
 
-Read a file from memory store.
+Read a memory file's full content.
 
 Flags:
-  --scope <type>       Scope: memory (default)
-  --group <name>       Group name (optional)
-
+`)
+		PrintLevelUsage()
+		fmt.Fprintf(os.Stderr, `
 Examples:
-  ai-hub read "my-note.md" --scope memory
-  ai-hub read "bug-fix.md" --scope memory --group "AI Hub 维护团队"
+  ai-hub read "my-note.md" --level session
+  ai-hub read "team-sop.md" --level team
 `)
 	}
 
@@ -42,22 +40,22 @@ Examples:
 		fs.Usage()
 		return 1
 	}
-	if !strings.HasSuffix(filename, ".md") {
-		filename += ".md"
-	}
 
-	if scope == "" {
-		scope = "memory"
-	}
-	if !ValidateScope(scope) {
-		fmt.Fprintf(os.Stderr, "Error: --scope must be 'memory'\n")
+	if level == "" {
+		fmt.Fprintf(os.Stderr, "Error: --level is required (session / team / global)\n\n")
+		fs.Usage()
 		return 1
 	}
 
-	fullScope := BuildScope(scope, group)
+	scope, errMsg := LevelToScope(level)
+	if errMsg != "" {
+		fmt.Fprintf(os.Stderr, "%s\n", errMsg)
+		return 1
+	}
+
 	reqBody := map[string]interface{}{
+		"scope":     scope,
 		"file_name": filename,
-		"scope":     fullScope,
 	}
 
 	respData, err := c.POST("/vector/read", reqBody)
@@ -67,9 +65,7 @@ Examples:
 	}
 
 	var resp struct {
-		FileName string `json:"file_name"`
-		Content  string `json:"content"`
-		Scope    string `json:"scope"`
+		Content string `json:"content"`
 	}
 	if err := json.Unmarshal(respData, &resp); err != nil {
 		fmt.Fprintf(os.Stderr, "Error parsing response: %v\n", err)

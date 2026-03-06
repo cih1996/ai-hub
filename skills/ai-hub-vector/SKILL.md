@@ -313,3 +313,65 @@ curl -X POST "http://localhost:$AI_HUB_PORT/api/v1/vector/restart"
 > - 全局 memory：`~/.ai-hub/memory/<file_name>`
 > - 团队 memory：`~/.ai-hub/teams/<团队名>/memory/<file_name>`
 > - 会话 memory：`~/.ai-hub/teams/<团队名>/sessions/<id>/memory/<file_name>`
+
+---
+
+## CLI 命令（ai-hub）
+
+所有命令统一使用 `--level` 参数指定三层 scope，环境变量 `AI_HUB_SESSION_ID`、`AI_HUB_GROUP_NAME`、`AI_HUB_PORT` 自动继承。
+
+### list — 列出记忆文件
+
+```bash
+ai-hub list --level session
+ai-hub list --level team
+ai-hub list --level global
+```
+
+输出格式：文件名 + 100字预览 + 创建/更新时间。
+
+### search — 语义搜索
+
+```bash
+ai-hub search "关键词" --level session
+ai-hub search "部署流程" --level team --top 5
+```
+
+默认 top_k=10，输出格式同 list + 相似度分数。
+
+### read — 读取文件
+
+```bash
+ai-hub read "文件名.md" --level session
+```
+
+### write — 写入文件
+
+```bash
+ai-hub write "文件名.md" --level session --content "# 内容"
+echo "内容" | ai-hub write "文件名.md" --level team
+```
+
+### edit — 编辑文件（查找替换）
+
+```bash
+ai-hub edit "文件名.md" --level session --old "旧文本" --new "新文本"
+```
+
+先读取文件，查找替换后写回，输出 diff。
+
+### delete — 删除文件
+
+```bash
+ai-hub delete "文件名.md" --level session --force
+```
+
+`--force` 跳过确认提示。
+
+### --level 参数说明
+
+| level | scope 解析 | 所需环境变量 |
+|-------|-----------|-------------|
+| `session` | `<团队名>/sessions/<id>/memory` | `AI_HUB_GROUP_NAME` + `AI_HUB_SESSION_ID` |
+| `team` | `<团队名>/memory` | `AI_HUB_GROUP_NAME` |
+| `global` | `memory` | 无 |
