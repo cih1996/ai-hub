@@ -17,29 +17,37 @@ import (
 )
 
 // resolveTeamScope looks up a session's group_name and returns the team scope.
-// Returns "" if session not found or has no group_name.
+// Returns "" if session not found. Uses "_standalone" when group_name is empty.
 func resolveTeamScope(sessionID int64, defaultScope string) string {
 	if sessionID <= 0 {
 		return ""
 	}
 	sess, err := store.GetSession(sessionID)
-	if err != nil || sess.GroupName == "" {
+	if err != nil {
 		return ""
 	}
-	return sess.GroupName + "/" + defaultScope
+	group := sess.GroupName
+	if group == "" {
+		group = "_standalone"
+	}
+	return group + "/" + defaultScope
 }
 
 // resolveSessionScope returns the session-level scope for a given session.
-// e.g. "团队名/sessions/21/memory". Returns "" if session has no group_name.
+// e.g. "团队名/sessions/21/memory". Uses "_standalone" when group_name is empty.
 func resolveSessionScope(sessionID int64, defaultScope string) string {
 	if sessionID <= 0 {
 		return ""
 	}
 	sess, err := store.GetSession(sessionID)
-	if err != nil || sess.GroupName == "" {
+	if err != nil {
 		return ""
 	}
-	return sess.GroupName + "/sessions/" + strconv.FormatInt(sessionID, 10) + "/" + defaultScope
+	group := sess.GroupName
+	if group == "" {
+		group = "_standalone"
+	}
+	return group + "/sessions/" + strconv.FormatInt(sessionID, 10) + "/" + defaultScope
 }
 
 // extractScopeGroup extracts the group name from a scope string.
@@ -307,8 +315,11 @@ func vectorSearch(c *gin.Context, defaultScope string) {
 	// Auto-resolve: three-layer merge (session → team → global)
 	var sessionGroup string
 	if req.SessionID > 0 {
-		if sess, err := store.GetSession(req.SessionID); err == nil && sess.GroupName != "" {
+		if sess, err := store.GetSession(req.SessionID); err == nil {
 			sessionGroup = sess.GroupName
+			if sessionGroup == "" {
+				sessionGroup = "_standalone"
+			}
 		}
 	}
 
@@ -543,8 +554,11 @@ func vectorWrite(c *gin.Context, defaultScope string) {
 	scope := defaultScope
 	var sessionGroup string // group of the requesting session
 	if req.SessionID > 0 {
-		if sess, err := store.GetSession(req.SessionID); err == nil && sess.GroupName != "" {
+		if sess, err := store.GetSession(req.SessionID); err == nil {
 			sessionGroup = sess.GroupName
+			if sessionGroup == "" {
+				sessionGroup = "_standalone"
+			}
 		}
 	}
 

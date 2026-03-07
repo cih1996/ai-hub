@@ -37,13 +37,16 @@ func LevelToScope(level string) (string, string) {
 
 	switch level {
 	case "session":
-		if group == "" || sessionID == "" {
-			return "", "Error: --level session requires AI_HUB_GROUP_NAME and AI_HUB_SESSION_ID environment variables"
+		if sessionID == "" {
+			return "", "Error: --level session requires AI_HUB_SESSION_ID environment variable"
+		}
+		if group == "" {
+			group = "_standalone"
 		}
 		return group + "/sessions/" + sessionID + "/memory", ""
 	case "team":
 		if group == "" {
-			return "", "Error: --level team requires AI_HUB_GROUP_NAME environment variable"
+			group = "_standalone"
 		}
 		return group + "/memory", ""
 	case "global":
