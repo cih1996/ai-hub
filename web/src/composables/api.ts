@@ -255,17 +255,19 @@ export const readVectorFile = (scope: string, fileName: string) =>
   })
 
 // Write a single file to any valid vector scope
-export const writeVectorFile = (scope: string, fileName: string, content: string) =>
+// When sessionId is provided and scope is empty, backend auto-resolves session-level scope
+export const writeVectorFile = (scope: string, fileName: string, content: string, sessionId?: number) =>
   request<{ ok: boolean; file_name: string; scope: string }>('/vector/write', {
     method: 'POST',
-    body: JSON.stringify({ scope, file_name: fileName, content }),
+    body: JSON.stringify({ scope: scope || '', file_name: fileName, content, ...(sessionId ? { session_id: sessionId } : {}) }),
   })
 
 // Delete a single file from any valid vector scope
-export const deleteVectorFile = (scope: string, fileName: string) =>
+// When sessionId is provided and scope is empty, backend auto-resolves session-level scope
+export const deleteVectorFile = (scope: string, fileName: string, sessionId?: number) =>
   request<{ ok: boolean; file_name: string }>('/vector/delete', {
     method: 'POST',
-    body: JSON.stringify({ scope, file_name: fileName }),
+    body: JSON.stringify({ scope: scope || '', file_name: fileName, ...(sessionId ? { session_id: sessionId } : {}) }),
   })
 
 // Channels

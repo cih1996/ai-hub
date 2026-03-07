@@ -628,21 +628,16 @@ async function createMemoryFile() {
   if (!sid || !memoryNewFileName.value.trim()) return
   let fileName = memoryNewFileName.value.trim()
   if (!fileName.endsWith('.md')) fileName += '.md'
-  // Determine scope: use session-level scope
-  const sess = store.currentSession
-  const groupName = sess?.group_name
-  let scope = 'memory'
-  if (groupName) {
-    scope = `${groupName}/sessions/${sid}/memory`
-  }
   memoryFileSaving.value = true
   try {
-    await api.writeVectorFile(scope, fileName, memoryFileContent.value)
+    // Pass session_id with empty scope, let backend auto-resolve session-level scope
+    // (handles both team sessions and standalone sessions via _standalone fallback)
+    const res = await api.writeVectorFile('', fileName, memoryFileContent.value, sid)
     showToast('创建成功')
     memoryCreating.value = false
     await loadMemoryFiles()
-    // Select the newly created file
-    const newFile = memoryFiles.value.find(f => f.file_name === fileName && f.scope === scope)
+    // Select the newly created file using the scope returned by backend
+    const newFile = memoryFiles.value.find(f => f.file_name === fileName && f.scope === res.scope)
     if (newFile) selectMemoryFile(newFile)
   } catch (e: any) {
     showToast('创建失败: ' + (e.message || '未知错误'), 'error')

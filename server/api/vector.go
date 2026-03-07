@@ -624,21 +624,33 @@ func vectorDelete(c *gin.Context, defaultScope string) {
 	var req struct {
 		FileName  string `json:"file_name"`
 		Scope     string `json:"scope"`      // optional: explicit scope override
-		SessionID int64  `json:"session_id"` // optional: auto-resolve team scope
+		SessionID int64  `json:"session_id"` // optional: auto-resolve session/team scope
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+
+	// Resolve scope with session-level support (aligned with vectorWrite)
 	scope := defaultScope
+	var sessionGroup string
+	if req.SessionID > 0 {
+		if sess, err := store.GetSession(req.SessionID); err == nil {
+			sessionGroup = sess.GroupName
+			if sessionGroup == "" {
+				sessionGroup = "_standalone"
+			}
+		}
+	}
+
 	if req.Scope != "" {
 		if !isValidScope(req.Scope) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid scope"})
 			return
 		}
 		scope = req.Scope
-	} else if teamScope := resolveTeamScope(req.SessionID, defaultScope); teamScope != "" {
-		scope = teamScope
+	} else if sessionGroup != "" {
+		scope = sessionGroup + "/sessions/" + strconv.FormatInt(req.SessionID, 10) + "/" + defaultScope
 	}
 	if req.FileName == "" || !validatePath(req.FileName) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "valid file_name is required"})
