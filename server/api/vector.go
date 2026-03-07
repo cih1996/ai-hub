@@ -833,8 +833,11 @@ func ListVectorFilesRich(c *gin.Context) {
 
 		var groupName string
 		if sessionID > 0 {
-			if sess, err := store.GetSession(sessionID); err == nil && sess.GroupName != "" {
+			if sess, err := store.GetSession(sessionID); err == nil {
 				groupName = sess.GroupName
+				if groupName == "" {
+					groupName = "_standalone"
+				}
 			}
 		}
 
