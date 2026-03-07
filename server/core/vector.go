@@ -314,6 +314,8 @@ func (v *VectorEngine) startProcess() error {
 		fmt.Sprintf("VECTOR_ENGINE_PORT=%d", v.port),
 		"VECTOR_DB_PATH="+filepath.Join(v.baseDir, "data"),
 		"EMBEDDING_MODEL_PATH="+filepath.Join(v.baseDir, "models"),
+		"HF_HUB_OFFLINE=1",
+		"TRANSFORMERS_OFFLINE=1",
 	)
 	cmd.SysProcAttr = newProcessGroupAttr()
 	cmd.Stdout = os.Stdout
