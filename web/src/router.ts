@@ -13,6 +13,7 @@ const router = createRouter({
         { path: 'skills', name: 'skills', component: () => import('./views/SkillsView.vue') },
         { path: 'mcp', name: 'mcp', component: () => import('./views/McpView.vue') },
         { path: 'triggers', name: 'triggers', component: () => import('./views/TriggersView.vue') },
+        { path: 'services', name: 'services', component: () => import('./views/ServicesView.vue') },
         { path: 'channels', name: 'channels', component: () => import('./views/ChannelsView.vue') },
         { path: 'token-usage', name: 'token-usage', component: () => import('./views/TokenUsageView.vue') },
       ],
