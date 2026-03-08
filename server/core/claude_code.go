@@ -2,6 +2,7 @@ package core
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -58,7 +59,24 @@ func NewClaudeCodeClient() *ClaudeCodeClient {
 	return &ClaudeCodeClient{BinaryPath: "claude"}
 }
 
+// ErrClaudeCLINotFound is returned when claude CLI is not installed
+var ErrClaudeCLINotFound = fmt.Errorf("Claude CLI 未安装。请先安装：npm install -g @anthropic-ai/claude-code")
+
+// checkClaudeCLI verifies that claude CLI is available in PATH
+func (c *ClaudeCodeClient) checkClaudeCLI() error {
+	_, err := exec.LookPath(c.BinaryPath)
+	if err != nil {
+		return ErrClaudeCLINotFound
+	}
+	return nil
+}
+
 func (c *ClaudeCodeClient) Stream(ctx context.Context, req ClaudeCodeRequest, onData func(string)) error {
+	// Check if claude CLI is installed before attempting to run
+	if err := c.checkClaudeCLI(); err != nil {
+		return err
+	}
+
 	// Build flags first, query last — matches documented CLI patterns
 	args := []string{
 		"-p",
@@ -161,7 +179,7 @@ func (c *ClaudeCodeClient) Stream(ctx context.Context, req ClaudeCodeRequest, on
 	}
 
 	// Collect stderr in background
-	var stderrBuf strings.Builder
+	var stderrBuf bytes.Buffer
 	var stderrMu sync.Mutex
 	go func() {
 		buf, _ := io.ReadAll(stderr)
@@ -185,7 +203,7 @@ func (c *ClaudeCodeClient) Stream(ctx context.Context, req ClaudeCodeRequest, on
 	waitErr := cmd.Wait()
 	if waitErr != nil {
 		stderrMu.Lock()
-		errOutput := strings.TrimSpace(stderrBuf.String())
+		errOutput := strings.TrimSpace(decodeStderr(stderrBuf.Bytes()))
 		stderrMu.Unlock()
 		log.Printf("[claude] exit error: %v, stderr: %s", waitErr, errOutput)
 		if errOutput != "" {

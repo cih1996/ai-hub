@@ -500,8 +500,10 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 				broadcast(WSMessage{Type: "token_usage", SessionID: session.ID, Content: string(usageJSON)})
 			}
 		} else {
-			// No content received — remove the empty pre-inserted message
-			store.DeleteMessage(progressMsgID)
+			// No content received — update the pre-inserted message with error instead of deleting
+			errContent := "❌ " + err.Error()
+			store.UpdateMessageContent(progressMsgID, errContent, "")
+			broadcast(WSMessage{Type: "chunk", SessionID: session.ID, Content: errContent})
 		}
 		broadcast(WSMessage{Type: "error", SessionID: session.ID, Content: err.Error()})
 		return
