@@ -200,6 +200,10 @@ func main() {
 		v1.POST("/status/retry-install", api.RetryInstall)
 		v1.GET("/version", api.GetVersion)
 
+		// System init status (for first-run guide)
+		v1.GET("/system/init-status", api.GetInitStatus)
+		v1.POST("/system/install-dep", api.InstallDep)
+
 		// Skills
 		v1.GET("/skills", api.ListSkills)
 		v1.POST("/skills/toggle", api.ToggleSkill)
