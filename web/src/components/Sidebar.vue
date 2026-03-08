@@ -103,11 +103,9 @@ function confirmDelete() {
 }
 
 const isManage = computed(() => route.path.startsWith('/manage'))
-const isSkills = computed(() => route.path.startsWith('/skills'))
+const isExtensions = computed(() => route.path.startsWith('/extensions'))
 const isServices = computed(() => route.path.startsWith('/services'))
-const isMcp = computed(() => route.path.startsWith('/mcp'))
-const isTriggers = computed(() => route.path.startsWith('/triggers'))
-const isChannels = computed(() => route.path.startsWith('/channels'))
+const isAutomation = computed(() => route.path.startsWith('/automation'))
 const isTokenUsage = computed(() => route.path.startsWith('/token-usage'))
 
 interface SessionGroup {
@@ -257,12 +255,13 @@ onMounted(async () => {
         </svg>
         <span>管理</span>
       </button>
-      <button class="nav-item" :class="{ active: isSkills }" @click="navTo('/skills')">
+      <button class="nav-item" :class="{ active: isExtensions }" @click="navTo('/extensions')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M22 11.08V12a10 10 0 11-5.93-9.14"/>
-          <polyline points="22 4 12 14.01 9 11.01"/>
+          <path d="M16 16v1a2 2 0 01-2 2H3a2 2 0 01-2-2V7a2 2 0 012-2h2m5.66 0H14a2 2 0 012 2v3.34l1 1L23 7v10"/>
+          <line x1="1" y1="1" x2="23" y2="23" stroke-width="0"/>
+          <rect x="8" y="2" width="8" height="8" rx="1"/>
         </svg>
-        <span>技能</span>
+        <span>扩展</span>
       </button>
       <button class="nav-item" :class="{ active: isServices }" @click="navTo('/services')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -273,27 +272,15 @@ onMounted(async () => {
         </svg>
         <span>作品</span>
       </button>
-      <button class="nav-item" :class="{ active: isMcp }" @click="navTo('/mcp')">
+      <button class="nav-item" :class="{ active: isAutomation }" @click="navTo('/automation')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/>
-          <rect x="2" y="14" width="20" height="8" rx="2" ry="2"/>
-          <line x1="6" y1="6" x2="6.01" y2="6"/>
-          <line x1="6" y1="18" x2="6.01" y2="18"/>
+          <polyline points="16 3 21 3 21 8"/>
+          <line x1="4" y1="20" x2="21" y2="3"/>
+          <polyline points="21 16 21 21 16 21"/>
+          <line x1="15" y1="15" x2="21" y2="21"/>
+          <line x1="4" y1="4" x2="9" y2="9"/>
         </svg>
-        <span>MCP</span>
-      </button>
-      <button class="nav-item" :class="{ active: isTriggers }" @click="navTo('/triggers')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="12" cy="12" r="10"/>
-          <polyline points="12 6 12 12 16 14"/>
-        </svg>
-        <span>定时</span>
-      </button>
-      <button class="nav-item" :class="{ active: isChannels }" @click="navTo('/channels')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
-        </svg>
-        <span>通讯</span>
+        <span>自动化</span>
       </button>
       <button class="nav-item" :class="{ active: isTokenUsage }" @click="navTo('/token-usage')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
