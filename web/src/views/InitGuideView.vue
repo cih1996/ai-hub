@@ -50,7 +50,7 @@ const providerForm = ref<Provider>({
   name: 'Anthropic',
   base_url: 'https://api.anthropic.com',
   api_key: '',
-  model: 'claude-sonnet-4-20250514',
+  model: 'claude-3-5-sonnet-20240620',
   is_default: true
 })
 
@@ -60,7 +60,7 @@ const proxyUrl = ref('')
 
 // Preset providers
 const presetProviders = [
-  { name: 'Anthropic', base_url: 'https://api.anthropic.com', model: 'claude-sonnet-4-20250514' },
+  { name: 'Anthropic', base_url: 'https://api.anthropic.com', model: 'claude-3-5-sonnet-20240620' },
   { name: 'OpenAI', base_url: 'https://api.openai.com/v1', model: 'gpt-4o' },
   { name: 'DeepSeek', base_url: 'https://api.deepseek.com', model: 'deepseek-chat' },
   { name: '自定义', base_url: '', model: '' }
@@ -107,7 +107,6 @@ async function installDep(dep: MissingDep) {
 
     if (result.success) {
       installProgress.value[dep.name] = { status: 'success', output: result.output }
-      // Refresh status
       await checkInitStatus()
     } else {
       installProgress.value[dep.name] = { status: 'error', output: result.error || result.output }
@@ -161,7 +160,6 @@ async function saveProvider() {
 
 async function saveProxy() {
   if (proxyEnabled.value && proxyUrl.value) {
-    // Save proxy to localStorage for now
     localStorage.setItem('ai-hub-proxy', proxyUrl.value)
   }
   nextStep()
@@ -185,7 +183,7 @@ function finish() {
 }
 
 function skipGuide() {
-  if (confirm('确定跳过引导？您可以稍后在设置中配置。')) {
+  if (confirm('确定要跳过引导吗？您稍后可以在设置中进行配置。')) {
     localStorage.setItem('ai-hub-init-completed', 'true')
     router.push('/chat')
   }
@@ -194,209 +192,223 @@ function skipGuide() {
 
 <template>
   <div class="init-guide">
-    <div class="guide-container">
-      <!-- Progress bar -->
-      <div class="progress-bar">
-        <div class="progress-track">
-          <div class="progress-fill" :style="{ width: `${(currentStep / totalSteps) * 100}%` }"></div>
+    <div class="guide-wrapper">
+      <!-- Header / Progress -->
+      <header class="guide-header">
+        <div class="logo">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span>AI Hub</span>
         </div>
-        <div class="step-indicators">
-          <div
-            v-for="step in totalSteps"
-            :key="step"
-            class="step-dot"
-            :class="{ active: step <= currentStep, current: step === currentStep }"
-          >
-            {{ step }}
-          </div>
+        <div class="steps-count">
+          <span class="current">{{ currentStep }}</span>
+          <span class="divider">/</span>
+          <span class="total">{{ totalSteps }}</span>
         </div>
-      </div>
+      </header>
 
-      <!-- Step 1: Welcome -->
-      <div v-if="currentStep === 1" class="step-content">
-        <div class="welcome-icon">🚀</div>
-        <h1>欢迎使用 AI Hub</h1>
-        <p class="subtitle">智能体管理中心，让 AI 为你工作</p>
-
-        <div class="env-check" v-if="initStatus">
-          <h3>环境检测</h3>
-          <div class="check-list">
-            <div class="check-item" :class="{ ok: initStatus.deps_status.node_installed }">
-              <span class="icon">{{ initStatus.deps_status.node_installed ? '✅' : '❌' }}</span>
-              <span>Node.js {{ initStatus.deps_status.node_version || '未安装' }}</span>
+      <div class="guide-content">
+        <!-- Step 1: Welcome -->
+        <transition name="fade" mode="out-in">
+          <div v-if="currentStep === 1" class="step-pane welcome-pane">
+            <div class="hero-text">
+              <h1>初始化您的<br/>智能中心</h1>
+              <p class="subtitle">配置环境以释放 AI 智能体的潜力。</p>
             </div>
-            <div class="check-item" :class="{ ok: initStatus.deps_status.npm_installed }">
-              <span class="icon">{{ initStatus.deps_status.npm_installed ? '✅' : '❌' }}</span>
-              <span>npm {{ initStatus.deps_status.npm_version || '未安装' }}</span>
-            </div>
-            <div class="check-item" :class="{ ok: initStatus.deps_status.claude_installed }">
-              <span class="icon">{{ initStatus.deps_status.claude_installed ? '✅' : '❌' }}</span>
-              <span>Claude CLI {{ initStatus.deps_status.claude_version || '未安装' }}</span>
-            </div>
-          </div>
-        </div>
 
-        <div class="actions">
-          <button class="btn-primary" @click="nextStep">开始配置</button>
-          <button class="btn-text" @click="skipGuide">跳过引导</button>
-        </div>
-      </div>
-
-      <!-- Step 2: Install Dependencies -->
-      <div v-if="currentStep === 2" class="step-content">
-        <h2>安装依赖</h2>
-        <p class="subtitle">检测到以下依赖需要安装</p>
-
-        <div v-if="requiredDeps.length === 0 && optionalDeps.length === 0" class="all-good">
-          <div class="icon">✅</div>
-          <p>所有依赖已就绪！</p>
-        </div>
-
-        <div v-else class="deps-list">
-          <div v-if="requiredDeps.length > 0" class="deps-section">
-            <h4>必需依赖</h4>
-            <div v-for="dep in requiredDeps" :key="dep.name" class="dep-item">
-              <div class="dep-info">
-                <span class="dep-name">{{ dep.name }}</span>
-                <span class="dep-desc">{{ dep.description }}</span>
+            <div class="env-status-card" v-if="initStatus">
+              <div class="card-header">
+                <h3>系统状态</h3>
+                <span class="status-badge" :class="{ 'all-ok': initStatus.deps_status.node_installed && initStatus.deps_status.npm_installed }">
+                  {{ initStatus.deps_status.node_installed && initStatus.deps_status.npm_installed ? '就绪' : '检测到问题' }}
+                </span>
               </div>
-              <div class="dep-action">
-                <template v-if="installProgress[dep.name]">
-                  <span v-if="installProgress[dep.name]?.status === 'installing'" class="status installing">安装中...</span>
-                  <span v-else-if="installProgress[dep.name]?.status === 'success'" class="status success">✅ 已安装</span>
-                  <span v-else class="status error">❌ 失败</span>
-                </template>
-                <button v-else class="btn-small" @click="installDep(dep)" :disabled="!dep.install_cmd">
-                  安装
-                </button>
+              <div class="status-grid">
+                <div class="status-item">
+                  <span class="label">Node.js</span>
+                  <span class="value">{{ initStatus.deps_status.node_version || '未安装' }}</span>
+                  <div class="indicator" :class="{ active: initStatus.deps_status.node_installed }"></div>
+                </div>
+                <div class="status-item">
+                  <span class="label">NPM</span>
+                  <span class="value">{{ initStatus.deps_status.npm_version || '未安装' }}</span>
+                  <div class="indicator" :class="{ active: initStatus.deps_status.npm_installed }"></div>
+                </div>
+                <div class="status-item">
+                  <span class="label">Claude CLI</span>
+                  <span class="value">{{ initStatus.deps_status.claude_version || '未安装' }}</span>
+                  <div class="indicator" :class="{ active: initStatus.deps_status.claude_installed }"></div>
+                </div>
               </div>
+            </div>
+
+            <div class="step-actions">
+              <button class="btn-primary" @click="nextStep">开始配置</button>
+              <button class="btn-text" @click="skipGuide">跳过设置</button>
             </div>
           </div>
 
-          <div v-if="optionalDeps.length > 0" class="deps-section">
-            <h4>可选依赖</h4>
-            <div v-for="dep in optionalDeps" :key="dep.name" class="dep-item">
-              <div class="dep-info">
-                <span class="dep-name">{{ dep.name }}</span>
-                <span class="dep-desc">{{ dep.description }}</span>
+          <!-- Step 2: Dependencies -->
+          <div v-else-if="currentStep === 2" class="step-pane">
+            <div class="pane-header">
+              <h2>依赖项</h2>
+              <p>安装所需工具以获得最佳性能。</p>
+            </div>
+
+            <div v-if="requiredDeps.length === 0 && optionalDeps.length === 0" class="empty-state">
+              <div class="icon-circle">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M20 6L9 17L4 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
               </div>
-              <div class="dep-action">
-                <template v-if="installProgress[dep.name]">
-                  <span v-if="installProgress[dep.name]?.status === 'installing'" class="status installing">安装中...</span>
-                  <span v-else-if="installProgress[dep.name]?.status === 'success'" class="status success">✅ 已安装</span>
-                  <span v-else class="status error">❌ 失败</span>
-                </template>
-                <button v-else class="btn-small btn-secondary" @click="installDep(dep)" :disabled="!dep.install_cmd">
-                  安装
-                </button>
+              <p>所有依赖项已安装。</p>
+            </div>
+
+            <div v-else class="deps-container">
+              <div v-for="dep in [...requiredDeps, ...optionalDeps]" :key="dep.name" class="dep-card">
+                <div class="dep-content">
+                  <div class="dep-header">
+                    <span class="dep-name">{{ dep.name }}</span>
+                    <span v-if="dep.required" class="tag-required">必需</span>
+                    <span v-else class="tag-optional">可选</span>
+                  </div>
+                  <p class="dep-desc">{{ dep.description }}</p>
+                </div>
+                <div class="dep-action">
+                   <template v-if="installProgress[dep.name]">
+                    <span v-if="installProgress[dep.name]?.status === 'installing'" class="status-text installing">安装中...</span>
+                    <span v-else-if="installProgress[dep.name]?.status === 'success'" class="status-text success">已安装</span>
+                    <span v-else class="status-text error">失败</span>
+                  </template>
+                  <button v-else class="btn-icon" @click="installDep(dep)" :disabled="!dep.install_cmd" title="安装">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M12 5V19M12 19L5 12M12 19L19 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                  </button>
+                </div>
               </div>
+              
+              <button class="btn-secondary full-width" @click="installAllDeps">一键安装缺失项</button>
+            </div>
+
+            <div class="step-actions">
+              <button class="btn-secondary" @click="prevStep">上一步</button>
+              <button class="btn-primary" @click="nextStep">
+                {{ allRequiredInstalled ? '下一步' : '跳过' }}
+              </button>
             </div>
           </div>
 
-          <button class="btn-outline" @click="installAllDeps">一键安装全部</button>
-        </div>
+          <!-- Step 3: Proxy -->
+          <div v-else-if="currentStep === 3" class="step-pane">
+            <div class="pane-header">
+              <h2>网络代理</h2>
+              <p>如果您在受限区域，请配置网络访问。</p>
+            </div>
 
-        <div class="actions">
-          <button class="btn-secondary" @click="prevStep">上一步</button>
-          <button class="btn-primary" @click="nextStep">
-            {{ allRequiredInstalled ? '下一步' : '跳过' }}
-          </button>
-        </div>
-      </div>
+            <div class="proxy-card">
+              <label class="toggle-row">
+                <span>启用代理</span>
+                <input type="checkbox" v-model="proxyEnabled" class="toggle-input" />
+                <div class="toggle-switch"></div>
+              </label>
 
-      <!-- Step 3: Proxy Settings -->
-      <div v-if="currentStep === 3" class="step-content">
-        <h2>代理设置</h2>
-        <p class="subtitle">如果您在中国大陆，可能需要配置代理访问 API</p>
+              <div class="input-group" :class="{ disabled: !proxyEnabled }">
+                <label>代理地址</label>
+                <input
+                  type="text"
+                  v-model="proxyUrl"
+                  placeholder="http://127.0.0.1:7890"
+                  class="modern-input"
+                  :disabled="!proxyEnabled"
+                />
+                <p class="input-hint">支持 HTTP 和 SOCKS5</p>
+              </div>
+            </div>
 
-        <div class="form-group">
-          <label class="checkbox-label">
-            <input type="checkbox" v-model="proxyEnabled" />
-            <span>启用代理</span>
-          </label>
-        </div>
+            <div class="step-actions">
+              <button class="btn-secondary" @click="prevStep">上一步</button>
+              <button class="btn-primary" @click="saveProxy">下一步</button>
+            </div>
+          </div>
 
-        <div v-if="proxyEnabled" class="form-group">
-          <label>代理地址</label>
-          <input
-            type="text"
-            v-model="proxyUrl"
-            placeholder="http://127.0.0.1:7890"
-            class="input"
-          />
-          <p class="hint">支持 HTTP/SOCKS5 代理，如 Clash、V2Ray 等</p>
-        </div>
+          <!-- Step 4: Provider -->
+          <div v-else-if="currentStep === 4" class="step-pane">
+            <div class="pane-header">
+              <h2>AI 服务商</h2>
+              <p>选择并配置您的主要 AI 模型服务商。</p>
+            </div>
 
-        <div class="actions">
-          <button class="btn-secondary" @click="prevStep">上一步</button>
-          <button class="btn-primary" @click="saveProxy">下一步</button>
-        </div>
-      </div>
+            <div class="provider-grid">
+              <button
+                v-for="preset in presetProviders"
+                :key="preset.name"
+                class="provider-card"
+                :class="{ active: providerForm.name === preset.name }"
+                @click="selectPreset(preset)"
+              >
+                <span class="provider-name">{{ preset.name }}</span>
+              </button>
+            </div>
 
-      <!-- Step 4: Configure Provider -->
-      <div v-if="currentStep === 4" class="step-content">
-        <h2>配置 API 供应商</h2>
-        <p class="subtitle">选择您的 AI 服务提供商并填写 API Key</p>
+            <div class="form-stack">
+              <div class="input-group">
+                <label>API 基础地址</label>
+                <input type="text" v-model="providerForm.base_url" class="modern-input" placeholder="https://api..." />
+              </div>
 
-        <div class="preset-list">
-          <button
-            v-for="preset in presetProviders"
-            :key="preset.name"
-            class="preset-btn"
-            :class="{ active: providerForm.name === preset.name }"
-            @click="selectPreset(preset)"
-          >
-            {{ preset.name }}
-          </button>
-        </div>
+              <div class="input-group">
+                <label>API 密钥</label>
+                <input type="password" v-model="providerForm.api_key" class="modern-input" placeholder="sk-..." />
+              </div>
 
-        <div class="form-group">
-          <label>名称</label>
-          <input type="text" v-model="providerForm.name" class="input" />
-        </div>
+              <div class="input-group">
+                <label>模型</label>
+                <input type="text" v-model="providerForm.model" class="modern-input" placeholder="model-name" />
+              </div>
+            </div>
 
-        <div class="form-group">
-          <label>API Base URL</label>
-          <input type="text" v-model="providerForm.base_url" class="input" placeholder="https://api.anthropic.com" />
-        </div>
+            <div class="step-actions">
+              <button class="btn-secondary" @click="prevStep">上一步</button>
+              <button class="btn-primary" @click="saveProvider" :disabled="loading">
+                {{ loading ? '保存中...' : '保存并继续' }}
+              </button>
+            </div>
+          </div>
 
-        <div class="form-group">
-          <label>API Key <span class="required">*</span></label>
-          <input type="password" v-model="providerForm.api_key" class="input" placeholder="sk-..." />
-        </div>
+          <!-- Step 5: Finish -->
+          <div v-else-if="currentStep === 5" class="step-pane finish-pane">
+            <div class="success-ring">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M20 6L9 17L4 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+            <h2>设置完成</h2>
+            <p class="subtitle">您的 AI Hub 已准备就绪。</p>
 
-        <div class="form-group">
-          <label>模型</label>
-          <input type="text" v-model="providerForm.model" class="input" placeholder="claude-sonnet-4-20250514" />
-        </div>
+            <div class="quick-tips">
+              <div class="tip-item">
+                <span class="tip-icon">💬</span>
+                <span>与 AI 智能体对话</span>
+              </div>
+              <div class="tip-item">
+                <span class="tip-icon">🧩</span>
+                <span>安装扩展</span>
+              </div>
+              <div class="tip-item">
+                <span class="tip-icon">⚡</span>
+                <span>自动化任务</span>
+              </div>
+            </div>
 
-        <div class="actions">
-          <button class="btn-secondary" @click="prevStep">上一步</button>
-          <button class="btn-primary" @click="saveProvider" :disabled="loading">
-            {{ loading ? '保存中...' : '保存并继续' }}
-          </button>
-        </div>
-      </div>
-
-      <!-- Step 5: Complete -->
-      <div v-if="currentStep === 5" class="step-content">
-        <div class="complete-icon">🎉</div>
-        <h1>配置完成！</h1>
-        <p class="subtitle">AI Hub 已准备就绪，开始您的智能体之旅吧</p>
-
-        <div class="tips">
-          <h4>快速上手</h4>
-          <ul>
-            <li>💬 在聊天界面与 AI 对话</li>
-            <li>⚙️ 在设置中管理供应商和规则</li>
-            <li>🔧 在扩展中启用 Skills 和 MCP</li>
-            <li>📊 在自动化中配置定时任务</li>
-          </ul>
-        </div>
-
-        <div class="actions">
-          <button class="btn-primary btn-large" @click="finish">进入 AI Hub</button>
-        </div>
+            <div class="step-actions">
+              <button class="btn-primary full-width" @click="finish">进入 AI Hub</button>
+            </div>
+          </div>
+        </transition>
       </div>
     </div>
   </div>
@@ -405,377 +417,564 @@ function skipGuide() {
 <style scoped>
 .init-guide {
   min-height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 20px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
-.guide-container {
-  background: white;
-  border-radius: 16px;
-  padding: 40px;
-  max-width: 600px;
+.guide-wrapper {
   width: 100%;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  max-width: 480px;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
 }
 
-.progress-bar {
-  margin-bottom: 40px;
-}
-
-.progress-track {
-  height: 4px;
-  background: #e0e0e0;
-  border-radius: 2px;
-  overflow: hidden;
-}
-
-.progress-fill {
-  height: 100%;
-  background: linear-gradient(90deg, #667eea, #764ba2);
-  transition: width 0.3s ease;
-}
-
-.step-indicators {
+/* Header */
+.guide-header {
   display: flex;
   justify-content: space-between;
-  margin-top: 12px;
+  align-items: center;
+  padding: 0 4px;
 }
 
-.step-dot {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: #e0e0e0;
-  color: #999;
+.logo {
   display: flex;
   align-items: center;
-  justify-content: center;
-  font-size: 12px;
+  gap: 8px;
   font-weight: 600;
-  transition: all 0.3s ease;
+  font-size: 16px;
+  color: var(--text-primary);
 }
 
-.step-dot.active {
-  background: #667eea;
-  color: white;
+.steps-count {
+  font-family: monospace;
+  font-size: 14px;
+  color: var(--text-muted);
 }
 
-.step-dot.current {
-  transform: scale(1.2);
-  box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.3);
+.steps-count .current {
+  color: var(--text-primary);
+  font-weight: 600;
 }
 
-.step-content {
+/* Content Area */
+.guide-content {
+  position: relative;
+  min-height: 400px;
+}
+
+.step-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.welcome-pane {
   text-align: center;
+  padding-top: 20px;
 }
 
-.welcome-icon, .complete-icon {
-  font-size: 64px;
-  margin-bottom: 20px;
+.finish-pane {
+  text-align: center;
+  padding-top: 40px;
+  align-items: center;
 }
 
-h1 {
-  font-size: 28px;
-  color: #333;
-  margin-bottom: 8px;
+.hero-text h1 {
+  font-size: 32px;
+  line-height: 1.2;
+  font-weight: 700;
+  margin-bottom: 12px;
+  letter-spacing: -0.5px;
 }
 
-h2 {
+.pane-header h2 {
   font-size: 24px;
-  color: #333;
+  font-weight: 600;
   margin-bottom: 8px;
 }
 
-.subtitle {
-  color: #666;
-  margin-bottom: 30px;
+.pane-header p, .subtitle {
+  color: var(--text-secondary);
+  font-size: 15px;
+  line-height: 1.5;
 }
 
-.env-check {
-  background: #f8f9fa;
-  border-radius: 12px;
+/* Status Card */
+.env-status-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 16px;
   padding: 20px;
-  margin-bottom: 30px;
   text-align: left;
 }
 
-.env-check h3 {
-  font-size: 16px;
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   margin-bottom: 16px;
-  color: #333;
 }
 
-.check-list {
+.card-header h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.status-badge {
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 100px;
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+}
+
+.status-badge.all-ok {
+  background: var(--success);
+  color: #fff;
+}
+
+.status-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.status-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px;
+  background: var(--bg-primary);
+  border-radius: 8px;
+}
+
+.status-item .label {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.status-item .value {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-family: monospace;
+}
+
+.indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--danger);
+}
+
+.indicator.active {
+  background: var(--success);
+}
+
+/* Dependencies */
+.deps-container {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-.check-item {
+.dep-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  transition: border-color 0.2s;
+}
+
+.dep-card:hover {
+  border-color: var(--text-muted);
+}
+
+.dep-content {
+  flex: 1;
+  min-width: 0;
+  margin-right: 16px;
+}
+
+.dep-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.dep-name {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.tag-required, .tag-optional {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.tag-required {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.tag-optional {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+.dep-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.btn-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-icon:hover:not(:disabled) {
+  background: var(--text-primary);
+  color: var(--bg-primary);
+  border-color: var(--text-primary);
+}
+
+.btn-icon:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.status-text {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.status-text.installing { color: var(--accent); }
+.status-text.success { color: var(--success); }
+.status-text.error { color: var(--danger); }
+
+/* Proxy & Forms */
+.proxy-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px;
+}
+
+.toggle-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  margin-bottom: 20px;
+}
+
+.toggle-input {
+  display: none;
+}
+
+.toggle-switch {
+  width: 44px;
+  height: 24px;
+  background: var(--bg-tertiary);
+  border-radius: 12px;
+  position: relative;
+  transition: background 0.2s;
+}
+
+.toggle-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  background: white;
+  border-radius: 50%;
+  transition: transform 0.2s;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+}
+
+.toggle-input:checked + .toggle-switch {
+  background: var(--text-primary);
+}
+
+.toggle-input:checked + .toggle-switch::after {
+  transform: translateX(20px);
+}
+
+.input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: opacity 0.2s;
+}
+
+.input-group.disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.input-group label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.modern-input {
+  width: 100%;
+  padding: 12px 16px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 14px;
+  color: var(--text-primary);
+  transition: all 0.2s;
+}
+
+.modern-input:focus {
+  border-color: var(--text-primary);
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bg-tertiary);
+}
+
+.input-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Provider Grid */
+.provider-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.provider-card {
+  padding: 16px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.2s;
+}
+
+.provider-card:hover {
+  border-color: var(--text-muted);
+}
+
+.provider-card.active {
+  background: var(--text-primary);
+  color: var(--bg-primary);
+  border-color: var(--text-primary);
+}
+
+.form-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Finish Pane */
+.success-ring {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 24px;
+  color: var(--success);
+}
+
+.quick-tips {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  margin: 24px 0;
+}
+
+.tip-item {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 8px 12px;
-  background: white;
+  padding: 12px;
+  background: var(--bg-secondary);
   border-radius: 8px;
+  font-size: 14px;
 }
 
-.check-item .icon {
+.tip-icon {
   font-size: 18px;
 }
 
-.actions {
+/* Actions */
+.step-actions {
   display: flex;
   gap: 12px;
+  margin-top: auto;
+  padding-top: 20px;
+}
+
+.btn-primary, .btn-secondary, .btn-text {
+  font-size: 14px;
+  font-weight: 500;
+  padding: 12px 24px;
+  border-radius: 100px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
   justify-content: center;
-  margin-top: 30px;
+  height: 48px;
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  border: none;
-  padding: 12px 32px;
-  border-radius: 8px;
-  font-size: 16px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: transform 0.2s, box-shadow 0.2s;
+  background: var(--text-primary);
+  color: var(--bg-primary);
+  border: 1px solid transparent;
+  flex: 2;
 }
 
 .btn-primary:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  opacity: 0.9;
+  transform: translateY(-1px);
 }
 
 .btn-primary:disabled {
-  opacity: 0.6;
+  opacity: 0.5;
   cursor: not-allowed;
   transform: none;
 }
 
 .btn-secondary {
-  background: #f0f0f0;
-  color: #333;
-  border: none;
-  padding: 12px 24px;
-  border-radius: 8px;
-  font-size: 14px;
-  cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  flex: 1;
+}
+
+.btn-secondary:hover {
+  background: var(--bg-tertiary);
 }
 
 .btn-text {
-  background: none;
-  border: none;
-  color: #666;
-  cursor: pointer;
-  font-size: 14px;
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 12px;
 }
 
 .btn-text:hover {
-  color: #333;
+  color: var(--text-primary);
 }
 
-.btn-outline {
-  background: none;
-  border: 2px solid #667eea;
-  color: #667eea;
-  padding: 10px 20px;
-  border-radius: 8px;
-  cursor: pointer;
-  margin-top: 20px;
-}
-
-.btn-small {
-  padding: 6px 16px;
-  font-size: 13px;
-  border-radius: 6px;
-  border: none;
-  background: #667eea;
-  color: white;
-  cursor: pointer;
-}
-
-.btn-small.btn-secondary {
-  background: #e0e0e0;
-  color: #333;
-}
-
-.btn-large {
-  padding: 16px 48px;
-  font-size: 18px;
-}
-
-/* Dependencies */
-.all-good {
-  padding: 40px;
-}
-
-.all-good .icon {
-  font-size: 48px;
-  margin-bottom: 16px;
-}
-
-.deps-list {
-  text-align: left;
-}
-
-.deps-section {
-  margin-bottom: 24px;
-}
-
-.deps-section h4 {
-  font-size: 14px;
-  color: #666;
-  margin-bottom: 12px;
-}
-
-.dep-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px 16px;
-  background: #f8f9fa;
-  border-radius: 8px;
-  margin-bottom: 8px;
-}
-
-.dep-info {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.dep-name {
-  font-weight: 600;
-  color: #333;
-}
-
-.dep-desc {
-  font-size: 12px;
-  color: #666;
-}
-
-.status {
-  font-size: 13px;
-}
-
-.status.installing {
-  color: #667eea;
-}
-
-.status.success {
-  color: #28a745;
-}
-
-.status.error {
-  color: #dc3545;
-}
-
-/* Form */
-.form-group {
-  margin-bottom: 20px;
-  text-align: left;
-}
-
-.form-group label {
-  display: block;
-  font-size: 14px;
-  font-weight: 600;
-  color: #333;
-  margin-bottom: 8px;
-}
-
-.input {
+.full-width {
   width: 100%;
-  padding: 12px 16px;
-  border: 2px solid #e0e0e0;
-  border-radius: 8px;
-  font-size: 14px;
-  transition: border-color 0.2s;
-  box-sizing: border-box;
+  flex: 1;
 }
 
-.input:focus {
-  outline: none;
-  border-color: #667eea;
+.empty-state {
+  text-align: center;
+  padding: 40px 0;
+  color: var(--text-secondary);
 }
 
-.hint {
-  font-size: 12px;
-  color: #666;
-  margin-top: 6px;
-}
-
-.required {
-  color: #dc3545;
-}
-
-.checkbox-label {
+.icon-circle {
+  width: 48px;
+  height: 48px;
+  background: var(--bg-secondary);
+  border-radius: 50%;
   display: flex;
   align-items: center;
-  gap: 8px;
-  cursor: pointer;
-}
-
-.checkbox-label input {
-  width: 18px;
-  height: 18px;
-}
-
-/* Presets */
-.preset-list {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-bottom: 24px;
   justify-content: center;
+  margin: 0 auto 16px;
 }
 
-.preset-btn {
-  padding: 8px 16px;
-  border: 2px solid #e0e0e0;
-  border-radius: 20px;
-  background: white;
-  cursor: pointer;
-  transition: all 0.2s;
+/* Animations */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease, transform 0.3s ease;
 }
 
-.preset-btn:hover {
-  border-color: #667eea;
+.fade-enter-from {
+  opacity: 0;
+  transform: translateY(10px);
 }
 
-.preset-btn.active {
-  background: #667eea;
-  border-color: #667eea;
-  color: white;
+.fade-leave-to {
+  opacity: 0;
+  transform: translateY(-10px);
 }
 
-/* Tips */
-.tips {
-  background: #f8f9fa;
-  border-radius: 12px;
-  padding: 20px;
-  margin: 30px 0;
-  text-align: left;
-}
+/* Mobile Responsiveness */
+@media (max-width: 600px) {
+  .init-guide {
+    padding: 16px;
+    align-items: flex-start;
+  }
+  
+  .guide-wrapper {
+    gap: 24px;
+    padding-top: 20px;
+  }
 
-.tips h4 {
-  margin-bottom: 12px;
-  color: #333;
-}
+  .hero-text h1 {
+    font-size: 28px;
+  }
 
-.tips ul {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
+  .step-actions {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    padding: 16px;
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+    background: var(--bg-primary);
+    border-top: 1px solid var(--border);
+    z-index: 100;
+    flex-direction: row-reverse; /* Put primary action on right */
+    box-shadow: 0 -4px 20px rgba(0,0,0,0.1);
+  }
 
-.tips li {
-  padding: 8px 0;
-  color: #555;
+  .guide-content {
+    padding-bottom: 120px; /* Space for fixed actions */
+  }
+  
+  .form-stack {
+    margin-bottom: 32px;
+  }
+  
+  .provider-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

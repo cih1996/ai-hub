@@ -5,18 +5,19 @@ import (
 	"ai-hub/server/store"
 	"net/http"
 	"os/exec"
-	"strings"
+	"runtime"
 
 	"github.com/gin-gonic/gin"
 )
 
 // InitStatusResponse represents the system initialization status
 type InitStatusResponse struct {
-	IsFirstRun  bool           `json:"is_first_run"`
-	HasProvider bool           `json:"has_provider"`
-	HasSession  bool           `json:"has_session"`
-	MissingDeps []MissingDep   `json:"missing_deps"`
+	IsFirstRun  bool            `json:"is_first_run"`
+	HasProvider bool            `json:"has_provider"`
+	HasSession  bool            `json:"has_session"`
+	MissingDeps []MissingDep    `json:"missing_deps"`
 	DepsStatus  core.DepsStatus `json:"deps_status"`
+	Platform    string          `json:"platform"` // darwin, linux, windows
 }
 
 // MissingDep represents a missing dependency
@@ -24,6 +25,7 @@ type MissingDep struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	InstallCmd  string `json:"install_cmd,omitempty"`
+	InstallURL  string `json:"install_url,omitempty"` // For manual download
 	Required    bool   `json:"required"`
 }
 
@@ -60,6 +62,7 @@ func GetInitStatus(c *gin.Context) {
 		HasSession:  hasSession,
 		MissingDeps: missingDeps,
 		DepsStatus:  depsStatus,
+		Platform:    runtime.GOOS,
 	})
 }
 
@@ -72,7 +75,8 @@ func checkMissingDeps() []MissingDep {
 		missing = append(missing, MissingDep{
 			Name:        "Node.js",
 			Description: "JavaScript 运行时，Claude Code CLI 依赖",
-			InstallCmd:  "brew install node",
+			InstallCmd:  getNodeInstallCmd(),
+			InstallURL:  "https://nodejs.org/",
 			Required:    true,
 		})
 	}
@@ -83,7 +87,8 @@ func checkMissingDeps() []MissingDep {
 		missing = append(missing, MissingDep{
 			Name:        "Python",
 			Description: "向量引擎依赖，用于语义搜索",
-			InstallCmd:  "brew install python3",
+			InstallCmd:  getPythonInstallCmd(),
+			InstallURL:  "https://www.python.org/downloads/",
 			Required:    false,
 		})
 	}
@@ -94,7 +99,7 @@ func checkMissingDeps() []MissingDep {
 		missing = append(missing, MissingDep{
 			Name:        "pip",
 			Description: "Python 包管理器",
-			InstallCmd:  "python3 -m ensurepip --upgrade",
+			InstallCmd:  getPipInstallCmd(),
 			Required:    false,
 		})
 	}
@@ -106,7 +111,7 @@ func checkMissingDeps() []MissingDep {
 			missing = append(missing, MissingDep{
 				Name:        "sentence-transformers",
 				Description: "向量引擎核心库，用于文本嵌入",
-				InstallCmd:  "pip3 install sentence-transformers -i https://pypi.tuna.tsinghua.edu.cn/simple",
+				InstallCmd:  getSentenceTransformersCmd(),
 				Required:    false,
 			})
 		}
@@ -127,12 +132,75 @@ func checkMissingDeps() []MissingDep {
 		missing = append(missing, MissingDep{
 			Name:        "Git",
 			Description: "版本控制工具",
-			InstallCmd:  "brew install git",
+			InstallCmd:  getGitInstallCmd(),
+			InstallURL:  "https://git-scm.com/downloads",
 			Required:    false,
 		})
 	}
 
 	return missing
+}
+
+// Platform-specific install commands
+
+func getNodeInstallCmd() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return "brew install node"
+	case "linux":
+		// Use NodeSource for latest LTS
+		return "curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash - && sudo apt-get install -y nodejs"
+	case "windows":
+		// winget is available on Windows 10 1709+ and Windows 11
+		return "winget install OpenJS.NodeJS.LTS"
+	default:
+		return ""
+	}
+}
+
+func getPythonInstallCmd() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return "brew install python3"
+	case "linux":
+		return "sudo apt-get install -y python3 python3-pip"
+	case "windows":
+		return "winget install Python.Python.3.12"
+	default:
+		return ""
+	}
+}
+
+func getPipInstallCmd() string {
+	switch runtime.GOOS {
+	case "windows":
+		return "python -m ensurepip --upgrade"
+	default:
+		return "python3 -m ensurepip --upgrade"
+	}
+}
+
+func getSentenceTransformersCmd() string {
+	// Use Tsinghua mirror for faster download in China
+	switch runtime.GOOS {
+	case "windows":
+		return "pip install sentence-transformers -i https://pypi.tuna.tsinghua.edu.cn/simple"
+	default:
+		return "pip3 install sentence-transformers -i https://pypi.tuna.tsinghua.edu.cn/simple"
+	}
+}
+
+func getGitInstallCmd() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return "brew install git"
+	case "linux":
+		return "sudo apt-get install -y git"
+	case "windows":
+		return "winget install Git.Git"
+	default:
+		return ""
+	}
 }
 
 // checkCommand checks if a command is available
@@ -179,15 +247,15 @@ func InstallDep(c *gin.Context) {
 		return
 	}
 
-	// Execute install command
-	// Split command for shell execution
-	parts := strings.Fields(req.InstallCmd)
-	if len(parts) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid install_cmd"})
-		return
+	// Execute command via shell to support pipes and complex commands
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("cmd", "/C", req.InstallCmd)
+	default:
+		cmd = exec.Command("sh", "-c", req.InstallCmd)
 	}
 
-	cmd := exec.Command(parts[0], parts[1:]...)
 	output, err := cmd.CombinedOutput()
 
 	resp := InstallDepResponse{
