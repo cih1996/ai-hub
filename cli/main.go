@@ -127,6 +127,8 @@ func Run(args []string) int {
 		return commands.RunNotes(c, commandArgs)
 	case "triggers":
 		return commands.RunTriggers(c, commandArgs)
+	case "errors":
+		return commands.RunErrors(c, commandArgs)
 	case "status":
 		return commands.RunStatus(c, commandArgs)
 	case "version":

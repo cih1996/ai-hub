@@ -167,6 +167,10 @@ func main() {
 		v1.GET("/sessions/:id/last-request", api.GetLastRawRequest)
 		v1.PUT("/sessions/:id/provider", api.SwitchProvider)
 
+		// AI error tracking
+		v1.GET("/sessions/:id/errors", api.GetSessionErrors)
+		v1.GET("/stats/errors", api.GetErrorStats)
+
 		// Session rules
 		v1.GET("/session-rules/:id", api.GetSessionRules)
 		v1.PUT("/session-rules/:id", api.PutSessionRules)

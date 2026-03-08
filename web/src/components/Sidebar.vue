@@ -360,6 +360,8 @@ onMounted(async () => {
               <span v-if="store.sessionTokenTotals?.[s.id]" class="session-token-tag" :title="(store.sessionTokenTotals![s.id] ?? 0).toLocaleString() + ' tokens'">
                 {{ formatTokens(store.sessionTokenTotals![s.id] ?? 0) }}
               </span>
+              <span v-if="s.error_count" class="error-badge" :title="s.error_count + ' errors'">{{ s.error_count }}</span>
+              <span v-if="s.warning_count" class="warning-badge" :title="s.warning_count + ' warnings'">{{ s.warning_count }}</span>
             </div>
           </div>
           <button class="btn-delete" @click.stop="deleteTarget = s" title="Delete">
@@ -678,6 +680,21 @@ onMounted(async () => {
   padding: 0 5px;
   border-radius: 3px;
   white-space: nowrap;
+}
+.error-badge, .warning-badge {
+  font-size: 10px;
+  padding: 0 5px;
+  border-radius: 3px;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.error-badge {
+  color: #dc2626;
+  background: rgba(220, 38, 38, 0.12);
+}
+.warning-badge {
+  color: #d97706;
+  background: rgba(217, 119, 6, 0.12);
 }
 .btn-delete {
   opacity: 0;

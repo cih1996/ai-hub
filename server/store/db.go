@@ -132,6 +132,18 @@ func migrate() error {
 		value TEXT NOT NULL DEFAULT ''
 	)`)
 
+	// AI error tracking
+	DB.Exec(`CREATE TABLE IF NOT EXISTS ai_errors (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		session_id INTEGER NOT NULL,
+		message_id INTEGER NOT NULL,
+		level TEXT NOT NULL DEFAULT 'error',
+		summary TEXT NOT NULL DEFAULT '',
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`)
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_ai_errors_session ON ai_errors(session_id)`)
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_ai_errors_message ON ai_errors(message_id)`)
+
 	return nil
 }
 
