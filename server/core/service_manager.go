@@ -7,9 +7,7 @@ import (
 	"log"
 	"net"
 	"os"
-	"os/exec"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -60,14 +58,13 @@ func (m *ServiceManager) Start(svc *model.Service) error {
 		return fmt.Errorf("open log file: %w", err)
 	}
 
-	cmd := exec.Command("sh", "-c", svc.Command)
+	cmd := buildCommand(svc.Command)
 	if svc.WorkDir != "" {
 		cmd.Dir = svc.WorkDir
 	}
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
-	// Detach process group so it survives parent exit
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	setProcAttr(cmd)
 
 	if err := cmd.Start(); err != nil {
 		logFile.Close()
@@ -97,13 +94,7 @@ func (m *ServiceManager) Stop(svc *model.Service) error {
 	defer m.mu.Unlock()
 
 	if svc.PID > 0 && processAlive(svc.PID) {
-		// Kill process group
-		syscall.Kill(-svc.PID, syscall.SIGTERM)
-		// Wait briefly then force kill
-		time.Sleep(2 * time.Second)
-		if processAlive(svc.PID) {
-			syscall.Kill(-svc.PID, syscall.SIGKILL)
-		}
+		killProcess(svc.PID)
 	}
 
 	svc.Status = "stopped"
@@ -179,14 +170,6 @@ func (m *ServiceManager) checkAll() {
 			}
 		}
 	}
-}
-
-func processAlive(pid int) bool {
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	return proc.Signal(syscall.Signal(0)) == nil
 }
 
 func portReachable(port int) bool {
