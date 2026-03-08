@@ -145,12 +145,39 @@ func GetMessages(c *gin.Context) {
 		return
 	}
 
-	// Check for pagination parameters
+	// Get total count (always returned in paginated responses)
+	total, _ := store.GetMessagesCount(id)
+
+	// Parse all query parameters
 	limitStr := c.Query("limit")
 	beforeIDStr := c.Query("before_id")
+	pageStr := c.Query("page")
+	pageSizeStr := c.Query("page_size")
+	offsetStr := c.Query("offset")
+	search := c.Query("search")
 
-	if limitStr != "" || beforeIDStr != "" {
-		// Paginated mode
+	// Priority: search > before_id > page > offset > default
+	if search != "" {
+		limit := 20
+		if limitStr != "" {
+			if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+				limit = l
+			}
+		}
+		msgs, err := store.SearchMessages(id, search, limit)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if msgs == nil {
+			msgs = []model.Message{}
+		}
+		c.JSON(http.StatusOK, gin.H{"messages": msgs, "total": total, "has_more": false})
+		return
+	}
+
+	if beforeIDStr != "" || limitStr != "" {
+		// Cursor-based pagination (existing behavior + total)
 		limit := 50
 		if limitStr != "" {
 			if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
@@ -173,20 +200,64 @@ func GetMessages(c *gin.Context) {
 			msgs = []model.Message{}
 		}
 
-		// Determine has_more: if we got `limit` messages and the oldest one is not the first message
 		hasMore := false
 		if len(msgs) >= limit && len(msgs) > 0 {
-			// Check if there are messages before the oldest returned
 			oldestID := msgs[0].ID
-			var countBefore int64
-			countBefore, _ = store.GetMessagesCountBefore(id, oldestID)
+			countBefore, _ := store.GetMessagesCountBefore(id, oldestID)
 			hasMore = countBefore > 0
 		}
 
-		c.JSON(http.StatusOK, gin.H{
-			"messages": msgs,
-			"has_more": hasMore,
-		})
+		c.JSON(http.StatusOK, gin.H{"messages": msgs, "has_more": hasMore, "total": total})
+		return
+	}
+
+	if pageStr != "" {
+		// Page-based pagination
+		page := 1
+		pageSize := 50
+		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+			page = p
+		}
+		if ps := pageSizeStr; ps != "" {
+			if s, err := strconv.Atoi(ps); err == nil && s > 0 {
+				pageSize = s
+			}
+		}
+		msgs, err := store.GetMessagesByPage(id, page, pageSize)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if msgs == nil {
+			msgs = []model.Message{}
+		}
+		hasMore := int64(page*pageSize) < total
+		c.JSON(http.StatusOK, gin.H{"messages": msgs, "has_more": hasMore, "total": total, "page": page, "page_size": pageSize})
+		return
+	}
+
+	if offsetStr != "" {
+		// Offset-based pagination
+		offset := 0
+		limit := 50
+		if o, err := strconv.Atoi(offsetStr); err == nil && o >= 0 {
+			offset = o
+		}
+		if limitStr != "" {
+			if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+				limit = l
+			}
+		}
+		msgs, err := store.GetMessagesByOffset(id, offset, limit)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if msgs == nil {
+			msgs = []model.Message{}
+		}
+		hasMore := int64(offset+limit) < total
+		c.JSON(http.StatusOK, gin.H{"messages": msgs, "has_more": hasMore, "total": total})
 		return
 	}
 
@@ -200,6 +271,36 @@ func GetMessages(c *gin.Context) {
 		msgs = []model.Message{}
 	}
 	c.JSON(http.StatusOK, msgs)
+}
+
+// GetMessageWithContext returns a single message with surrounding context.
+// GET /api/v1/sessions/:id/messages/:msg_id?context=2
+func GetMessageWithContext(c *gin.Context) {
+	sessionID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid session id"})
+		return
+	}
+	msgID, err := strconv.ParseInt(c.Param("msg_id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid message id"})
+		return
+	}
+	ctx := 2
+	if ctxStr := c.Query("context"); ctxStr != "" {
+		if v, err := strconv.Atoi(ctxStr); err == nil && v >= 0 {
+			ctx = v
+		}
+	}
+	msgs, err := store.GetMessageWithContext(sessionID, msgID, ctx)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if msgs == nil {
+		msgs = []model.Message{}
+	}
+	c.JSON(http.StatusOK, gin.H{"messages": msgs, "target_id": msgID})
 }
 
 // TruncateMessages handles DELETE /api/v1/sessions/:id/messages?from=<msgId>
