@@ -4,6 +4,7 @@ import (
 	"ai-hub/cli"
 	"ai-hub/server/api"
 	"ai-hub/server/core"
+	"ai-hub/server/model"
 	"ai-hub/server/store"
 	"embed"
 	"flag"
@@ -219,6 +220,17 @@ func main() {
 		v1.PUT("/channels/:id", api.UpdateChannel)
 		v1.DELETE("/channels/:id", api.DeleteChannel)
 
+		// Services
+		v1.GET("/services", api.ListServices)
+		v1.POST("/services", api.CreateService)
+		v1.GET("/services/:id", api.GetService)
+		v1.PUT("/services/:id", api.UpdateService)
+		v1.DELETE("/services/:id", api.DeleteService)
+		v1.POST("/services/:id/start", api.StartService)
+		v1.POST("/services/:id/stop", api.StopService)
+		v1.POST("/services/:id/restart", api.RestartService)
+		v1.GET("/services/:id/logs", api.GetServiceLogs)
+
 		// Webhooks (IM platform callbacks)
 		v1.POST("/webhook/feishu", api.HandleFeishuWebhook)
 		v1.POST("/webhook/qq", api.HandleQQWebhook)
@@ -298,6 +310,22 @@ func main() {
 	// Start trigger scheduler
 	core.StartTriggerLoop(*port)
 
+	// Initialize service manager with WS callback
+	core.InitServiceManager(func(svc *model.Service) {
+		content := fmt.Sprintf(`{"id":%d,"status":"%s","pid":%d}`, svc.ID, svc.Status, svc.PID)
+		api.BroadcastRaw("service_status", content)
+	})
+	// Auto-start services
+	go func() {
+		services, _ := store.ListServices()
+		for i := range services {
+			if services[i].AutoStart {
+				log.Printf("[service] auto-starting %q", services[i].Name)
+				core.ServiceMgr.Start(&services[i])
+			}
+		}
+	}()
+
 	// Start QQ WebSocket client connections for enabled channels
 	api.LogQQDedupConfig()
 	api.QQWSMgr.StartAll()
@@ -309,6 +337,7 @@ func main() {
 		<-quit
 		log.Println("[main] shutting down...")
 		api.QQWSMgr.Shutdown()
+		core.StopServiceManager()
 		if core.Vector != nil {
 			core.Vector.Stop()
 		}
