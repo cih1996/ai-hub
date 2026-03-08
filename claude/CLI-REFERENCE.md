@@ -41,6 +41,42 @@ ai-hub triggers create --session <id> --time "09:00:00" --content "指令" [--ma
 ai-hub triggers update <id> --content "新指令"
 ai-hub triggers delete <id>              # 删除
 
+## 服务管理（HTTP API，无 CLI 子命令）
+
+服务通过 HTTP API 管理，日志自动分配到 ~/.ai-hub/logs/service-<name>.log
+
+```bash
+# 创建服务
+curl -X POST http://localhost:$AI_HUB_PORT/api/v1/services \
+  -H "Content-Type: application/json" \
+  -d '{"name":"项目名","command":"npm run dev","work_dir":"/path/to/project","port":3000,"auto_start":false}'
+
+# 列出所有服务（含实时状态）
+curl http://localhost:$AI_HUB_PORT/api/v1/services
+
+# 查看单个服务
+curl http://localhost:$AI_HUB_PORT/api/v1/services/<id>
+
+# 启动 / 停止 / 重启
+curl -X POST http://localhost:$AI_HUB_PORT/api/v1/services/<id>/start
+curl -X POST http://localhost:$AI_HUB_PORT/api/v1/services/<id>/stop
+curl -X POST http://localhost:$AI_HUB_PORT/api/v1/services/<id>/restart
+
+# 查看日志（默认100行，可指定 ?lines=200）
+curl http://localhost:$AI_HUB_PORT/api/v1/services/<id>/logs?lines=50
+
+# 更新配置（仅传需要改的字段）
+curl -X PUT http://localhost:$AI_HUB_PORT/api/v1/services/<id> \
+  -H "Content-Type: application/json" \
+  -d '{"port":3001,"auto_start":true}'
+
+# 删除服务（自动停止运行中的进程）
+curl -X DELETE http://localhost:$AI_HUB_PORT/api/v1/services/<id>
+```
+
+字段说明：name(必填), command(必填), work_dir, port, auto_start(启动时自动运行)
+状态值：stopped / running / dead
+
 ## 系统
 
 ai-hub version                           # 版本
