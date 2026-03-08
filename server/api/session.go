@@ -24,6 +24,8 @@ type SessionResponse struct {
 	ProcessState string `json:"process_state,omitempty"`
 	UptimeSec    int64  `json:"uptime_sec,omitempty"`
 	IdleSec      int64  `json:"idle_sec,omitempty"`
+	ErrorCount   int    `json:"error_count"`
+	WarningCount int    `json:"warning_count"`
 }
 
 func ListSessions(c *gin.Context) {
@@ -35,12 +37,22 @@ func ListSessions(c *gin.Context) {
 	streamingIDs := GetStreamingSessionIDs()
 	triggerSessions, _ := store.SessionsWithTriggers()
 	poolStatus := core.Pool.Status()
+	// Batch query error/warning counts
+	sids := make([]int64, len(list))
+	for i, s := range list {
+		sids[i] = s.ID
+	}
+	errorCounts, _ := store.GetSessionErrorCounts(sids)
 	resp := make([]SessionResponse, 0, len(list))
 	for _, s := range list {
 		sr := SessionResponse{
 			Session:     s,
 			Streaming:   streamingIDs[s.ID],
 			HasTriggers: triggerSessions[s.ID],
+		}
+		if ec, ok := errorCounts[s.ID]; ok {
+			sr.ErrorCount = ec.ErrorCount
+			sr.WarningCount = ec.WarningCount
 		}
 		if info, ok := poolStatus[s.ID]; ok {
 			sr.ProcessAlive = true

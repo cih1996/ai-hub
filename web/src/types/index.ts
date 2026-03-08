@@ -23,6 +23,8 @@ export interface Session {
   has_triggers: boolean
   process_alive: boolean
   process_state: string
+  error_count: number
+  warning_count: number
   created_at: string
   updated_at: string
 }

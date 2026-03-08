@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -476,6 +477,7 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 				Metadata:  metadataJSON,
 			}
 			store.AddMessage(assistantMsg)
+			extractAndSaveErrors(session.ID, assistantMsg.ID, content)
 			// Save token usage even on error (partial response)
 			if usageInput > 0 || usageOutput > 0 || usageCacheCreation > 0 || usageCacheRead > 0 {
 				tu := &model.TokenUsage{SessionID: session.ID, MessageID: assistantMsg.ID, InputTokens: usageInput, OutputTokens: usageOutput, CacheCreationInputTokens: usageCacheCreation, CacheReadInputTokens: usageCacheRead}
@@ -510,6 +512,7 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 			Metadata:  metadataJSON,
 		}
 		store.AddMessage(assistantMsg)
+		extractAndSaveErrors(session.ID, assistantMsg.ID, content)
 		// Save and broadcast token usage
 		if usageInput > 0 || usageOutput > 0 || usageCacheCreation > 0 || usageCacheRead > 0 {
 			tu := &model.TokenUsage{SessionID: session.ID, MessageID: assistantMsg.ID, InputTokens: usageInput, OutputTokens: usageOutput, CacheCreationInputTokens: usageCacheCreation, CacheReadInputTokens: usageCacheRead}
@@ -990,4 +993,26 @@ func GetLastRawRequest(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, resp)
+}
+
+// errorTagRe matches <!--error:xxx--> and <!--warning:xxx--> tags in AI responses.
+var errorTagRe = regexp.MustCompile(`<!--(error|warning):\s*(.+?)-->`)
+
+// extractAndSaveErrors scans content for error/warning tags and persists them.
+func extractAndSaveErrors(sessionID, messageID int64, content string) {
+	matches := errorTagRe.FindAllStringSubmatch(content, -1)
+	for _, m := range matches {
+		if len(m) < 3 {
+			continue
+		}
+		e := &model.AIError{
+			SessionID: sessionID,
+			MessageID: messageID,
+			Level:     m[1],
+			Summary:   strings.TrimSpace(m[2]),
+		}
+		if err := store.AddAIError(e); err != nil {
+			log.Printf("[ai-error] save failed: %v", err)
+		}
+	}
 }

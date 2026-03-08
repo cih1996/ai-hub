@@ -347,8 +347,11 @@ function cancelEditTitle() {
 
 marked.setOptions({ breaks: true, gfm: true })
 
+// Strip <!--error:xxx--> and <!--warning:xxx--> tags before rendering
+const errorTagPattern = /<!--(?:error|warning):\s*.+?-->/g
+
 function renderMd(text: string): string {
-  return marked.parse(text) as string
+  return marked.parse(text.replace(errorTagPattern, '')) as string
 }
 
 const allMessages = computed(() => [...store.messages])

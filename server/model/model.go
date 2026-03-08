@@ -111,6 +111,30 @@ type CompressSettings struct {
 	MinTurns    int    `json:"min_turns"`    // 最小对话轮数阈值（user 消息数），默认 10；token 与轮数同时满足才触发压缩
 }
 
+// AIError AI 错误追踪记录
+type AIError struct {
+	ID        int64     `json:"id"`
+	SessionID int64     `json:"session_id"`
+	MessageID int64     `json:"message_id"`
+	Level     string    `json:"level"`   // "error" | "warning"
+	Summary   string    `json:"summary"` // 错误摘要
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// ErrorStat 按会话聚合的错误统计
+type ErrorStat struct {
+	SessionID    int64  `json:"session_id"`
+	SessionTitle string `json:"session_title"`
+	ErrorCount   int    `json:"error_count"`
+	WarningCount int    `json:"warning_count"`
+}
+
+// ErrorCount 单会话错误/警告计数
+type ErrorCount struct {
+	ErrorCount   int `json:"error_count"`
+	WarningCount int `json:"warning_count"`
+}
+
 // Channel 通讯频道（IM 网关）
 type Channel struct {
 	ID        int64     `json:"id"`
