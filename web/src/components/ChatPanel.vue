@@ -4,7 +4,7 @@ import type { Ref } from 'vue'
 import { marked } from 'marked'
 import { useChatStore } from '../stores/chat'
 import * as api from '../composables/api'
-import type { StepsMetadata } from '../types'
+import type { StepsMetadata, Message } from '../types'
 
 const isMobile = inject<Ref<boolean>>('isMobile', ref(false))
 const openSidebar = inject<() => void>('openSidebar', () => {})
@@ -108,9 +108,64 @@ const rawRequestData = ref<{
   captured_at: string
   anthropic_request?: api.AnthropicRequest
 } | null>(null)
-const rawRequestTab = ref<'messages' | 'raw' | 'system' | 'query'>('system')
+const rawRequestTab = ref<'messages' | 'fullchat' | 'raw' | 'system' | 'query'>('system')
 // Track which rows are expanded in the visual Messages tab
 const expandedRows = ref<Set<number>>(new Set())
+
+// Full chat history state (lazy-loaded in fullchat tab)
+const fullChatMessages = ref<Message[]>([])
+const fullChatHasMore = ref(false)
+const fullChatTotal = ref(0)
+const fullChatLoading = ref(false)
+const fullChatLoaded = ref(false)
+const expandedFullChatRows = ref<Set<number>>(new Set())
+
+async function loadFullChat() {
+  const sid = store.currentSession?.id
+  if (!sid || fullChatLoading.value) return
+  fullChatLoading.value = true
+  try {
+    const beforeId = fullChatMessages.value.length > 0
+      ? fullChatMessages.value[fullChatMessages.value.length - 1]!.id
+      : undefined
+    const res = await api.getMessagesPaginated(sid, 30, beforeId)
+    // API returns ASC order within the batch; we want newest-first display,
+    // so reverse each batch and append (older messages go to the end)
+    const batch = [...res.messages].reverse()
+    fullChatMessages.value.push(...batch)
+    fullChatHasMore.value = res.has_more
+    if (res.total != null) fullChatTotal.value = res.total
+    fullChatLoaded.value = true
+  } catch {
+    // silent
+  } finally {
+    fullChatLoading.value = false
+  }
+}
+
+function onFullChatScroll(e: Event) {
+  const el = e.target as HTMLElement
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 50 && fullChatHasMore.value) {
+    loadFullChat()
+  }
+}
+
+function toggleFullChatRow(id: number) {
+  if (expandedFullChatRows.value.has(id)) {
+    expandedFullChatRows.value.delete(id)
+  } else {
+    expandedFullChatRows.value.add(id)
+  }
+}
+
+function stripErrorTags(text: string): string {
+  return text.replace(errorTagPattern, '').trim()
+}
+
+function previewText(text: string, len: number): string {
+  const clean = stripErrorTags(text).replace(/\n/g, ' ')
+  return clean.length > len ? clean.slice(0, len) + '…' : clean
+}
 
 // Format the complete Anthropic API request body for the Raw tab.
 // Displays the entire POST body (model, max_tokens, tools, temperature, etc.)
@@ -277,6 +332,12 @@ async function openRawRequest() {
   rawRequestLoading.value = true
   rawRequestData.value = null
   expandedRows.value = new Set()
+  // Reset fullchat state on each open
+  fullChatMessages.value = []
+  fullChatHasMore.value = false
+  fullChatTotal.value = 0
+  fullChatLoaded.value = false
+  expandedFullChatRows.value = new Set()
   try {
     rawRequestData.value = await api.getLastRawRequest(sid)
     // Default to Messages tab if proxy data is available (it's the most informative)
@@ -288,6 +349,13 @@ async function openRawRequest() {
     rawRequestLoading.value = false
   }
 }
+
+// Lazy-load fullchat when tab is first activated
+watch(rawRequestTab, (tab) => {
+  if (tab === 'fullchat' && !fullChatLoaded.value) {
+    loadFullChat()
+  }
+})
 
 // Vector engine health banner
 const vectorHealthy = ref(true)
@@ -1227,6 +1295,9 @@ function formatToolInput(raw: string): string {
                 v-if="rawRequestData.anthropic_request?.messages">
                 Messages <span class="raw-req-tab-badge">{{ parsedMessageRows.length }}</span>
               </button>
+              <button :class="['raw-req-tab', rawRequestTab === 'fullchat' && 'active']" @click="rawRequestTab = 'fullchat'">
+                完整对话 <span v-if="fullChatTotal" class="raw-req-tab-badge">{{ fullChatTotal }}</span>
+              </button>
               <button :class="['raw-req-tab', rawRequestTab === 'raw' && 'active']" @click="rawRequestTab = 'raw'"
                 v-if="rawRequestData.anthropic_request?.messages">
                 Raw
@@ -1295,6 +1366,27 @@ function formatToolInput(raw: string): string {
                     <!-- Other types expanded: raw JSON -->
                     <pre v-else-if="expandedRows.has(row.rowIndex)" class="raw-msg-full-pre" @click.stop>{{ row.full }}</pre>
                   </div>
+                </div>
+              </template>
+              <template v-else-if="rawRequestTab === 'fullchat'">
+                <div class="fullchat-list" @scroll="onFullChatScroll">
+                  <div v-if="fullChatLoading && fullChatMessages.length === 0" class="raw-req-loading">加载中...</div>
+                  <template v-else>
+                    <div v-for="msg in fullChatMessages" :key="msg.id"
+                      class="fullchat-row" @click="toggleFullChatRow(msg.id)">
+                      <div class="fullchat-row-header">
+                        <span :class="['fullchat-role-badge', msg.role === 'user' ? 'role-user' : 'role-assistant']">
+                          {{ msg.role === 'user' ? 'user' : 'assistant' }}
+                        </span>
+                        <span class="fullchat-id">#{{ msg.id }}</span>
+                        <span class="fullchat-preview" v-if="!expandedFullChatRows.has(msg.id)">{{ previewText(msg.content, 60) }}</span>
+                        <span class="fullchat-expand-icon">{{ expandedFullChatRows.has(msg.id) ? '▼' : '▶' }}</span>
+                      </div>
+                      <pre v-if="expandedFullChatRows.has(msg.id)" class="fullchat-full-content" @click.stop>{{ stripErrorTags(msg.content) }}</pre>
+                    </div>
+                    <div v-if="fullChatLoading" class="fullchat-status">加载更多...</div>
+                    <div v-else-if="!fullChatHasMore && fullChatMessages.length > 0" class="fullchat-status">已加载全部 {{ fullChatTotal }} 条消息</div>
+                  </template>
                 </div>
               </template>
               <template v-else-if="rawRequestTab === 'raw'">
@@ -1539,6 +1631,48 @@ function formatToolInput(raw: string): string {
 .raw-req-loading {
   padding: 40px 20px;
   text-align: center; color: var(--text-muted); font-size: 13px;
+}
+
+/* ===== Full Chat Tab ===== */
+.fullchat-list {
+  display: flex; flex-direction: column; gap: 4px;
+  max-height: 60vh; overflow-y: auto;
+}
+.fullchat-row {
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 6px 10px; cursor: pointer; font-size: 12px;
+}
+.fullchat-row:hover { background: var(--bg-hover, var(--bg-tertiary)); }
+.fullchat-row-header {
+  display: flex; align-items: center; gap: 6px; min-height: 22px;
+}
+.fullchat-role-badge {
+  font-size: 10px; font-weight: 600; padding: 1px 6px;
+  border-radius: 3px; text-transform: uppercase; flex-shrink: 0;
+}
+.fullchat-role-badge.role-user {
+  background: rgba(59, 130, 246, 0.12); color: #3b82f6;
+}
+.fullchat-role-badge.role-assistant {
+  background: rgba(34, 197, 94, 0.12); color: #22c55e;
+}
+.fullchat-id {
+  font-size: 10px; color: var(--text-muted); flex-shrink: 0;
+}
+.fullchat-preview {
+  flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-secondary); font-size: 11px;
+}
+.fullchat-expand-icon {
+  font-size: 10px; color: var(--text-muted); flex-shrink: 0;
+}
+.fullchat-full-content {
+  margin: 6px 0 2px; padding: 8px; font-size: 12px; line-height: 1.5;
+  background: var(--bg-secondary); border-radius: 4px;
+  white-space: pre-wrap; word-break: break-word; max-height: 400px; overflow-y: auto;
+}
+.fullchat-status {
+  text-align: center; padding: 10px; font-size: 11px; color: var(--text-muted);
 }
 
 /* ===== Visual Messages Tab ===== */

@@ -47,7 +47,7 @@ export const getMessages = (sessionId: number) =>
 export const getMessagesPaginated = (sessionId: number, limit = 50, beforeId?: number) => {
   const params = new URLSearchParams({ limit: String(limit) })
   if (beforeId && beforeId > 0) params.set('before_id', String(beforeId))
-  return request<{ messages: Message[]; has_more: boolean }>(
+  return request<{ messages: Message[]; has_more: boolean; total?: number }>(
     `/sessions/${sessionId}/messages?${params.toString()}`
   )
 }
