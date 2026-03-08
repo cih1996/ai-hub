@@ -144,6 +144,21 @@ func migrate() error {
 	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_ai_errors_session ON ai_errors(session_id)`)
 	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_ai_errors_message ON ai_errors(message_id)`)
 
+	// Services
+	DB.Exec(`CREATE TABLE IF NOT EXISTS services (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL UNIQUE,
+		command TEXT NOT NULL DEFAULT '',
+		work_dir TEXT NOT NULL DEFAULT '',
+		port INTEGER NOT NULL DEFAULT 0,
+		log_path TEXT NOT NULL DEFAULT '',
+		pid INTEGER NOT NULL DEFAULT 0,
+		status TEXT NOT NULL DEFAULT 'stopped',
+		auto_start INTEGER NOT NULL DEFAULT 0,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`)
+
 	return nil
 }
 

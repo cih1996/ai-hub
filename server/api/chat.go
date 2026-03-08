@@ -121,6 +121,11 @@ func BroadcastProcessState(hubSessionID int64, alive bool, state string) {
 	broadcast(WSMessage{Type: "process_update", SessionID: hubSessionID, Content: content})
 }
 
+// BroadcastRaw sends a raw WS message with given type and content.
+func BroadcastRaw(msgType string, content string) {
+	broadcast(WSMessage{Type: msgType, Content: content})
+}
+
 // IsSessionStreaming checks if a session is currently active
 func IsSessionStreaming(sessionID int64) bool {
 	activeStreamsMu.RLock()

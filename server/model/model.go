@@ -146,3 +146,18 @@ type Channel struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
+
+// Service 托管服务
+type Service struct {
+	ID        int64     `json:"id"`
+	Name      string    `json:"name"`
+	Command   string    `json:"command"`
+	WorkDir   string    `json:"work_dir"`
+	Port      int       `json:"port"`
+	LogPath   string    `json:"log_path"`
+	PID       int       `json:"pid"`
+	Status    string    `json:"status"`     // stopped / running / dead
+	AutoStart bool      `json:"auto_start"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
