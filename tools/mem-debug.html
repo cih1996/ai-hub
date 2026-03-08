@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Hub mem CLI 调试工具</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, 'SF Pro', sans-serif; background: #0d1117; color: #c9d1d9; padding: 20px; }
+h1 { font-size: 18px; color: #58a6ff; margin-bottom: 16px; }
+.tabs { display: flex; gap: 4px; margin-bottom: 16px; flex-wrap: wrap; }
+.tab { padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; background: #161b22; border: 1px solid #30363d; color: #8b949e; transition: all .2s; }
+.tab:hover { border-color: #58a6ff; color: #c9d1d9; }
+.tab.active { background: #1f6feb22; border-color: #58a6ff; color: #58a6ff; }
+.panel { display: none; }
+.panel.active { display: block; }
+.form-group { margin-bottom: 12px; }
+.form-group label { display: block; font-size: 12px; color: #8b949e; margin-bottom: 4px; }
+.form-group input, .form-group select, .form-group textarea {
+  width: 100%; padding: 8px 10px; font-size: 13px; background: #161b22;
+  border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; font-family: 'SF Mono', monospace;
+}
+.form-group textarea { min-height: 80px; resize: vertical; }
+.form-group select { appearance: auto; }
+.row { display: flex; gap: 12px; }
+.row > .form-group { flex: 1; }
+.btn { padding: 8px 20px; border-radius: 6px; font-size: 13px; cursor: pointer; font-weight: 500; transition: all .2s; }
+.btn-primary { background: #238636; color: #fff; border: 1px solid #2ea043; }
+.btn-primary:hover { background: #2ea043; }
+.btn-secondary { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; }
+.btn-secondary:hover { background: #30363d; }
+.btn-copy { background: #1f6feb; color: #fff; border: 1px solid #388bfd; }
+.btn-copy:hover { background: #388bfd; }
+.actions { display: flex; gap: 8px; margin-top: 16px; align-items: center; }
+.output { margin-top: 16px; background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 12px; font-family: 'SF Mono', monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all; max-height: 400px; overflow-y: auto; }
+.output.cmd { color: #7ee787; }
+.output.result { color: #c9d1d9; }
+.output.error { color: #f85149; }
+.config-bar { display: flex; gap: 12px; margin-bottom: 16px; padding: 10px 12px; background: #161b22; border: 1px solid #30363d; border-radius: 6px; align-items: center; flex-wrap: wrap; }
+.config-bar label { font-size: 12px; color: #8b949e; white-space: nowrap; }
+.config-bar input { width: 80px; padding: 4px 8px; font-size: 12px; background: #0d1117; border: 1px solid #30363d; border-radius: 4px; color: #c9d1d9; }
+.config-bar input.wide { width: 160px; }
+.hint { font-size: 11px; color: #484f58; margin-top: 2px; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; }
+.badge-green { background: #23863622; color: #3fb950; }
+.badge-blue { background: #1f6feb22; color: #58a6ff; }
+.content-fields { margin-top: 8px; padding: 10px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; }
+.content-fields h4 { font-size: 12px; color: #58a6ff; margin-bottom: 8px; }
+.status { font-size: 12px; color: #8b949e; }
+</style>
+</head>
+<body>
+<h1>🧠 AI Hub mem CLI 调试工具</h1>
+
+<div class="config-bar">
+  <label>端口</label><input id="cfgPort" value="8080" placeholder="8080">
+  <label>团队</label><input id="cfgGroup" class="wide" value="AI Hub 维护团队" placeholder="团队名">
+  <label>二进制</label><input id="cfgBin" class="wide" value="ai-hub" placeholder="ai-hub 路径" style="width:240px">
+  <span class="status" id="statusText">就绪</span>
+</div>
+
+<div class="tabs">
+  <div class="tab active" data-tab="add">mem add</div>
+  <div class="tab" data-tab="retrieve">mem retrieve</div>
+  <div class="tab" data-tab="feedback">mem feedback</div>
+  <div class="tab" data-tab="revise">mem revise</div>
+  <div class="tab" data-tab="deprecate">mem deprecate</div>
+  <div class="tab" data-tab="spec">mem spec</div>
+</div>
+
+<!-- ADD -->
+<div class="panel active" id="panel-add">
+  <div class="row">
+    <div class="form-group">
+      <label>类型 (type)</label>
+      <select id="addType" onchange="updateContentFields()">
+        <option value="env_fact">env_fact - 环境事实</option>
+        <option value="preference">preference - 用户偏好</option>
+        <option value="procedure">procedure - 操作流程</option>
+        <option value="diagnostic">diagnostic - 故障诊断</option>
+        <option value="anti_pattern">anti_pattern - 反模式</option>
+        <option value="decision">decision - 决策记录</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>风险 (risk)</label>
+      <select id="addRisk">
+        <option value="low">low</option>
+        <option value="medium">medium</option>
+        <option value="high">high</option>
+      </select>
+    </div>
+  </div>
+  <div class="form-group">
+    <label>标题 (title) <span class="badge badge-green">必填</span></label>
+    <input id="addTitle" placeholder="如：生产数据库连接配置">
+  </div>
+  <div class="form-group">
+    <label>标签 (tags)</label>
+    <input id="addTags" placeholder="逗号分隔，如：数据库,生产,配置">
+  </div>
+
+  <div class="content-fields" id="contentFields">
+    <h4>内容字段 (content) — <span id="contentTypeLabel">env_fact</span></h4>
+    <div id="contentInputs"></div>
+  </div>
+
+  <div class="form-group" style="margin-top:12px">
+    <label>证据来源 (evidence.ref)</label>
+    <input id="addEvidenceRef" value="manual_input" placeholder="如：chat_history, config_file">
+  </div>
+
+  <div class="actions">
+    <button class="btn btn-primary" onclick="buildAdd()">生成命令</button>
+    <button class="btn btn-copy" onclick="copyCmd()">复制命令</button>
+    <button class="btn btn-secondary" onclick="execViaAPI('add')">通过 API 执行</button>
+  </div>
+</div>
+
+<!-- RETRIEVE -->
+<div class="panel" id="panel-retrieve">
+  <div class="form-group">
+    <label>查询 (query) <span class="badge badge-green">必填</span></label>
+    <input id="retQuery" placeholder="如：部署流程">
+  </div>
+  <div class="row">
+    <div class="form-group">
+      <label>返回数量 (k)</label>
+      <input id="retK" type="number" value="5" min="1" max="20">
+    </div>
+    <div class="form-group">
+      <label>类型过滤 (types)</label>
+      <input id="retTypes" placeholder="逗号分隔，如：procedure,diagnostic">
+    </div>
+  </div>
+  <div class="actions">
+    <button class="btn btn-primary" onclick="buildRetrieve()">生成命令</button>
+    <button class="btn btn-copy" onclick="copyCmd()">复制命令</button>
+    <button class="btn btn-secondary" onclick="execViaAPI('retrieve')">通过 API 执行</button>
+  </div>
+</div>
+
+<!-- FEEDBACK -->
+<div class="panel" id="panel-feedback">
+  <div class="row">
+    <div class="form-group">
+      <label>记忆 ID <span class="badge badge-green">必填</span></label>
+      <input id="fbId" placeholder="如：mem_20260305_0892">
+    </div>
+    <div class="form-group">
+      <label>结果</label>
+      <select id="fbResult">
+        <option value="success">success ✅</option>
+        <option value="fail">fail ❌</option>
+      </select>
+    </div>
+  </div>
+  <div class="actions">
+    <button class="btn btn-primary" onclick="buildFeedback()">生成命令</button>
+    <button class="btn btn-copy" onclick="copyCmd()">复制命令</button>
+  </div>
+</div>
+
+<!-- REVISE -->
+<div class="panel" id="panel-revise">
+  <div class="form-group">
+    <label>旧记忆 ID <span class="badge badge-green">必填</span></label>
+    <input id="revId" placeholder="如：mem_20260305_0892">
+  </div>
+  <div class="form-group">
+    <label>新标题 (可选)</label>
+    <input id="revTitle" placeholder="留空则保持原标题">
+  </div>
+  <div class="form-group">
+    <label>新内容 JSON (可选)</label>
+    <textarea id="revContent" placeholder='如：{"key": "port", "value": "8081"}'></textarea>
+  </div>
+  <div class="actions">
+    <button class="btn btn-primary" onclick="buildRevise()">生成命令</button>
+    <button class="btn btn-copy" onclick="copyCmd()">复制命令</button>
+  </div>
+</div>
+
+<!-- DEPRECATE -->
+<div class="panel" id="panel-deprecate">
+  <div class="form-group">
+    <label>记忆 ID <span class="badge badge-green">必填</span></label>
+    <input id="depId" placeholder="如：mem_20260305_0892">
+  </div>
+  <div class="actions">
+    <button class="btn btn-primary" onclick="buildDeprecate()">生成命令</button>
+    <button class="btn btn-copy" onclick="copyCmd()">复制命令</button>
+  </div>
+</div>
+
+<!-- SPEC -->
+<div class="panel" id="panel-spec">
+  <div class="form-group">
+    <label>命令</label>
+    <select id="specCmd">
+      <option value="add">add</option>
+      <option value="retrieve">retrieve</option>
+      <option value="feedback">feedback</option>
+      <option value="revise">revise</option>
+      <option value="deprecate">deprecate</option>
+    </select>
+  </div>
+  <div class="actions">
+    <button class="btn btn-primary" onclick="buildSpec()">生成命令</button>
+    <button class="btn btn-copy" onclick="copyCmd()">复制命令</button>
+  </div>
+</div>
+
+<div class="output cmd" id="cmdOutput" style="display:none"></div>
+<div class="output result" id="resultOutput" style="display:none"></div>
+
+<script>
+// Content field definitions per type
+const contentSchemas = {
+  env_fact: [
+    { key: 'key', label: 'Key', placeholder: '如：db.prod.ip', required: true },
+    { key: 'value', label: 'Value', placeholder: '如：10.0.0.5', required: true },
+    { key: 'note', label: 'Note', placeholder: '备注（可选）' },
+  ],
+  preference: [
+    { key: 'key', label: 'Key', placeholder: '如：output.language', required: true },
+    { key: 'value', label: 'Value', placeholder: '如：zh-CN', required: true },
+    { key: 'priority', label: 'Priority', placeholder: '1-10', type: 'number', required: true },
+  ],
+  procedure: [
+    { key: 'summary', label: 'Summary', placeholder: '流程摘要', required: true },
+    { key: 'steps', label: 'Steps (每行一步，格式: do|expect)', placeholder: '编译代码|编译成功\n运行测试|测试通过', type: 'textarea', required: true },
+  ],
+  diagnostic: [
+    { key: 'summary', label: 'Summary', placeholder: '诊断摘要', required: true },
+    { key: 'checks', label: 'Checks (每行: check|if_yes|if_no)', placeholder: '端口是否占用|杀进程|检查配置', type: 'textarea', required: true },
+  ],
+  anti_pattern: [
+    { key: 'pattern', label: 'Pattern', placeholder: '反模式描述', required: true },
+    { key: 'symptom', label: 'Symptom', placeholder: '症状', required: true },
+    { key: 'cause', label: 'Cause', placeholder: '原因', required: true },
+    { key: 'fix', label: 'Fix', placeholder: '修复方法', required: true },
+  ],
+  decision: [
+    { key: 'summary', label: 'Summary', placeholder: '决策摘要', required: true },
+    { key: 'rationale', label: 'Rationale (每行一条)', placeholder: '性能更好\n维护成本低', type: 'textarea', required: true },
+    { key: 'impact', label: 'Impact (每行一条)', placeholder: '需要迁移数据\n前端需适配', type: 'textarea', required: true },
+  ],
+};
+
+function updateContentFields() {
+  const type = document.getElementById('addType').value;
+  document.getElementById('contentTypeLabel').textContent = type;
+  const container = document.getElementById('contentInputs');
+  const schema = contentSchemas[type];
+  container.innerHTML = schema.map(f => {
+    const req = f.required ? '<span class="badge badge-green">必填</span>' : '';
+    if (f.type === 'textarea') {
+      return `<div class="form-group"><label>${f.label} ${req}</label><textarea id="cf_${f.key}" placeholder="${f.placeholder}" rows="3"></textarea></div>`;
+    }
+    return `<div class="form-group"><label>${f.label} ${req}</label><input id="cf_${f.key}" type="${f.type||'text'}" placeholder="${f.placeholder}"></div>`;
+  }).join('');
+}
+
+function getContentJSON() {
+  const type = document.getElementById('addType').value;
+  const schema = contentSchemas[type];
+  const content = {};
+  for (const f of schema) {
+    const val = document.getElementById('cf_' + f.key)?.value?.trim() || '';
+    if (f.key === 'steps') {
+      content.steps = val.split('\n').filter(Boolean).map(line => {
+        const [d, e] = line.split('|');
+        return { do: d?.trim() || '', expect: e?.trim() || '' };
+      });
+    } else if (f.key === 'checks') {
+      content.checks = val.split('\n').filter(Boolean).map(line => {
+        const [c, y, n] = line.split('|');
+        return { check: c?.trim()||'', if_yes: y?.trim()||'', if_no: n?.trim()||'' };
+      });
+    } else if (f.key === 'rationale' || f.key === 'impact') {
+      content[f.key] = val.split('\n').filter(Boolean);
+    } else if (f.type === 'number') {
+      content[f.key] = parseInt(val) || 0;
+    } else {
+      content[f.key] = val;
+    }
+  }
+  return content;
+}
+
+function cfg() {
+  return {
+    port: document.getElementById('cfgPort').value || '8080',
+    group: document.getElementById('cfgGroup').value || '',
+    bin: document.getElementById('cfgBin').value || 'ai-hub',
+  };
+}
+
+function globalFlags() {
+  const c = cfg();
+  let f = `--port ${c.port}`;
+  if (c.group) f += ` --group "${c.group}"`;
+  return f;
+}
+
+let lastCmd = '';
+function showCmd(cmd) {
+  lastCmd = cmd;
+  const el = document.getElementById('cmdOutput');
+  el.style.display = 'block';
+  el.textContent = '$ ' + cmd;
+  document.getElementById('resultOutput').style.display = 'none';
+}
+
+function showResult(text, isError) {
+  const el = document.getElementById('resultOutput');
+  el.style.display = 'block';
+  el.className = 'output ' + (isError ? 'error' : 'result');
+  try { el.textContent = JSON.stringify(JSON.parse(text), null, 2); }
+  catch { el.textContent = text; }
+}
+
+function copyCmd() {
+  if (!lastCmd) return;
+  navigator.clipboard.writeText(lastCmd).then(() => {
+    document.getElementById('statusText').textContent = '✅ 已复制';
+    setTimeout(() => document.getElementById('statusText').textContent = '就绪', 2000);
+  });
+}
+
+function buildAdd() {
+  const c = cfg();
+  const tags = document.getElementById('addTags').value.trim();
+  const json = {
+    type: document.getElementById('addType').value,
+    title: document.getElementById('addTitle').value.trim(),
+    risk: document.getElementById('addRisk').value,
+    content: getContentJSON(),
+    evidence: [{ kind: 'user', ref: document.getElementById('addEvidenceRef').value.trim() || 'manual', ts: new Date().toISOString() }],
+  };
+  if (tags) json.tags = tags.split(',').map(t => t.trim());
+  const escaped = JSON.stringify(JSON.stringify(json));
+  showCmd(`echo ${escaped} | ${c.bin} ${globalFlags()} mem add`);
+}
+
+function buildRetrieve() {
+  const c = cfg();
+  const q = document.getElementById('retQuery').value.trim();
+  const k = document.getElementById('retK').value;
+  const types = document.getElementById('retTypes').value.trim();
+  let cmd = `${c.bin} ${globalFlags()} mem retrieve --query "${q}"`;
+  if (k && k !== '5') cmd += ` --k ${k}`;
+  if (types) cmd += ` --types ${types}`;
+  showCmd(cmd);
+}
+
+function buildFeedback() {
+  const c = cfg();
+  showCmd(`${c.bin} ${globalFlags()} mem feedback --id "${document.getElementById('fbId').value.trim()}" --result ${document.getElementById('fbResult').value}`);
+}
+
+function buildRevise() {
+  const c = cfg();
+  const json = { id: document.getElementById('revId').value.trim() };
+  const title = document.getElementById('revTitle').value.trim();
+  const content = document.getElementById('revContent').value.trim();
+  if (title) json.new_title = title;
+  if (content) { try { json.new_content = JSON.parse(content); } catch { json.new_content = content; } }
+  const escaped = JSON.stringify(JSON.stringify(json));
+  showCmd(`echo ${escaped} | ${c.bin} ${globalFlags()} mem revise`);
+}
+
+function buildDeprecate() {
+  const c = cfg();
+  const json = { id: document.getElementById('depId').value.trim() };
+  const escaped = JSON.stringify(JSON.stringify(json));
+  showCmd(`echo ${escaped} | ${c.bin} ${globalFlags()} mem deprecate`);
+}
+
+function buildSpec() {
+  const c = cfg();
+  showCmd(`${c.bin} ${globalFlags()} mem spec ${document.getElementById('specCmd').value}`);
+}
+
+// Execute via HTTP API (for retrieve/add that map to vector endpoints)
+async function execViaAPI(type) {
+  const c = cfg();
+  const base = `http://localhost:${c.port}/api/v1`;
+  document.getElementById('statusText').textContent = '执行中...';
+
+  try {
+    let resp;
+    if (type === 'retrieve') {
+      const q = document.getElementById('retQuery').value.trim();
+      const scope = c.group ? c.group + '/memory' : 'memory';
+      resp = await fetch(base + '/vector/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scope, query: q, top_k: parseInt(document.getElementById('retK').value) || 5 }),
+      });
+    } else if (type === 'add') {
+      const tags = document.getElementById('addTags').value.trim();
+      const json = {
+        type: document.getElementById('addType').value,
+        title: document.getElementById('addTitle').value.trim(),
+        risk: document.getElementById('addRisk').value,
+        content: getContentJSON(),
+        evidence: [{ kind: 'user', ref: document.getElementById('addEvidenceRef').value.trim() || 'manual', ts: new Date().toISOString() }],
+      };
+      if (tags) json.tags = tags.split(',').map(t => t.trim());
+      // Use the write API with rendered markdown
+      const scope = c.group ? c.group + '/memory' : 'memory';
+      const fileName = json.title.replace(/[\/\\:*?"<>| ]/g, '-') + '.md';
+      const md = `# ${json.title}\n\n> Type: \`${json.type}\` | Risk: \`${json.risk}\`\n> Tags: ${(json.tags||[]).join(', ')}\n\n${JSON.stringify(json.content, null, 2)}`;
+      resp = await fetch(base + '/vector/write', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_name: fileName, content: md, scope, extra_metadata: { mem_type: json.type, mem_status: 'active', mem_title: json.title } }),
+      });
+    }
+    const data = await resp.json();
+    showResult(JSON.stringify(data), !resp.ok);
+    document.getElementById('statusText').textContent = resp.ok ? '✅ 成功' : '❌ 失败';
+  } catch (e) {
+    showResult('请求失败: ' + e.message, true);
+    document.getElementById('statusText').textContent = '❌ 错误';
+  }
+  setTimeout(() => document.getElementById('statusText').textContent = '就绪', 3000);
+}
+
+// Tab switching
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('panel-' + tab.dataset.tab).classList.add('active');
+    document.getElementById('cmdOutput').style.display = 'none';
+    document.getElementById('resultOutput').style.display = 'none';
+  });
+});
+
+// Init
+updateContentFields();
+</script>
+</body>
+</html>

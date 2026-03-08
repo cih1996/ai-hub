@@ -468,10 +468,18 @@ const displayWorkDir = computed(() => {
   return wd.replace(/^\/Users\/[^/]+/, home)
 })
 
-function scrollToBottom() {
+function scrollToBottom(retry = true) {
   nextTick(() => {
     if (messagesEl.value) {
       messagesEl.value.scrollTop = messagesEl.value.scrollHeight
+    }
+    // Retry after a short delay to catch late DOM renders (images, code blocks, etc.)
+    if (retry) {
+      setTimeout(() => {
+        if (messagesEl.value) {
+          messagesEl.value.scrollTop = messagesEl.value.scrollHeight
+        }
+      }, 150)
     }
   })
 }
@@ -500,9 +508,9 @@ watch(() => allMessages.value.length, (newLen, oldLen) => {
   // Only auto-scroll when new messages are appended (not prepended via loadMore)
   if (!store.loadingMore && newLen > oldLen) scrollToBottom()
 })
-watch(() => store.streamingContent, scrollToBottom)
-watch(() => store.thinkingContent, scrollToBottom)
-watch(() => store.toolCalls.length, scrollToBottom)
+watch(() => store.streamingContent, () => scrollToBottom(false))
+watch(() => store.thinkingContent, () => scrollToBottom(false))
+watch(() => store.toolCalls.length, () => scrollToBottom())
 
 // Session token stats
 const sessionTokenStats = ref<{ total_input_tokens: number; total_output_tokens: number; total_cache_creation_tokens: number; total_cache_read_tokens: number; count: number } | null>(null)

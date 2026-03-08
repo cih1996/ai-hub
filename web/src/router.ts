@@ -4,6 +4,7 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', redirect: '/chat' },
+    { path: '/init', name: 'init', component: () => import('./views/InitGuideView.vue') },
     {
       path: '/',
       component: () => import('./views/MainLayout.vue'),

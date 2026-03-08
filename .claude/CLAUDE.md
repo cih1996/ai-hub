@@ -63,11 +63,12 @@ AI Hub 通过 go:embed 嵌入资源，启动时自动安装到 ~/.ai-hub/：
 
 ### 编译与测试
 1. 代码修改后 `make` 编译，产物在 dist/
-2. 停 8081：`lsof -ti:8081 | xargs kill -9 2>/dev/null`，`sleep 2`
-3. 启 8081：`nohup dist/ai-hub-darwin-arm64 -port 8081 >> ~/.ai-hub/logs/ai-hub-8081.log 2>&1 &`
-4. 验证：`sleep 5 && curl -s http://localhost:8081/api/v1/version`（失败查日志 `tail -50`）
+2. 停 8081：`ai-hub services stop "AI Hub 测试实例"`
+3. 启 8081：`ai-hub services start "AI Hub 测试实例"`
+4. 验证：`sleep 5 && curl -s http://localhost:8081/api/v1/version`（失败查日志 `ai-hub services logs "AI Hub 测试实例" --lines 50`）
 5. 前端验证：通过 Chrome MCP 访问 http://localhost:8081
 6. 严禁操作 8080 生产实例
+7. 测试实例已注册为服务（ID: 9），所有启停操作必须通过 `ai-hub services` CLI
 
 ### 升级生产（售后客服执行）
 1. `git pull`
