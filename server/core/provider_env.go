@@ -4,6 +4,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -104,9 +105,17 @@ func injectCLIPath(env []string) []string {
 		return env
 	}
 	binDir := filepath.Join(home, ".ai-hub", "bin")
+
+	// Use correct PATH separator: ";" on Windows, ":" on Unix
+	pathSep := ":"
+	if runtime.GOOS == "windows" {
+		pathSep = ";"
+	}
+
 	for i, e := range env {
-		if strings.HasPrefix(e, "PATH=") {
-			env[i] = "PATH=" + binDir + ":" + e[5:]
+		if strings.HasPrefix(strings.ToUpper(e), "PATH=") {
+			// Windows PATH is case-insensitive, preserve original case
+			env[i] = e[:5] + binDir + pathSep + e[5:]
 			return env
 		}
 	}
