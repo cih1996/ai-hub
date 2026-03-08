@@ -192,7 +192,7 @@ func serviceCreate(c *client.Client, args []string) int {
 				i++
 				workDir = args[i]
 			}
-		case "--port":
+		case "--svc-port":
 			if i+1 < len(args) {
 				i++
 				fmt.Sscanf(args[i], "%d", &port)
@@ -203,7 +203,7 @@ func serviceCreate(c *client.Client, args []string) int {
 	}
 
 	if name == "" || command == "" {
-		fmt.Fprintln(os.Stderr, "Usage: ai-hub service create --name <name> --command <cmd> [--port N] [--work-dir dir] [--auto-start]")
+		fmt.Fprintln(os.Stderr, "Usage: ai-hub service create --name <name> --command <cmd> [--svc-port N] [--work-dir dir] [--auto-start]")
 		return 1
 	}
 

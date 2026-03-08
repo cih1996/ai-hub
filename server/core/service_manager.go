@@ -128,6 +128,10 @@ func (m *ServiceManager) Restart(svc *model.Service) error {
 // CheckAlive returns the current status of a service.
 func (m *ServiceManager) CheckAlive(svc *model.Service) string {
 	if svc.PID <= 0 {
+		// Preserve dead/stopped from DB rather than always returning stopped
+		if svc.Status == "dead" {
+			return "dead"
+		}
 		return "stopped"
 	}
 	if processAlive(svc.PID) {
