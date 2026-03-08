@@ -19,31 +19,31 @@ func RunService(c *client.Client, args []string) int {
 		return serviceList(c)
 	case "info":
 		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "Usage: ai-hub service info <name|id>")
+			fmt.Fprintln(os.Stderr, "Usage: ai-hub services <name|id>")
 			return 1
 		}
 		return serviceInfo(c, args[1])
 	case "start":
 		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "Usage: ai-hub service start <name|id>")
+			fmt.Fprintln(os.Stderr, "Usage: ai-hub services start <name|id>")
 			return 1
 		}
 		return serviceAction(c, args[1], "start")
 	case "stop":
 		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "Usage: ai-hub service stop <name|id>")
+			fmt.Fprintln(os.Stderr, "Usage: ai-hub services stop <name|id>")
 			return 1
 		}
 		return serviceAction(c, args[1], "stop")
 	case "restart":
 		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "Usage: ai-hub service restart <name|id>")
+			fmt.Fprintln(os.Stderr, "Usage: ai-hub services restart <name|id>")
 			return 1
 		}
 		return serviceAction(c, args[1], "restart")
 	case "logs":
 		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "Usage: ai-hub service logs <name|id> [--lines N]")
+			fmt.Fprintln(os.Stderr, "Usage: ai-hub services logs <name|id> [--lines N]")
 			return 1
 		}
 		lines := 100
@@ -58,7 +58,7 @@ func RunService(c *client.Client, args []string) int {
 		return serviceCreate(c, args[1:])
 	case "delete":
 		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "Usage: ai-hub service delete <name|id>")
+			fmt.Fprintln(os.Stderr, "Usage: ai-hub services delete <name|id>")
 			return 1
 		}
 		return serviceDelete(c, args[1])
@@ -182,12 +182,12 @@ func serviceCreate(c *client.Client, args []string) int {
 				i++
 				name = args[i]
 			}
-		case "--command":
+		case "--command", "--cmd":
 			if i+1 < len(args) {
 				i++
 				command = args[i]
 			}
-		case "--work-dir":
+		case "--work-dir", "--dir":
 			if i+1 < len(args) {
 				i++
 				workDir = args[i]
@@ -203,7 +203,7 @@ func serviceCreate(c *client.Client, args []string) int {
 	}
 
 	if name == "" || command == "" {
-		fmt.Fprintln(os.Stderr, "Usage: ai-hub service create --name <name> --command <cmd> [--svc-port N] [--work-dir dir] [--auto-start]")
+		fmt.Fprintln(os.Stderr, "Usage: ai-hub services create --name <name> --cmd <command> [--svc-port N] [--dir path] [--auto-start]")
 		return 1
 	}
 

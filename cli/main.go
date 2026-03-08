@@ -129,7 +129,7 @@ func Run(args []string) int {
 		return commands.RunTriggers(c, commandArgs)
 	case "errors":
 		return commands.RunErrors(c, commandArgs)
-	case "service":
+	case "service", "services":
 		return commands.RunService(c, commandArgs)
 	case "status":
 		return commands.RunStatus(c, commandArgs)
@@ -221,6 +221,14 @@ Sessions:
   sessions <id>      Session detail
   sessions <id> messages   View recent messages
   send               Send message to a session (0=new)
+
+Services:
+  services           List all services
+  services <id>      Service detail
+  services create    Create a service
+  services start/stop/restart <id>
+  services logs <id> View service logs
+  services delete <id>
 
 System:
   rules              Manage session rules (get/set/delete)
