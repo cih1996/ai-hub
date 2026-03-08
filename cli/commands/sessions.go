@@ -9,9 +9,22 @@ import (
 )
 
 // RunSessions executes the sessions command
+// Usage: ai-hub sessions [id] [messages] [--with-errors]
 func RunSessions(c *client.Client, args []string) int {
+	// Check for --with-errors flag
+	var withErrors bool
+	var filteredArgs []string
+	for _, arg := range args {
+		if arg == "--with-errors" {
+			withErrors = true
+		} else {
+			filteredArgs = append(filteredArgs, arg)
+		}
+	}
+	args = filteredArgs
+
 	if len(args) == 0 {
-		return listSessions(c)
+		return listSessions(c, withErrors)
 	}
 
 	// Parse session ID
@@ -29,7 +42,8 @@ func RunSessions(c *client.Client, args []string) int {
 	return sessionDetail(c, id)
 }
 
-func listSessions(c *client.Client) int {
+func listSessions(c *client.Client, withErrors bool) int {
+	// Get sessions
 	respData, err := c.GET("/sessions")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -56,6 +70,56 @@ func listSessions(c *client.Client) int {
 		return 0
 	}
 
+	// Get error stats for all sessions
+	errorStats := make(map[int64]struct {
+		Errors   int
+		Warnings int
+	})
+
+	statsData, err := c.GET("/stats/errors")
+	if err == nil {
+		var statsResp struct {
+			Stats []struct {
+				SessionID    int64 `json:"session_id"`
+				ErrorCount   int   `json:"error_count"`
+				WarningCount int   `json:"warning_count"`
+			} `json:"stats"`
+		}
+		if json.Unmarshal(statsData, &statsResp) == nil {
+			for _, s := range statsResp.Stats {
+				errorStats[s.SessionID] = struct {
+					Errors   int
+					Warnings int
+				}{s.ErrorCount, s.WarningCount}
+			}
+		}
+	}
+
+	// Filter sessions if --with-errors
+	if withErrors {
+		var filtered []struct {
+			ID           int64  `json:"id"`
+			Title        string `json:"title"`
+			GroupName    string `json:"group_name"`
+			WorkDir      string `json:"work_dir"`
+			Streaming    bool   `json:"streaming"`
+			ProcessAlive bool   `json:"process_alive"`
+			ProcessState string `json:"process_state"`
+			UpdatedAt    string `json:"updated_at"`
+		}
+		for _, s := range sessions {
+			stats := errorStats[s.ID]
+			if stats.Errors > 0 || stats.Warnings > 0 {
+				filtered = append(filtered, s)
+			}
+		}
+		sessions = filtered
+		if len(sessions) == 0 {
+			fmt.Println("No sessions with errors found.")
+			return 0
+		}
+	}
+
 	fmt.Printf("%d sessions:\n\n", len(sessions))
 	for _, s := range sessions {
 		status := "idle"
@@ -68,7 +132,15 @@ func listSessions(c *client.Client) int {
 		if group == "" {
 			group = "-"
 		}
-		fmt.Printf("#%-4d [%s] %s\n", s.ID, status, s.Title)
+
+		// Get error stats for this session
+		stats := errorStats[s.ID]
+		errStr := ""
+		if stats.Errors > 0 || stats.Warnings > 0 {
+			errStr = fmt.Sprintf("  E:%d W:%d", stats.Errors, stats.Warnings)
+		}
+
+		fmt.Printf("#%-4d [%s] %s%s\n", s.ID, status, s.Title, errStr)
 		fmt.Printf("      团队: %s  更新: %s\n", group, FormatTime(s.UpdatedAt))
 		fmt.Println("---")
 	}
@@ -181,12 +253,12 @@ func sessionMessages(c *client.Client, id int64, args []string) int {
 			return 1
 		}
 		msgID := resp.Messages[0].ID
-		return showMessageWithContext(c, id, msgID)
+		return showMessageWithContext(c, id, msgID, 2)
 	}
 
 	// --from <msg_id>: show from specific message ID with context
 	if fromID > 0 {
-		return showMessageWithContext(c, id, int64(fromID))
+		return showMessageWithContext(c, id, int64(fromID), 2)
 	}
 
 	// Build query path
@@ -252,8 +324,8 @@ func sessionMessages(c *client.Client, id int64, args []string) int {
 	return 0
 }
 
-func showMessageWithContext(c *client.Client, sessionID, msgID int64) int {
-	respData, err := c.GET(fmt.Sprintf("/sessions/%d/messages/%d?context=2", sessionID, msgID))
+func showMessageWithContext(c *client.Client, sessionID, msgID int64, lines int) int {
+	respData, err := c.GET(fmt.Sprintf("/sessions/%d/messages/%d?context=%d", sessionID, msgID, lines))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 1
@@ -292,4 +364,9 @@ func showMessageWithContext(c *client.Client, sessionID, msgID int64) int {
 		fmt.Printf("   %s\n\n", TruncatePreview(m.Content, preview))
 	}
 	return 0
+}
+
+// ShowMessageWithContextPublic is exported for use by errors command
+func ShowMessageWithContextPublic(c *client.Client, sessionID, msgID int64, lines int) int {
+	return showMessageWithContext(c, sessionID, msgID, lines)
 }

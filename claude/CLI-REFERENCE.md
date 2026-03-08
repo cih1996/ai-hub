@@ -16,10 +16,21 @@ level 解析：session 需要 GROUP_NAME+SESSION_ID，team 需要 GROUP_NAME，g
 
 ## 会话管理
 
-ai-hub sessions                          # 列出所有会话
+ai-hub sessions                          # 列出所有会话（含错误统计 E:n W:n）
+ai-hub sessions --with-errors            # 只显示有错误/警告的会话
 ai-hub sessions <id>                     # 会话详情+状态
 ai-hub sessions <id> messages            # 最近消息
 ai-hub send <session_id> "消息内容"       # 发消息（0=新建会话）
+
+## 错误统计
+
+ai-hub errors                            # 所有会话错误统计概览
+ai-hub errors <session_id>               # 查看会话的错误列表
+ai-hub errors <session_id> --level error # 只看错误（不含警告）
+ai-hub errors <session_id> --context <message_id>  # 查看出错消息的上下文
+ai-hub errors <session_id> --context <message_id> --lines 5  # 指定上下文行数（默认2）
+
+用途：AI 可通过 --context 拉取犯错时的对话上下文，分析错误原因。
 
 ## 规则管理
 
