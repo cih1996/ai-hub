@@ -96,6 +96,23 @@ func AddMessage(m *model.Message) error {
 	return err
 }
 
+// UpdateMessageContent updates the content and metadata of an existing message.
+// Used for incremental saves during streaming to prevent data loss on crash.
+func UpdateMessageContent(id int64, content string, metadata string) error {
+	_, err := DB.Exec(
+		`UPDATE messages SET content = ?, metadata = ? WHERE id = ?`,
+		content, metadata, id,
+	)
+	return err
+}
+
+// DeleteMessage removes a single message by ID.
+// Used to clean up empty pre-inserted messages when streaming produces no content.
+func DeleteMessage(id int64) error {
+	_, err := DB.Exec(`DELETE FROM messages WHERE id = ?`, id)
+	return err
+}
+
 func GetMessages(sessionID int64) ([]model.Message, error) {
 	rows, err := DB.Query(
 		`SELECT id, session_id, role, content, metadata, created_at FROM messages WHERE session_id = ? ORDER BY created_at`,

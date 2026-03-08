@@ -519,6 +519,7 @@ watch(() => store.currentSessionId, async (id) => {
       }
     } catch { /* ignore */ }
   }
+  scrollToBottom()
 }, { immediate: true })
 
 // Update session stats when new token_usage arrives via WS

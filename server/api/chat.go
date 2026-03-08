@@ -439,6 +439,21 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 	var metadataJSON string
 	var usageInput, usageOutput, usageCacheCreation, usageCacheRead int64
 
+	// Pre-insert empty assistant message for incremental saves (Issue #163)
+	// This ensures partial content survives process crashes during streaming.
+	assistantMsg := &model.Message{
+		SessionID: session.ID,
+		Role:      "assistant",
+		Content:   "",
+		Metadata:  "",
+	}
+	if err := store.AddMessage(assistantMsg); err != nil {
+		log.Printf("[chat] session=%d failed to pre-insert assistant message: %v", session.ID, err)
+		broadcast(WSMessage{Type: "error", SessionID: session.ID, Content: "failed to save message"})
+		return
+	}
+	progressMsgID := assistantMsg.ID
+
 	// Reset proxy usage accumulator at stream start (Issue #72)
 	ResetProxyUsage(session.ID)
 
@@ -458,7 +473,7 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 	if consumeForceFreshRun(session.ID) {
 		isResume = false
 	}
-	fullResponse, metadataJSON, usageInput, usageOutput, usageCacheCreation, usageCacheRead, err = streamClaudeCode(ctx, provider, query, session.ClaudeSessionID, isResume, stream.Send, session.ID, session.WorkDir, session.GroupName)
+	fullResponse, metadataJSON, usageInput, usageOutput, usageCacheCreation, usageCacheRead, err = streamClaudeCode(ctx, provider, query, session.ClaudeSessionID, isResume, stream.Send, session.ID, session.WorkDir, session.GroupName, progressMsgID)
 
 	if err != nil {
 		log.Printf("[chat] session=%d provider=%s error: %v", session.ID, provider.Name, err)
@@ -475,21 +490,18 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 			if content == "" {
 				content = "[任务已执行，详见执行步骤]"
 			}
-			assistantMsg := &model.Message{
-				SessionID: session.ID,
-				Role:      "assistant",
-				Content:   content,
-				Metadata:  metadataJSON,
-			}
-			store.AddMessage(assistantMsg)
-			extractAndSaveErrors(session.ID, assistantMsg.ID, content)
+			store.UpdateMessageContent(progressMsgID, content, metadataJSON)
+			extractAndSaveErrors(session.ID, progressMsgID, content)
 			// Save token usage even on error (partial response)
 			if usageInput > 0 || usageOutput > 0 || usageCacheCreation > 0 || usageCacheRead > 0 {
-				tu := &model.TokenUsage{SessionID: session.ID, MessageID: assistantMsg.ID, InputTokens: usageInput, OutputTokens: usageOutput, CacheCreationInputTokens: usageCacheCreation, CacheReadInputTokens: usageCacheRead}
+				tu := &model.TokenUsage{SessionID: session.ID, MessageID: progressMsgID, InputTokens: usageInput, OutputTokens: usageOutput, CacheCreationInputTokens: usageCacheCreation, CacheReadInputTokens: usageCacheRead}
 				store.AddTokenUsage(tu)
 				usageJSON, _ := json.Marshal(tu)
 				broadcast(WSMessage{Type: "token_usage", SessionID: session.ID, Content: string(usageJSON)})
 			}
+		} else {
+			// No content received — remove the empty pre-inserted message
+			store.DeleteMessage(progressMsgID)
 		}
 		broadcast(WSMessage{Type: "error", SessionID: session.ID, Content: err.Error()})
 		return
@@ -510,17 +522,12 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 		if content == "" {
 			content = "[任务已执行，详见执行步骤]"
 		}
-		assistantMsg := &model.Message{
-			SessionID: session.ID,
-			Role:      "assistant",
-			Content:   content,
-			Metadata:  metadataJSON,
-		}
-		store.AddMessage(assistantMsg)
-		extractAndSaveErrors(session.ID, assistantMsg.ID, content)
+		// Final update of the pre-inserted assistant message
+		store.UpdateMessageContent(progressMsgID, content, metadataJSON)
+		extractAndSaveErrors(session.ID, progressMsgID, content)
 		// Save and broadcast token usage
 		if usageInput > 0 || usageOutput > 0 || usageCacheCreation > 0 || usageCacheRead > 0 {
-			tu := &model.TokenUsage{SessionID: session.ID, MessageID: assistantMsg.ID, InputTokens: usageInput, OutputTokens: usageOutput, CacheCreationInputTokens: usageCacheCreation, CacheReadInputTokens: usageCacheRead}
+			tu := &model.TokenUsage{SessionID: session.ID, MessageID: progressMsgID, InputTokens: usageInput, OutputTokens: usageOutput, CacheCreationInputTokens: usageCacheCreation, CacheReadInputTokens: usageCacheRead}
 			store.AddTokenUsage(tu)
 			usageJSON, _ := json.Marshal(tu)
 			broadcast(WSMessage{Type: "token_usage", SessionID: session.ID, Content: string(usageJSON)})
@@ -529,6 +536,9 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 		if usageInput > 0 {
 			go maybeAutoCompress(session, usageInput)
 		}
+	} else {
+		// No content received — remove the empty pre-inserted message
+		store.DeleteMessage(progressMsgID)
 	}
 
 	// Broadcast done so even reconnected/new WS clients receive it (stream.Send is single-client)
@@ -597,7 +607,7 @@ func runtimeTemplateVars(sessID int64, groupName string) map[string]string {
 	return vars
 }
 
-func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID string, resume bool, send func(WSMessage), sessID int64, workDir string, groupName string) (string, string, int64, int64, int64, int64, error) {
+func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID string, resume bool, send func(WSMessage), sessID int64, workDir string, groupName string, progressMsgID int64) (string, string, int64, int64, int64, int64, error) {
 	req := core.ClaudeCodeRequest{
 		Query:        query,
 		SessionID:    sessionID,
@@ -655,6 +665,10 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 	// Full text from assistant message (preserves newlines, used as fallback)
 	var assistantFullText string
 	var usageInput, usageOutput, usageCacheCreation, usageCacheRead int64
+
+	// Incremental save throttle state (Issue #163)
+	var lastSaveTime time.Time
+	var lastSaveLen int
 
 	err := claudeClient.StreamPersistent(ctx, req, func(line string) {
 		// Debug: log raw line type for troubleshooting (especially Windows)
@@ -775,6 +789,16 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 					if inner.Delta.Text != "" {
 						fullResponse += inner.Delta.Text
 						send(WSMessage{Type: "chunk", SessionID: sessID, Content: inner.Delta.Text})
+						// Incremental save: every 5s or 2000 chars since last save (Issue #163)
+						if progressMsgID > 0 {
+							charsSinceSave := len(fullResponse) - lastSaveLen
+							timeSinceSave := time.Since(lastSaveTime)
+							if charsSinceSave >= 2000 || timeSinceSave >= 5*time.Second {
+								store.UpdateMessageContent(progressMsgID, fullResponse, "")
+								lastSaveTime = time.Now()
+								lastSaveLen = len(fullResponse)
+							}
+						}
 					}
 				case "thinking_delta":
 					if inner.Delta.Thinking != "" {
