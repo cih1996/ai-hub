@@ -178,6 +178,108 @@ func GetMessagesCountBefore(sessionID int64, beforeID int64) (int64, error) {
 	return count, err
 }
 
+// GetMessagesByOffset returns messages with OFFSET/LIMIT pagination, ordered by id ASC.
+func GetMessagesByOffset(sessionID int64, offset, limit int) ([]model.Message, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := DB.Query(
+		`SELECT id, session_id, role, content, metadata, created_at FROM messages
+		 WHERE session_id = ? ORDER BY id ASC LIMIT ? OFFSET ?`,
+		sessionID, limit, offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanMessages(rows)
+}
+
+// GetMessagesByPage returns messages for a given page (1-based), ordered by id ASC.
+func GetMessagesByPage(sessionID int64, page, pageSize int) ([]model.Message, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+	offset := (page - 1) * pageSize
+	return GetMessagesByOffset(sessionID, offset, pageSize)
+}
+
+// GetMessageWithContext returns a single message plus surrounding context messages.
+func GetMessageWithContext(sessionID, msgID int64, ctx int) ([]model.Message, error) {
+	if ctx < 0 {
+		ctx = 0
+	}
+	// Get `ctx` messages before the target
+	beforeRows, err := DB.Query(
+		`SELECT id, session_id, role, content, metadata, created_at FROM (
+			SELECT id, session_id, role, content, metadata, created_at FROM messages
+			WHERE session_id = ? AND id < ? ORDER BY id DESC LIMIT ?
+		) sub ORDER BY id ASC`,
+		sessionID, msgID, ctx,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer beforeRows.Close()
+	before, err := scanMessages(beforeRows)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get the target message + `ctx` messages after
+	afterRows, err := DB.Query(
+		`SELECT id, session_id, role, content, metadata, created_at FROM messages
+		 WHERE session_id = ? AND id >= ? ORDER BY id ASC LIMIT ?`,
+		sessionID, msgID, ctx+1,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer afterRows.Close()
+	after, err := scanMessages(afterRows)
+	if err != nil {
+		return nil, err
+	}
+
+	return append(before, after...), nil
+}
+
+// SearchMessages searches messages by keyword (SQL LIKE), ordered by id DESC.
+func SearchMessages(sessionID int64, keyword string, limit int) ([]model.Message, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	rows, err := DB.Query(
+		`SELECT id, session_id, role, content, metadata, created_at FROM messages
+		 WHERE session_id = ? AND content LIKE ? ORDER BY id DESC LIMIT ?`,
+		sessionID, "%"+keyword+"%", limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanMessages(rows)
+}
+
+// scanMessages is a helper to scan message rows into a slice.
+func scanMessages(rows interface {
+	Next() bool
+	Scan(...interface{}) error
+}) ([]model.Message, error) {
+	var list []model.Message
+	for rows.Next() {
+		var m model.Message
+		if err := rows.Scan(&m.ID, &m.SessionID, &m.Role, &m.Content, &m.Metadata, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		list = append(list, m)
+	}
+	return list, nil
+}
+
 func CreateSessionWithMessage(providerID string, content string, workDir string, groupName string) (*model.Session, error) {
 	s := &model.Session{
 		Title:      truncateTitle(content),

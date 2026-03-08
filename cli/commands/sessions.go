@@ -106,14 +106,102 @@ func sessionDetail(c *client.Client, id int64) int {
 
 func sessionMessages(c *client.Client, id int64, args []string) int {
 	limit := 20
+	var page, pageSize, nth, fromID int
+	var search string
+	var countOnly bool
+
 	for i := 0; i < len(args); i++ {
-		if args[i] == "--limit" && i+1 < len(args) {
-			i++
-			fmt.Sscanf(args[i], "%d", &limit)
+		switch args[i] {
+		case "--limit":
+			if i+1 < len(args) {
+				i++
+				fmt.Sscanf(args[i], "%d", &limit)
+			}
+		case "--page":
+			if i+1 < len(args) {
+				i++
+				fmt.Sscanf(args[i], "%d", &page)
+			}
+		case "--size":
+			if i+1 < len(args) {
+				i++
+				fmt.Sscanf(args[i], "%d", &pageSize)
+			}
+		case "--nth":
+			if i+1 < len(args) {
+				i++
+				fmt.Sscanf(args[i], "%d", &nth)
+			}
+		case "--from":
+			if i+1 < len(args) {
+				i++
+				fmt.Sscanf(args[i], "%d", &fromID)
+			}
+		case "--count":
+			countOnly = true
+		case "--search":
+			if i+1 < len(args) {
+				i++
+				search = args[i]
+			}
 		}
 	}
 
-	path := fmt.Sprintf("/sessions/%d/messages?limit=%d", id, limit)
+	// --count: just show total
+	if countOnly {
+		respData, err := c.GET(fmt.Sprintf("/sessions/%d/messages?limit=1", id))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return 1
+		}
+		var resp struct {
+			Total int64 `json:"total"`
+		}
+		json.Unmarshal(respData, &resp)
+		fmt.Printf("Session #%d: %d messages\n", id, resp.Total)
+		return 0
+	}
+
+	// --nth N: show message #N with context
+	if nth > 0 {
+		// First get the message at position nth using offset
+		respData, err := c.GET(fmt.Sprintf("/sessions/%d/messages?offset=%d&limit=1", id, nth-1))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return 1
+		}
+		var resp struct {
+			Messages []struct {
+				ID int64 `json:"id"`
+			} `json:"messages"`
+		}
+		json.Unmarshal(respData, &resp)
+		if len(resp.Messages) == 0 {
+			fmt.Fprintf(os.Stderr, "Message #%d not found in session #%d\n", nth, id)
+			return 1
+		}
+		msgID := resp.Messages[0].ID
+		return showMessageWithContext(c, id, msgID)
+	}
+
+	// --from <msg_id>: show from specific message ID with context
+	if fromID > 0 {
+		return showMessageWithContext(c, id, int64(fromID))
+	}
+
+	// Build query path
+	var path string
+	if search != "" {
+		path = fmt.Sprintf("/sessions/%d/messages?search=%s&limit=%d", id, search, limit)
+	} else if page > 0 {
+		if pageSize <= 0 {
+			pageSize = 20
+		}
+		path = fmt.Sprintf("/sessions/%d/messages?page=%d&page_size=%d", id, page, pageSize)
+	} else {
+		path = fmt.Sprintf("/sessions/%d/messages?limit=%d", id, limit)
+	}
+
 	respData, err := c.GET(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -127,7 +215,10 @@ func sessionMessages(c *client.Client, id int64, args []string) int {
 			Content   string `json:"content"`
 			CreatedAt string `json:"created_at"`
 		} `json:"messages"`
-		HasMore bool `json:"has_more"`
+		HasMore  bool  `json:"has_more"`
+		Total    int64 `json:"total"`
+		Page     int   `json:"page"`
+		PageSize int   `json:"page_size"`
 	}
 	if err := json.Unmarshal(respData, &resp); err != nil {
 		fmt.Fprintf(os.Stderr, "Error parsing response: %v\n", err)
@@ -139,6 +230,10 @@ func sessionMessages(c *client.Client, id int64, args []string) int {
 		return 0
 	}
 
+	if resp.Total > 0 {
+		fmt.Printf("Session #%d — %d messages total\n\n", id, resp.Total)
+	}
+
 	for _, m := range resp.Messages {
 		role := "👤"
 		if m.Role == "assistant" {
@@ -148,7 +243,53 @@ func sessionMessages(c *client.Client, id int64, args []string) int {
 		fmt.Printf("   %s\n\n", TruncatePreview(m.Content, 200))
 	}
 	if resp.HasMore {
-		fmt.Println("(还有更多消息，使用 --limit 调整)")
+		if page > 0 {
+			fmt.Printf("(第 %d 页，使用 --page %d 查看下一页)\n", page, page+1)
+		} else {
+			fmt.Println("(还有更多消息，使用 --page 或 --limit 调整)")
+		}
+	}
+	return 0
+}
+
+func showMessageWithContext(c *client.Client, sessionID, msgID int64) int {
+	respData, err := c.GET(fmt.Sprintf("/sessions/%d/messages/%d?context=2", sessionID, msgID))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return 1
+	}
+	var resp struct {
+		Messages []struct {
+			ID        int64  `json:"id"`
+			Role      string `json:"role"`
+			Content   string `json:"content"`
+			CreatedAt string `json:"created_at"`
+		} `json:"messages"`
+		TargetID int64 `json:"target_id"`
+	}
+	if err := json.Unmarshal(respData, &resp); err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing response: %v\n", err)
+		return 1
+	}
+	if len(resp.Messages) == 0 {
+		fmt.Printf("Message #%d not found\n", msgID)
+		return 1
+	}
+	for _, m := range resp.Messages {
+		role := "👤"
+		if m.Role == "assistant" {
+			role = "🤖"
+		}
+		marker := "  "
+		if m.ID == resp.TargetID {
+			marker = "▶ "
+		}
+		fmt.Printf("%s%s [#%d] %s\n", marker, role, m.ID, FormatTime(m.CreatedAt))
+		preview := 200
+		if m.ID == resp.TargetID {
+			preview = 500
+		}
+		fmt.Printf("   %s\n\n", TruncatePreview(m.Content, preview))
 	}
 	return 0
 }
