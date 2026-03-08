@@ -43,7 +43,7 @@ release: frontend
 	@echo "==> Building darwin/arm64..."
 	@GOOS=darwin GOARCH=arm64 CC=$(CC_darwin_arm64) go build -ldflags "$(LDFLAGS)" -o dist/$(APP)-darwin-arm64 .
 	@echo "==> Building linux/amd64..."
-	@GOOS=linux GOARCH=amd64 CC=$(CC_linux_amd64) go build -ldflags "$(LDFLAGS)" -o dist/$(APP)-linux-amd64 .
+	@GOOS=linux GOARCH=amd64 CC=$(CC_linux_amd64) go build -ldflags "$(LDFLAGS) -extldflags '-static'" -o dist/$(APP)-linux-amd64 .
 	@echo "==> Building windows/amd64..."
 	@GOOS=windows GOARCH=amd64 CC=$(CC_windows_amd64) go build -ldflags "$(LDFLAGS)" -o dist/$(APP)-windows-amd64.exe .
 	@echo ""
