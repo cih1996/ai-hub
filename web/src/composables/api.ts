@@ -364,6 +364,36 @@ export async function importArchive(file: File): Promise<ImportResult> {
   return res.json()
 }
 
+// Services
+export interface Service {
+  id: number
+  name: string
+  command: string
+  work_dir: string
+  port: number
+  log_path: string
+  pid: number
+  status: string
+  auto_start: boolean
+  created_at: string
+  updated_at: string
+}
+export const listServices = () => request<Service[]>('/services')
+export const createService = (data: Partial<Service>) =>
+  request<Service>('/services', { method: 'POST', body: JSON.stringify(data) })
+export const updateService = (id: number, data: Partial<Service>) =>
+  request<Service>('/services/' + id, { method: 'PUT', body: JSON.stringify(data) })
+export const deleteService = (id: number) =>
+  request('/services/' + id, { method: 'DELETE' })
+export const startService = (id: number) =>
+  request<Service>('/services/' + id + '/start', { method: 'POST' })
+export const stopService = (id: number) =>
+  request<Service>('/services/' + id + '/stop', { method: 'POST' })
+export const restartService = (id: number) =>
+  request<Service>('/services/' + id + '/restart', { method: 'POST' })
+export const getServiceLogs = (id: number, lines = 100) =>
+  request<{ logs: string; error?: string }>('/services/' + id + '/logs?lines=' + lines)
+
 // Compress settings
 export const getCompressSettings = () => request<CompressSettings>('/settings/compress')
 export const updateCompressSettings = (s: CompressSettings) =>
