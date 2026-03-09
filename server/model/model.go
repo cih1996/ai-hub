@@ -48,10 +48,11 @@ type Session struct {
 	ID                int64     `json:"id"`
 	Title             string    `json:"title"`
 	ProviderID        string    `json:"provider_id"`
-	ClaudeSessionID   string    `json:"claude_session_id"`   // UUID for Claude Code CLI --session-id
-	WorkDir           string    `json:"work_dir"`            // 工作目录，空 = 系统默认(home)
-	GroupName         string    `json:"group_name"`          // 会话分组名称
+	ClaudeSessionID   string    `json:"claude_session_id"`    // UUID for Claude Code CLI --session-id
+	WorkDir           string    `json:"work_dir"`             // 工作目录，空 = 系统默认(home)
+	GroupName         string    `json:"group_name"`           // 会话分组名称
 	LastCompressMsgID int64     `json:"last_compress_msg_id"` // 上次压缩时最新消息 ID，用于增量统计
+	AttentionEnabled  bool      `json:"attention_enabled"`    // 注意力系统开关
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
 }

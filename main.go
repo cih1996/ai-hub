@@ -189,6 +189,7 @@ func main() {
 		v1.GET("/sessions/:id/last-request", api.GetLastRawRequest)
 		v1.GET("/sessions/:id/messages/:msg_id", api.GetMessageWithContext)
 		v1.PUT("/sessions/:id/provider", api.SwitchProvider)
+		v1.PUT("/sessions/:id/attention", api.ToggleAttention)
 
 		// AI error tracking
 		v1.GET("/sessions/:id/errors", api.GetSessionErrors)

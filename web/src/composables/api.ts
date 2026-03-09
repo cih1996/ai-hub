@@ -88,6 +88,10 @@ export const truncateMessages = (sessionId: number, fromMsgId: number) =>
 export const switchProvider = (id: number, providerId: string) =>
   request<{ ok: boolean; provider_id: string; provider_name: string }>(`/sessions/${id}/provider`, { method: 'PUT', body: JSON.stringify({ provider_id: providerId }) })
 
+// Toggle attention mode
+export const toggleAttention = (id: number, enabled: boolean) =>
+  request<{ ok: boolean; attention_enabled: boolean; session_id: number }>(`/sessions/${id}/attention`, { method: 'PUT', body: JSON.stringify({ enabled }) })
+
 // Chat
 export const sendChat = (sessionId: number, content: string, workDir?: string, sessionRules?: string, providerId?: string, groupName?: string) =>
   request<{ session_id: number; status: string }>('/chat/send', {

@@ -585,3 +585,41 @@ func SwitchProvider(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"ok": true, "provider_id": body.ProviderID, "provider_name": provider.Name})
 }
+
+// ToggleAttention handles PUT /api/v1/sessions/:id/attention
+// Toggles the attention system for a session.
+func ToggleAttention(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid session id"})
+		return
+	}
+
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	session, err := store.GetSession(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return
+	}
+
+	if err := store.UpdateAttentionEnabled(id, body.Enabled); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Broadcast state change to all WS clients
+	state := "off"
+	if body.Enabled {
+		state = "on"
+	}
+	broadcast(WSMessage{Type: "attention_update", SessionID: id, Content: state})
+
+	c.JSON(http.StatusOK, gin.H{"ok": true, "attention_enabled": body.Enabled, "session_id": session.ID})
+}
