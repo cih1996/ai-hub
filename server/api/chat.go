@@ -357,6 +357,13 @@ func SendChat(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
 			return
 		}
+
+		// Attention system: intercept message when enabled
+		originalContent := req.Content
+		if session.AttentionEnabled {
+			req.Content = buildAttentionPrompt(originalContent)
+		}
+
 		// Check if session is already streaming — queue message instead of rejecting
 		if IsSessionStreaming(session.ID) {
 			userMsg := &model.Message{
@@ -370,7 +377,7 @@ func SendChat(c *gin.Context) {
 			}
 			log.Printf("[chat] session %d is streaming, message queued (msg_id=%d)", session.ID, userMsg.ID)
 			// Broadcast queued message so frontend displays it
-			broadcast(WSMessage{Type: "message_queued", SessionID: session.ID, Content: req.Content})
+			broadcast(WSMessage{Type: "message_queued", SessionID: session.ID, Content: originalContent})
 			c.JSON(http.StatusOK, gin.H{
 				"session_id": session.ID,
 				"status":     "queued",
@@ -1046,4 +1053,25 @@ func extractAndSaveErrors(sessionID, messageID int64, content string) {
 			log.Printf("[ai-error] save failed: %v", err)
 		}
 	}
+}
+
+// buildAttentionPrompt wraps user content with attention system planning template.
+// When attention mode is enabled, the AI is asked to plan before executing.
+func buildAttentionPrompt(userContent string) string {
+	return `【注意力模式】请先规划再执行。
+
+用户原始请求：
+` + userContent + `
+
+---
+
+请按以下步骤处理：
+
+1. **理解需求**：简要复述用户的核心诉求（1-2句话）
+2. **分析影响**：列出可能涉及的文件、模块或系统
+3. **制定计划**：用编号列表说明执行步骤
+4. **风险评估**：指出潜在风险或需要确认的点
+5. **等待确认**：询问用户是否同意执行计划
+
+注意：在用户确认前，不要执行任何实际操作（如写文件、运行命令等）。`
 }

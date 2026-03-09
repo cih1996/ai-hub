@@ -79,6 +79,20 @@ function showToast(msg: string, type: 'success' | 'error' = 'success') {
   toastTimer = setTimeout(() => { toastVisible.value = false }, 2500)
 }
 
+// Toggle attention mode
+async function toggleAttention() {
+  const session = store.currentSession
+  if (!session) return
+  try {
+    const newState = !session.attention_enabled
+    await api.toggleAttention(session.id, newState)
+    session.attention_enabled = newState
+    showToast(newState ? '注意力模式已开启' : '注意力模式已关闭', 'success')
+  } catch (e: unknown) {
+    showToast('切换失败: ' + (e instanceof Error ? e.message : String(e)), 'error')
+  }
+}
+
 // Session rules modal state
 const showSessionRulesModal = ref(false)
 const sessionRulesContent = ref('')
@@ -1107,29 +1121,39 @@ function formatToolInput(raw: string): string {
     </div>
 
     <div class="input-area">
-      <div class="input-wrapper" :class="{ disabled: store.streaming }">
-        <textarea
-          ref="textareaEl"
-          v-model="input"
-          :disabled="store.streaming"
-          @keydown="onKeydown"
-          @input="autoResize"
-          @compositionstart="isComposing = true"
-          @compositionend="isComposing = false"
-          :placeholder="store.streaming ? 'AI is responding...' : 'Type a message... (Shift+Enter for new line)'"
-          rows="1"
-        />
-        <div class="input-actions">
-          <button v-if="store.streaming" class="btn-stop" @click="store.stopStreaming()" title="Stop">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-              <rect x="6" y="6" width="12" height="12" rx="2"/>
-            </svg>
-          </button>
-          <button v-else class="btn-send" :disabled="!input.trim()" @click="send" title="Send">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
-            </svg>
-          </button>
+      <div class="input-row">
+        <button
+          class="btn-attention"
+          :class="{ active: store.currentSession?.attention_enabled }"
+          @click="toggleAttention"
+          :title="store.currentSession?.attention_enabled ? '关闭注意力模式' : '开启注意力模式（AI 先规划后执行）'"
+        >
+          <span class="attention-icon">{{ store.currentSession?.attention_enabled ? '🎯' : '👁️' }}</span>
+        </button>
+        <div class="input-wrapper" :class="{ disabled: store.streaming }">
+          <textarea
+            ref="textareaEl"
+            v-model="input"
+            :disabled="store.streaming"
+            @keydown="onKeydown"
+            @input="autoResize"
+            @compositionstart="isComposing = true"
+            @compositionend="isComposing = false"
+            :placeholder="store.streaming ? 'AI is responding...' : (store.currentSession?.attention_enabled ? '注意力模式：AI 会先规划再执行...' : 'Type a message... (Shift+Enter for new line)')"
+            rows="1"
+          />
+          <div class="input-actions">
+            <button v-if="store.streaming" class="btn-stop" @click="store.stopStreaming()" title="Stop">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <rect x="6" y="6" width="12" height="12" rx="2"/>
+              </svg>
+            </button>
+            <button v-else class="btn-send" :disabled="!input.trim()" @click="send" title="Send">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -2005,8 +2029,35 @@ function formatToolInput(raw: string): string {
   border-top: 1px solid var(--border);
   background: var(--bg-primary);
 }
-.input-wrapper {
+.input-row {
   max-width: 720px; margin: 0 auto;
+  display: flex; align-items: flex-end; gap: 8px;
+}
+.btn-attention {
+  flex-shrink: 0;
+  width: 40px; height: 40px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-lg);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  transition: all var(--transition);
+  cursor: pointer;
+}
+.btn-attention:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.btn-attention.active {
+  background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
+  border-color: transparent;
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
+}
+.btn-attention .attention-icon {
+  font-size: 18px;
+  line-height: 1;
+}
+.input-wrapper {
+  flex: 1;
   display: flex; align-items: flex-end; gap: 8px;
   background: var(--bg-secondary); border: 1px solid var(--border);
   border-radius: var(--radius-lg); padding: 8px 12px;

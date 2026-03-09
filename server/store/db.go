@@ -132,6 +132,9 @@ func migrate() error {
 		value TEXT NOT NULL DEFAULT ''
 	)`)
 
+	// Sessions: add attention_enabled column (attention system)
+	DB.Exec(`ALTER TABLE sessions ADD COLUMN attention_enabled INTEGER NOT NULL DEFAULT 0`)
+
 	// AI error tracking
 	DB.Exec(`CREATE TABLE IF NOT EXISTS ai_errors (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
