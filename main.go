@@ -16,6 +16,7 @@ import (
 	"os/signal"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 
@@ -537,30 +538,58 @@ func installClaudeRules(dataDir string) {
 	log.Printf("[rules] done, installed/updated %d template(s)", count)
 }
 
-// installCLISymlink creates a symlink ~/.ai-hub/bin/ai-hub → current binary.
-// This allows Claude subprocesses (with PATH injection) to use `ai-hub` CLI commands.
-// The symlink is recreated on every startup so it always points to the current version.
+// installCLIBinary installs CLI binary to ~/.ai-hub/bin/ for Claude subprocess access.
+// On Unix: creates symlink ai-hub → current binary
+// On Windows: copies binary as ai-hub.exe (symlinks require admin privileges)
 func installCLISymlink(dataDir string) {
 	binDir := filepath.Join(dataDir, "bin")
 	if err := os.MkdirAll(binDir, 0755); err != nil {
-		log.Printf("[cli-symlink] mkdir error: %v", err)
+		log.Printf("[cli-install] mkdir error: %v", err)
 		return
 	}
 	selfPath, err := os.Executable()
 	if err != nil {
-		log.Printf("[cli-symlink] cannot resolve self path: %v", err)
+		log.Printf("[cli-install] cannot resolve self path: %v", err)
 		return
 	}
 	selfPath, err = filepath.EvalSymlinks(selfPath)
 	if err != nil {
-		log.Printf("[cli-symlink] cannot eval symlinks: %v", err)
+		log.Printf("[cli-install] cannot eval symlinks: %v", err)
 		return
 	}
-	link := filepath.Join(binDir, "ai-hub")
-	os.Remove(link)
-	if err := os.Symlink(selfPath, link); err != nil {
-		log.Printf("[cli-symlink] symlink error: %v", err)
-		return
+
+	// Determine target filename based on OS
+	targetName := "ai-hub"
+	if runtime.GOOS == "windows" {
+		targetName = "ai-hub.exe"
 	}
-	log.Printf("[cli-symlink] %s → %s", link, selfPath)
+	target := filepath.Join(binDir, targetName)
+
+	// Remove existing file/symlink
+	os.Remove(target)
+
+	if runtime.GOOS == "windows" {
+		// Windows: copy binary (symlinks require admin privileges)
+		if err := copyFile(selfPath, target); err != nil {
+			log.Printf("[cli-install] copy error: %v", err)
+			return
+		}
+		log.Printf("[cli-install] copied %s → %s", selfPath, target)
+	} else {
+		// Unix: create symlink
+		if err := os.Symlink(selfPath, target); err != nil {
+			log.Printf("[cli-install] symlink error: %v", err)
+			return
+		}
+		log.Printf("[cli-install] symlink %s → %s", target, selfPath)
+	}
+}
+
+// copyFile copies a file from src to dst
+func copyFile(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, 0755)
 }
