@@ -1,6 +1,7 @@
 package api
 
 import (
+	"ai-hub/server/core"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -75,8 +76,7 @@ func isSkillDisabled(name, source string) bool {
 }
 
 func scanUserSkills() []SkillInfo {
-	home, _ := os.UserHomeDir()
-	dir := filepath.Join(home, ".ai-hub", "skills")
+	dir := filepath.Join(core.GetDataDir(), "skills")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
@@ -218,10 +218,9 @@ func ToggleSkill(c *gin.Context) {
 	} else {
 		disPath := disabledSkillPath(req.Name, req.Source)
 		// Find original path
-		home, _ := os.UserHomeDir()
 		var origDir string
 		if req.Source == "user" {
-			origDir = filepath.Join(home, ".ai-hub", "skills", req.Name)
+			origDir = filepath.Join(core.GetDataDir(), "skills", req.Name)
 		} else {
 			origDir = findPluginSkillDir(req.Name)
 		}

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -46,9 +47,8 @@ func CreateService(c *gin.Context) {
 		return
 	}
 	// Auto-assign log path
-	home, _ := os.UserHomeDir()
 	safeName := strings.ReplaceAll(s.Name, "/", "-")
-	s.LogPath = fmt.Sprintf("%s/.ai-hub/logs/service-%s.log", home, safeName)
+	s.LogPath = filepath.Join(core.GetDataDir(), "logs", fmt.Sprintf("service-%s.log", safeName))
 
 	if err := store.CreateService(&s); err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
@@ -93,9 +93,8 @@ func UpdateService(c *gin.Context) {
 	// Merge fields (read-then-merge pattern)
 	if req.Name != nil {
 		svc.Name = *req.Name
-		home, _ := os.UserHomeDir()
 		safeName := strings.ReplaceAll(svc.Name, "/", "-")
-		svc.LogPath = fmt.Sprintf("%s/.ai-hub/logs/service-%s.log", home, safeName)
+		svc.LogPath = filepath.Join(core.GetDataDir(), "logs", fmt.Sprintf("service-%s.log", safeName))
 	}
 	if req.Command != nil {
 		svc.Command = *req.Command

@@ -12,8 +12,7 @@ import (
 )
 
 func sessionRulesDir() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".ai-hub", "session-rules")
+	return filepath.Join(core.GetDataDir(), "session-rules")
 }
 
 func sessionRulesPath(id int64) string {

@@ -13,7 +13,7 @@ import (
 // TemplateVars returns all available template variables with current values.
 func TemplateVars() map[string]string {
 	home, _ := os.UserHomeDir()
-	aiHubBase := filepath.Join(home, ".ai-hub")
+	aiHubBase := GetDataDir()
 	bjLoc := time.FixedZone("CST", 8*3600)
 	now := time.Now()
 
@@ -88,28 +88,27 @@ func TemplateDir() string {
 }
 
 // ScopeDir returns the filesystem directory for the given vector scope.
-// Global scopes (e.g. "memory") resolve to ~/.ai-hub/memory.
-// Team scopes (e.g. "团队名/memory") resolve to ~/.ai-hub/teams/团队名/memory.
-// Session scopes (e.g. "团队名/sessions/21/memory") resolve to ~/.ai-hub/teams/团队名/sessions/21/memory.
+// Global scopes (e.g. "memory") resolve to <data-dir>/memory.
+// Team scopes (e.g. "团队名/memory") resolve to <data-dir>/teams/团队名/memory.
+// Session scopes (e.g. "团队名/sessions/21/memory") resolve to <data-dir>/teams/团队名/sessions/21/memory.
 func ScopeDir(scope string) string {
-	home, _ := os.UserHomeDir()
+	baseDir := GetDataDir()
 	parts := strings.Split(scope, "/")
 	// Session-level: <group>/sessions/<id>/<suffix>
 	if len(parts) == 4 && parts[1] == "sessions" {
-		return filepath.Join(home, ".ai-hub", "teams", parts[0], "sessions", parts[2], parts[3])
+		return filepath.Join(baseDir, "teams", parts[0], "sessions", parts[2], parts[3])
 	}
 	// Team-level: <group>/<suffix>
 	if len(parts) == 2 {
-		return filepath.Join(home, ".ai-hub", "teams", parts[0], parts[1])
+		return filepath.Join(baseDir, "teams", parts[0], parts[1])
 	}
 	// Global
-	return filepath.Join(home, ".ai-hub", scope)
+	return filepath.Join(baseDir, scope)
 }
 
 // TeamDir returns the base directory for a team's resources.
 func TeamDir(groupName string) string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".ai-hub", "teams", groupName)
+	return filepath.Join(GetDataDir(), "teams", groupName)
 }
 
 // BuildTeamRules reads all *.md files from ~/.ai-hub/teams/<groupName>/rules/ (flat),
@@ -192,13 +191,12 @@ func BuildSystemPromptWithVars(extra map[string]string) string {
 	return RenderTemplateWithVars(combined, extra)
 }
 
-// buildSkillsSummary scans ~/.ai-hub/skills/*/SKILL.md, extracts YAML
+// buildSkillsSummary scans <data-dir>/skills/*/SKILL.md, extracts YAML
 // frontmatter (name + description), and returns a summary block.
 // ai-hub-core's CLI usage is already injected via CLI-REFERENCE.md in rules/,
 // so it does not prompt "Read SKILL.md". Other skills still prompt Read.
 func buildSkillsSummary() string {
-	home, _ := os.UserHomeDir()
-	skillsDir := filepath.Join(home, ".ai-hub", "skills")
+	skillsDir := filepath.Join(GetDataDir(), "skills")
 	dirs, err := os.ReadDir(skillsDir)
 	if err != nil {
 		return ""

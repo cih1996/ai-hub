@@ -2,7 +2,6 @@ package core
 
 import (
 	"net/url"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -97,14 +96,10 @@ func applyProviderProxyEnv(env []string, proxyURL string) []string {
 	return env
 }
 
-// injectCLIPath prepends ~/.ai-hub/bin to PATH so Claude subprocesses
+// injectCLIPath prepends <data-dir>/bin to PATH so Claude subprocesses
 // can execute `ai-hub` CLI commands directly.
 func injectCLIPath(env []string) []string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return env
-	}
-	binDir := filepath.Join(home, ".ai-hub", "bin")
+	binDir := filepath.Join(GetDataDir(), "bin")
 
 	// Use correct PATH separator: ";" on Windows, ":" on Unix
 	pathSep := ":"

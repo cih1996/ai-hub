@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -182,6 +183,5 @@ func portReachable(port int) bool {
 }
 
 func logDir() string {
-	home, _ := os.UserHomeDir()
-	return home + "/.ai-hub/logs"
+	return filepath.Join(GetDataDir(), "logs")
 }
