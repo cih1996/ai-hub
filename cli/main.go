@@ -149,6 +149,10 @@ func Run(args []string) int {
 	case "version":
 		fmt.Printf("ai-hub version %s\n", Version)
 		return 0
+	case "daemon":
+		return commands.RunDaemon(c, commandArgs)
+	case "reload":
+		return commands.RunReload(c, commandArgs)
 	case "mem":
 		return runMem(c, globalFlags.GroupName, commandArgs)
 	default:
@@ -249,6 +253,19 @@ System:
   triggers           Manage triggers (list/create/update/delete)
   status             System status
   version            Show version
+
+Daemon:
+  daemon start       Start AI Hub service
+  daemon stop        Stop AI Hub service (graceful)
+  daemon restart     Restart AI Hub service
+  daemon install     Install as system service
+  daemon uninstall   Uninstall system service
+  daemon status      Show service status
+
+Hot Reload:
+  reload vector      Reload vector engine
+  reload config      Reload configuration
+  reload skills      Reload skill definitions
 
 Use "ai-hub <command> --help" for more information about a command.`)
 }

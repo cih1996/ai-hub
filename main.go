@@ -7,18 +7,22 @@ import (
 	"ai-hub/server/model"
 	"ai-hub/server/store"
 	"embed"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io/fs"
 	"log"
 	"mime"
+	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -38,6 +42,14 @@ var (
 )
 
 func main() {
+	// Self-install mode: when run without arguments, check and install/upgrade
+	if len(os.Args) == 1 {
+		if runSelfInstall() {
+			return
+		}
+		// If self-install returns false, continue to start server
+	}
+
 	// CLI mode detection: if first arg is not a server flag, route to CLI
 	// Server flags: -port, -data, --data-dir
 	// CLI triggers: --version, --help, or any non-flag argument
@@ -278,6 +290,12 @@ func main() {
 		// Global settings
 		v1.GET("/settings/compress", api.GetCompressSettings)
 		v1.PUT("/settings/compress", api.UpdateCompressSettings)
+
+		// System management (daemon, reload)
+		v1.POST("/shutdown", api.Shutdown)
+		v1.POST("/reload/vector", api.ReloadVector)
+		v1.POST("/reload/config", api.ReloadConfig)
+		v1.POST("/reload/skills", api.ReloadSkills)
 
 		// Anthropic API reverse proxy for precise token metering (Issue #72)
 		v1.Any("/proxy/s/:session_id/anthropic/*path", api.HandleAnthropicProxy)
@@ -592,4 +610,417 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return os.WriteFile(dst, data, 0755)
+}
+
+// runSelfInstall handles the self-install/upgrade logic when run without arguments.
+// Returns true if the program should exit after this function.
+func runSelfInstall() bool {
+	selfPath, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to get executable path: %v\n", err)
+		return true
+	}
+	selfPath, _ = filepath.EvalSymlinks(selfPath)
+
+	installPath := getInstallPath()
+	if installPath == "" {
+		fmt.Fprintf(os.Stderr, "Unsupported platform: %s\n", runtime.GOOS)
+		return true
+	}
+
+	// Check if service is already installed
+	serviceInstalled := isServiceInstalled()
+
+	// Check if already running
+	runningVersion := getRunningVersion()
+
+	// Case 1: Service installed and running
+	if serviceInstalled && runningVersion != "" {
+		// Compare versions
+		cmp := compareVersions(Version, runningVersion)
+		if cmp > 0 {
+			// Current binary is newer, upgrade
+			fmt.Printf("Upgrading AI Hub from %s to %s...\n", runningVersion, Version)
+			if upgradeService(selfPath, installPath) {
+				fmt.Printf("AI Hub upgraded to %s\n", Version)
+				openBrowser("http://localhost:8080")
+			}
+			return true
+		} else if cmp < 0 {
+			// Running version is newer
+			fmt.Printf("Warning: Running version (%s) is newer than this binary (%s)\n", runningVersion, Version)
+			fmt.Println("Skipping installation. Use 'ai-hub daemon stop' to stop the running service.")
+			return true
+		} else {
+			// Same version, just open browser
+			fmt.Printf("AI Hub %s is already running\n", Version)
+			openBrowser("http://localhost:8080")
+			return true
+		}
+	}
+
+	// Case 2: Service installed but not running
+	if serviceInstalled && runningVersion == "" {
+		fmt.Println("AI Hub service is installed but not running. Starting...")
+		startService()
+		waitForService(5 * time.Second)
+		openBrowser("http://localhost:8080")
+		return true
+	}
+
+	// Case 3: Not installed, do fresh install
+	fmt.Printf("Installing AI Hub %s...\n", Version)
+	if installService(selfPath, installPath) {
+		fmt.Printf("AI Hub %s installed and started\n", Version)
+		waitForService(5 * time.Second)
+		openBrowser("http://localhost:8080")
+	}
+	return true
+}
+
+// getInstallPath returns the installation path for the current platform
+func getInstallPath() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return "/usr/local/bin/ai-hub"
+	case "linux":
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, ".local", "bin", "ai-hub")
+	case "windows":
+		localAppData := os.Getenv("LOCALAPPDATA")
+		if localAppData == "" {
+			home, _ := os.UserHomeDir()
+			localAppData = filepath.Join(home, "AppData", "Local")
+		}
+		return filepath.Join(localAppData, "ai-hub", "ai-hub.exe")
+	default:
+		return ""
+	}
+}
+
+// isServiceInstalled checks if the service is installed
+func isServiceInstalled() bool {
+	switch runtime.GOOS {
+	case "darwin":
+		home, _ := os.UserHomeDir()
+		plistPath := filepath.Join(home, "Library", "LaunchAgents", "com.ai-hub.server.plist")
+		_, err := os.Stat(plistPath)
+		return err == nil
+	case "linux":
+		home, _ := os.UserHomeDir()
+		servicePath := filepath.Join(home, ".config", "systemd", "user", "ai-hub.service")
+		_, err := os.Stat(servicePath)
+		return err == nil
+	case "windows":
+		cmd := exec.Command("schtasks", "/Query", "/TN", "AIHub")
+		return cmd.Run() == nil
+	default:
+		return false
+	}
+}
+
+// getRunningVersion returns the version of the running service, or empty if not running
+func getRunningVersion() string {
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get("http://localhost:8080/api/v1/version")
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return ""
+	}
+	if v, ok := result["version"].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// compareVersions compares two version strings (e.g., "v1.2.3")
+// Returns: 1 if a > b, -1 if a < b, 0 if equal
+func compareVersions(a, b string) int {
+	// Strip 'v' prefix
+	a = strings.TrimPrefix(a, "v")
+	b = strings.TrimPrefix(b, "v")
+
+	// Simple string comparison for semver
+	// For more robust comparison, use a semver library
+	if a > b {
+		return 1
+	} else if a < b {
+		return -1
+	}
+	return 0
+}
+
+// installService installs the service for the current platform
+func installService(srcPath, dstPath string) bool {
+	// Ensure directory exists
+	os.MkdirAll(filepath.Dir(dstPath), 0755)
+
+	// Copy binary
+	if srcPath != dstPath {
+		if err := copyFile(srcPath, dstPath); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to copy binary: %v\n", err)
+			return false
+		}
+		os.Chmod(dstPath, 0755)
+	}
+
+	switch runtime.GOOS {
+	case "darwin":
+		return installLaunchdService(dstPath)
+	case "linux":
+		return installSystemdService(dstPath)
+	case "windows":
+		return installWindowsService(dstPath)
+	default:
+		return false
+	}
+}
+
+// upgradeService upgrades the running service
+func upgradeService(srcPath, dstPath string) bool {
+	// Stop the service first
+	stopService()
+	time.Sleep(1 * time.Second)
+
+	// Copy new binary
+	if srcPath != dstPath {
+		if err := copyFile(srcPath, dstPath); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to copy binary: %v\n", err)
+			return false
+		}
+		os.Chmod(dstPath, 0755)
+	}
+
+	// Start the service
+	startService()
+	return true
+}
+
+// startService starts the service
+func startService() {
+	switch runtime.GOOS {
+	case "darwin":
+		exec.Command("launchctl", "start", "com.ai-hub.server").Run()
+	case "linux":
+		exec.Command("systemctl", "--user", "start", "ai-hub").Run()
+	case "windows":
+		exec.Command("schtasks", "/Run", "/TN", "AIHub").Run()
+	}
+}
+
+// stopService stops the service gracefully
+func stopService() {
+	// Try graceful shutdown via API first
+	client := &http.Client{Timeout: 2 * time.Second}
+	client.Post("http://localhost:8080/api/v1/shutdown", "application/json", nil)
+	time.Sleep(500 * time.Millisecond)
+
+	// Fallback to platform-specific stop
+	switch runtime.GOOS {
+	case "darwin":
+		exec.Command("launchctl", "stop", "com.ai-hub.server").Run()
+	case "linux":
+		exec.Command("systemctl", "--user", "stop", "ai-hub").Run()
+	case "windows":
+		exec.Command("schtasks", "/End", "/TN", "AIHub").Run()
+	}
+}
+
+// waitForService waits for the service to become available
+func waitForService(timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	client := &http.Client{Timeout: 1 * time.Second}
+	for time.Now().Before(deadline) {
+		resp, err := client.Get("http://localhost:8080/api/v1/version")
+		if err == nil {
+			resp.Body.Close()
+			return true
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return false
+}
+
+// openBrowser opens the default browser to the given URL
+func openBrowser(url string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "linux":
+		cmd = exec.Command("xdg-open", url)
+	case "windows":
+		cmd = exec.Command("cmd", "/c", "start", url)
+	default:
+		return
+	}
+	cmd.Start()
+}
+
+// installLaunchdService installs launchd service on macOS
+func installLaunchdService(binaryPath string) bool {
+	home, _ := os.UserHomeDir()
+	dataDir := filepath.Join(home, ".ai-hub")
+	logPath := filepath.Join(dataDir, "logs", "ai-hub.log")
+	plistPath := filepath.Join(home, "Library", "LaunchAgents", "com.ai-hub.server.plist")
+
+	os.MkdirAll(filepath.Dir(logPath), 0755)
+	os.MkdirAll(filepath.Dir(plistPath), 0755)
+
+	plist := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.ai-hub.server</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>%s</string>
+        <string>-port</string>
+        <string>8080</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>%s</string>
+    <key>StandardErrorPath</key>
+    <string>%s</string>
+    <key>WorkingDirectory</key>
+    <string>%s</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+</dict>
+</plist>`, binaryPath, logPath, logPath, dataDir)
+
+	if err := os.WriteFile(plistPath, []byte(plist), 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to write plist: %v\n", err)
+		return false
+	}
+
+	exec.Command("launchctl", "unload", plistPath).Run()
+	if err := exec.Command("launchctl", "load", plistPath).Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load service: %v\n", err)
+		return false
+	}
+
+	return true
+}
+
+// installSystemdService installs systemd user service on Linux
+func installSystemdService(binaryPath string) bool {
+	home, _ := os.UserHomeDir()
+	dataDir := filepath.Join(home, ".ai-hub")
+	servicePath := filepath.Join(home, ".config", "systemd", "user", "ai-hub.service")
+
+	os.MkdirAll(filepath.Dir(servicePath), 0755)
+
+	service := fmt.Sprintf(`[Unit]
+Description=AI Hub Server
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%s -port 8080
+WorkingDirectory=%s
+Restart=always
+RestartSec=5
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=default.target
+`, binaryPath, dataDir)
+
+	if err := os.WriteFile(servicePath, []byte(service), 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to write service file: %v\n", err)
+		return false
+	}
+
+	exec.Command("systemctl", "--user", "daemon-reload").Run()
+	exec.Command("systemctl", "--user", "enable", "ai-hub").Run()
+	exec.Command("systemctl", "--user", "start", "ai-hub").Run()
+
+	// Enable lingering
+	user := os.Getenv("USER")
+	if user != "" {
+		exec.Command("loginctl", "enable-linger", user).Run()
+	}
+
+	return true
+}
+
+// installWindowsService installs Windows scheduled task
+func installWindowsService(binaryPath string) bool {
+	home, _ := os.UserHomeDir()
+	dataDir := filepath.Join(home, ".ai-hub")
+	xmlPath := filepath.Join(dataDir, "task.xml")
+
+	os.MkdirAll(dataDir, 0755)
+
+	// Delete existing task
+	exec.Command("schtasks", "/Delete", "/TN", "AIHub", "/F").Run()
+
+	taskXML := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <Triggers>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+    </LogonTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+    <RestartOnFailure>
+      <Interval>PT1M</Interval>
+      <Count>3</Count>
+    </RestartOnFailure>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>%s</Command>
+      <Arguments>-port 8080</Arguments>
+      <WorkingDirectory>%s</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>`, strings.ReplaceAll(binaryPath, `\`, `\\`), strings.ReplaceAll(dataDir, `\`, `\\`))
+
+	if err := os.WriteFile(xmlPath, []byte(taskXML), 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to write task XML: %v\n", err)
+		return false
+	}
+
+	cmd := exec.Command("schtasks", "/Create", "/TN", "AIHub", "/XML", xmlPath, "/F")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create scheduled task: %v\n%s\n", err, output)
+		return false
+	}
+
+	exec.Command("schtasks", "/Run", "/TN", "AIHub").Run()
+	return true
 }

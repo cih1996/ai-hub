@@ -94,6 +94,29 @@ func (v *VectorEngine) bootstrap() {
 	log.Println("[vector] engine ready")
 }
 
+// Reload reinitializes the vector engine (hot reload)
+func (v *VectorEngine) Reload() {
+	log.Println("[vector] reloading...")
+
+	v.mu.Lock()
+	v.ready = false
+	v.disabled = false
+	v.err = ""
+	// Keep existing collections, just reload model
+	v.mu.Unlock()
+
+	// Reload model
+	if err := v.loadModel(); err != nil {
+		v.setDisabled("model reload failed: " + err.Error())
+		return
+	}
+
+	v.mu.Lock()
+	v.ready = true
+	v.mu.Unlock()
+	log.Println("[vector] reload complete")
+}
+
 func (v *VectorEngine) loadModel() error {
 	os.MkdirAll(v.modelDir, 0755)
 
