@@ -13,13 +13,13 @@ import (
 
 // InitStatusResponse represents the system initialization status
 type InitStatusResponse struct {
-	IsFirstRun   bool            `json:"is_first_run"`
-	HasProvider  bool            `json:"has_provider"`
-	HasSession   bool            `json:"has_session"`
-	MissingDeps  []MissingDep    `json:"missing_deps"`
-	DepsStatus   core.DepsStatus `json:"deps_status"`
-	Platform     string          `json:"platform"`      // darwin, linux, windows
-	PackageManager string        `json:"package_manager"` // brew, apt, winget, choco, none
+	IsFirstRun     bool            `json:"is_first_run"`
+	HasProvider    bool            `json:"has_provider"`
+	HasSession     bool            `json:"has_session"`
+	MissingDeps    []MissingDep    `json:"missing_deps"`
+	DepsStatus     core.DepsStatus `json:"deps_status"`
+	Platform       string          `json:"platform"`        // darwin, linux, windows
+	PackageManager string          `json:"package_manager"` // brew, apt, winget, choco, none
 }
 
 // MissingDep represents a missing dependency
@@ -112,65 +112,19 @@ func detectPackageManager() string {
 func checkMissingDeps(pkgMgr string) []MissingDep {
 	var missing []MissingDep
 
-	// Check Node.js
+	// Check Node.js (required for Claude CLI)
 	if !checkCommand("node", "--version") {
 		dep := getNodeDep(pkgMgr)
 		missing = append(missing, dep)
 	}
 
-	// Check Python
-	pythonOK := checkCommand("python3", "--version") || checkCommand("python", "--version")
-	if !pythonOK {
-		dep := getPythonDep(pkgMgr)
-		missing = append(missing, dep)
-	}
-
-	// Check pip
-	pipOK := checkCommand("pip3", "--version") || checkCommand("pip", "--version")
-	if pythonOK && !pipOK {
-		missing = append(missing, MissingDep{
-			Name:        "pip",
-			Description: "Python 包管理器",
-			InstallCmd:  getPipInstallCmd(),
-			Required:    false,
-		})
-	}
-
-	// Check python3-venv on Linux (needed for virtual environments)
-	if runtime.GOOS == "linux" && pythonOK {
-		if !checkPythonVenv() {
-			missing = append(missing, MissingDep{
-				Name:        "python3-venv",
-				Description: "Python 虚拟环境支持",
-				InstallCmd:  "sudo apt-get install -y python3-venv",
-				NeedsSudo:   true,
-				CopyCmd:     "apt-get install -y python3-venv",
-				Required:    false,
-				Hint:        "向量引擎需要此组件创建虚拟环境",
-			})
-		}
-	}
-
-	// Check vector engine
-	if core.Vector == nil || !core.Vector.IsReady() {
-		if !checkPythonPackage("sentence_transformers") {
-			missing = append(missing, MissingDep{
-				Name:        "sentence-transformers",
-				Description: "向量引擎核心库，用于文本嵌入",
-				InstallCmd:  getSentenceTransformersCmd(),
-				Required:    false,
-				Hint:        "首次安装约需下载 500MB 模型文件",
-			})
-		}
-	}
-
-	// Check Claude CLI
+	// Check Claude CLI (required)
 	if !checkCommand("claude", "--version") {
 		dep := getClaudeCLIDep(pkgMgr)
 		missing = append(missing, dep)
 	}
 
-	// Check git
+	// Check git (optional but recommended)
 	if !checkCommand("git", "--version") {
 		dep := getGitDep(pkgMgr)
 		missing = append(missing, dep)
@@ -222,49 +176,6 @@ func getNodeDep(pkgMgr string) MissingDep {
 		default:
 			dep.InstallURL = "https://nodejs.org/en/download/"
 			dep.Hint = "请下载 Windows 安装包 (.msi)"
-		}
-	}
-	return dep
-}
-
-// Python dependency
-func getPythonDep(pkgMgr string) MissingDep {
-	dep := MissingDep{
-		Name:        "Python",
-		Description: "向量引擎依赖，用于语义搜索",
-		InstallURL:  "https://www.python.org/downloads/",
-		Required:    false,
-	}
-
-	switch runtime.GOOS {
-	case "darwin":
-		if pkgMgr == "brew" {
-			dep.InstallCmd = "brew install python3"
-		}
-	case "linux":
-		switch pkgMgr {
-		case "apt":
-			dep.InstallCmd = "sudo apt-get install -y python3 python3-pip python3-venv"
-			dep.NeedsSudo = true
-			dep.CopyCmd = "apt-get install -y python3 python3-pip python3-venv"
-		case "yum":
-			dep.InstallCmd = "sudo yum install -y python3 python3-pip"
-			dep.NeedsSudo = true
-		case "dnf":
-			dep.InstallCmd = "sudo dnf install -y python3 python3-pip"
-			dep.NeedsSudo = true
-		case "pacman":
-			dep.InstallCmd = "sudo pacman -S python python-pip"
-			dep.NeedsSudo = true
-		}
-	case "windows":
-		switch pkgMgr {
-		case "winget":
-			dep.InstallCmd = "winget install Python.Python.3.12"
-		case "choco":
-			dep.InstallCmd = "choco install python -y"
-		default:
-			dep.Hint = "请下载 Windows 安装包，安装时勾选 'Add to PATH'"
 		}
 	}
 	return dep
@@ -339,44 +250,11 @@ func getGitDep(pkgMgr string) MissingDep {
 	return dep
 }
 
-func getPipInstallCmd() string {
-	if runtime.GOOS == "windows" {
-		return "python -m ensurepip --upgrade"
-	}
-	return "python3 -m ensurepip --upgrade"
-}
-
-func getSentenceTransformersCmd() string {
-	pip := "pip3"
-	if runtime.GOOS == "windows" {
-		pip = "pip"
-	}
-	// Use Tsinghua mirror for China
-	return pip + " install sentence-transformers -i https://pypi.tuna.tsinghua.edu.cn/simple"
-}
-
 // checkCommand checks if a command is available
 func checkCommand(name string, args ...string) bool {
 	cmd := exec.Command(name, args...)
 	err := cmd.Run()
 	return err == nil
-}
-
-// checkPythonPackage checks if a Python package is installed
-func checkPythonPackage(pkg string) bool {
-	for _, py := range []string{"python3", "python"} {
-		cmd := exec.Command(py, "-c", "import "+pkg)
-		if err := cmd.Run(); err == nil {
-			return true
-		}
-	}
-	return false
-}
-
-// checkPythonVenv checks if python3-venv is available
-func checkPythonVenv() bool {
-	cmd := exec.Command("python3", "-c", "import venv")
-	return cmd.Run() == nil
 }
 
 // checkNpmPermissionIssue checks if npm global install might have permission issues

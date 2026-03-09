@@ -1,155 +1,89 @@
 package core
 
 import (
-	"bytes"
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
-	"net/http"
-	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/nlpodyssey/cybertron/pkg/models/bert"
+	"github.com/nlpodyssey/cybertron/pkg/tasks"
+	"github.com/nlpodyssey/cybertron/pkg/tasks/textencoding"
 )
 
-// venvBinPath returns the correct path for a binary inside a Python venv.
-// Windows uses venv/Scripts/<name>.exe, Unix uses venv/bin/<name>.
-func venvBinPath(venvDir, name string) string {
-	if runtime.GOOS == "windows" {
-		return filepath.Join(venvDir, "Scripts", name+".exe")
-	}
-	return filepath.Join(venvDir, "bin", name)
+const (
+	// DefaultModelName is the Chinese embedding model
+	DefaultModelName = "BAAI/bge-small-zh-v1.5"
+	// VectorDimension is the output dimension of the model
+	VectorDimension = 512
+)
+
+// VectorRecord represents a stored vector with metadata
+type VectorRecord struct {
+	ID         string                 `json:"id"`
+	Document   string                 `json:"document"`
+	Vector     []float64              `json:"vector"`
+	Metadata   map[string]interface{} `json:"metadata"`
+	CreatedAt  string                 `json:"created_at"`
+	UpdatedAt  string                 `json:"updated_at"`
+	HitCount   int                    `json:"hit_count"`
+	LastHitAt  string                 `json:"last_hit_at"`
 }
 
-// VectorEngine manages the Python vector engine subprocess
+// VectorEngine manages the Go-native vector engine
 type VectorEngine struct {
 	mu       sync.RWMutex
-	cmd      *exec.Cmd
-	cancel   context.CancelFunc
-	port     int
-	baseURL  string
 	ready    bool
 	disabled bool
 	err      string
 
-	// bootstrap lifecycle
-	bootstrapCancel context.CancelFunc
+	// model
+	model    textencoding.Interface
+	modelDir string
 
-	// paths
-	baseDir    string // ~/.ai-hub/vector-engine
-	venvDir    string
-	pythonPath string // venv python
-	scriptDir  string // ai-hub/vector-engine/
+	// storage: scope -> (docID -> record)
+	collections map[string]map[string]*VectorRecord
+	dataDir     string
 }
 
 var Vector *VectorEngine
 
-// InitVectorEngine initializes and starts the vector engine in background.
-// Never blocks main startup — failures degrade gracefully.
-func InitVectorEngine(scriptDir string) {
+// InitVectorEngine initializes the vector engine
+func InitVectorEngine(_ string) {
 	home, _ := os.UserHomeDir()
-	baseDir := filepath.Join(home, ".ai-hub", "vector-engine")
-	port := 8090
+	baseDir := filepath.Join(home, ".ai-hub")
+	modelDir := filepath.Join(baseDir, "models")
+	dataDir := filepath.Join(baseDir, "vector-data")
 
 	Vector = &VectorEngine{
-		port:      port,
-		baseURL:   fmt.Sprintf("http://127.0.0.1:%d", port),
-		baseDir:   baseDir,
-		venvDir:   filepath.Join(baseDir, "venv"),
-		scriptDir: scriptDir,
+		modelDir:    modelDir,
+		dataDir:     dataDir,
+		collections: make(map[string]map[string]*VectorRecord),
 	}
 
-	go func() {
-		ctx, cancel := context.WithCancel(context.Background())
-		Vector.mu.Lock()
-		Vector.bootstrapCancel = cancel
-		Vector.mu.Unlock()
-		Vector.bootstrap(ctx)
-	}()
+	go Vector.bootstrap()
 }
 
-func (v *VectorEngine) bootstrap(ctx context.Context) {
+func (v *VectorEngine) bootstrap() {
 	log.Println("[vector] starting bootstrap...")
 
-	// Step 1: check python3 >= 3.10
-	pyPath, err := v.detectPython()
-	if err != nil {
-		v.setDisabled("python not found: " + err.Error())
+	// Step 1: Load embedding model
+	if err := v.loadModel(); err != nil {
+		v.setDisabled("model load failed: " + err.Error())
 		return
 	}
-	log.Printf("[vector] python: %s", pyPath)
+	log.Println("[vector] embedding model loaded")
 
-	if ctx.Err() != nil {
-		log.Println("[vector] bootstrap cancelled after step 1")
-		return
-	}
-
-	// Step 2: create/check venv
-	if err := v.ensureVenv(pyPath); err != nil {
-		v.setDisabled("venv setup failed: " + err.Error())
-		return
-	}
-	log.Printf("[vector] venv ready: %s", v.venvDir)
-
-	if ctx.Err() != nil {
-		log.Println("[vector] bootstrap cancelled after step 2")
-		return
-	}
-
-	// Step 3: install pip dependencies
-	if err := v.installDeps(); err != nil {
-		v.setDisabled("pip install failed: " + err.Error())
-		return
-	}
-	log.Println("[vector] pip dependencies ready")
-
-	if ctx.Err() != nil {
-		log.Println("[vector] bootstrap cancelled after step 3")
-		return
-	}
-
-	// Step 4: download embedding model (may take minutes on first run)
-	if err := v.downloadModel(); err != nil {
-		v.setDisabled("model download failed: " + err.Error())
-		return
-	}
-	log.Println("[vector] embedding model ready")
-
-	if ctx.Err() != nil {
-		log.Println("[vector] bootstrap cancelled after step 4")
-		return
-	}
-
-	// Step 5: start FastAPI service
-	if err := v.startProcess(); err != nil {
-		if err.Error() == "reuse_existing" {
-			// Healthy process already running on the port — reuse it
-			v.mu.Lock()
-			v.ready = true
-			v.mu.Unlock()
-			log.Println("[vector] engine ready (reused existing process)")
-			return
-		}
-		v.setDisabled("process start failed: " + err.Error())
-		return
-	}
-
-	// Step 6: wait for health check (60s for slow Windows cold-start, Issue #83)
-	if err := v.waitHealthy(ctx, 60*time.Second); err != nil {
-		if ctx.Err() != nil {
-			log.Println("[vector] bootstrap cancelled during health check")
-			return
-		}
-		v.setDisabled("health check failed: " + err.Error())
-		v.Stop()
-		return
+	// Step 2: Load existing data
+	if err := v.loadData(); err != nil {
+		log.Printf("[vector] warning: failed to load existing data: %v", err)
 	}
 
 	v.mu.Lock()
@@ -158,278 +92,163 @@ func (v *VectorEngine) bootstrap(ctx context.Context) {
 	log.Println("[vector] engine ready")
 }
 
-func (v *VectorEngine) detectPython() (string, error) {
-	for _, name := range []string{"python3", "python"} {
-		out, err := runCmd(name, "--version")
-		if err != nil {
-			continue
-		}
-		// parse "Python 3.x.y"
-		ver := strings.TrimSpace(out)
-		ver = strings.TrimPrefix(ver, "Python ")
-		parts := strings.Split(ver, ".")
-		if len(parts) < 2 {
-			continue
-		}
-		major, _ := strconv.Atoi(parts[0])
-		minor, _ := strconv.Atoi(parts[1])
-		if major == 3 && minor >= 10 {
-			path, _ := exec.LookPath(name)
-			return path, nil
-		}
-	}
-	return "", fmt.Errorf("python >= 3.10 required")
-}
+func (v *VectorEngine) loadModel() error {
+	os.MkdirAll(v.modelDir, 0755)
 
-func (v *VectorEngine) ensureVenv(pyPath string) error {
-	venvPython := venvBinPath(v.venvDir, "python")
-	if _, err := os.Stat(venvPython); err == nil {
-		v.pythonPath = venvPython
-		return nil
-	}
-	os.MkdirAll(v.baseDir, 0755)
-	cmd := exec.Command(pyPath, "-m", "venv", v.venvDir)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("%s: %s", err, strings.TrimSpace(string(out)))
-	}
-	v.pythonPath = venvPython
-	return nil
-}
+	// Check if model exists locally
+	modelPath := filepath.Join(v.modelDir, strings.ReplaceAll(DefaultModelName, "/", string(os.PathSeparator)))
+	spagoModel := filepath.Join(modelPath, "spago_model.bin")
 
-func (v *VectorEngine) installDeps() error {
-	reqFile := filepath.Join(v.scriptDir, "requirements.txt")
-	pip := venvBinPath(v.venvDir, "pip")
-	cmd := exec.Command(pip, "install", "-q", "-r", reqFile,
-		"-i", "https://mirrors.aliyun.com/pypi/simple/",
-		"--trusted-host", "mirrors.aliyun.com")
-	cmd.Env = append(os.Environ(), "VIRTUAL_ENV="+v.venvDir)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("%s: %s", err, strings.TrimSpace(string(out)))
-	}
-	return nil
-}
-
-func (v *VectorEngine) downloadModel() error {
-	modelCacheDir := filepath.Join(v.baseDir, "models")
-	sentinelFile := filepath.Join(modelCacheDir, ".model_ready")
-	script := filepath.Join(v.scriptDir, "download_model.py")
-
-	// Fast path: sentinel file exists → model already downloaded, skip download script.
-	// The sentinel is only created after a successful download.
-	if _, err := os.Stat(sentinelFile); err == nil {
-		log.Printf("[vector] model cache found (%s), skipping download", modelCacheDir)
-		return nil
+	var downloadPolicy tasks.DownloadPolicy
+	if _, err := os.Stat(spagoModel); err == nil {
+		// Model exists, use offline mode
+		downloadPolicy = tasks.DownloadNever
+		log.Printf("[vector] using cached model: %s", modelPath)
+	} else {
+		// Model doesn't exist, need to download
+		downloadPolicy = tasks.DownloadMissing
+		log.Printf("[vector] downloading model: %s", DefaultModelName)
 	}
 
-	runDownload := func() error {
-		cmd := exec.Command(v.pythonPath, script)
-		cmd.Env = append(os.Environ(),
-			"VIRTUAL_ENV="+v.venvDir,
-			"EMBEDDING_MODEL_PATH="+modelCacheDir,
-		)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		return cmd.Run()
-	}
-
-	if err := runDownload(); err != nil {
-		// First attempt failed — may be caused by a corrupt/partial cache from a
-		// previous interrupted download (e.g. kill -9 during bootstrap).
-		// Clear the cache directory and retry once before giving up.
-		log.Printf("[vector] model download failed (%v), clearing cache and retrying...", err)
-		if rmErr := os.RemoveAll(modelCacheDir); rmErr != nil {
-			log.Printf("[vector] failed to clear model cache: %v", rmErr)
-		}
-		if err2 := runDownload(); err2 != nil {
-			return fmt.Errorf("download_model.py failed: %s", err2)
-		}
-		log.Println("[vector] model download succeeded after cache clear")
-	}
-
-	// Create sentinel file so subsequent restarts skip the download step.
-	os.MkdirAll(modelCacheDir, 0755)
-	if err := os.WriteFile(sentinelFile, []byte("ok"), 0644); err != nil {
-		log.Printf("[vector] warning: could not write sentinel file: %v", err)
-	}
-	return nil
-}
-
-// handlePortConflict checks if the vector engine port is already occupied.
-// If a healthy process is found, it sets ready=true and returns a sentinel error to skip startup.
-// If an unhealthy process is found, it kills it before returning nil.
-func (v *VectorEngine) handlePortConflict() error {
-	// Quick health check on the port
-	url := v.baseURL + "/health"
-	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Get(url)
+	model, err := tasks.Load[textencoding.Interface](&tasks.Config{
+		ModelsDir:      v.modelDir,
+		ModelName:      DefaultModelName,
+		DownloadPolicy: downloadPolicy,
+	})
 	if err != nil {
-		// Port not responding — might still be occupied by a dead process
-		v.killPortProcess()
-		return nil
-	}
-	resp.Body.Close()
-
-	if resp.StatusCode == 200 {
-		// Healthy process already running — reuse it
-		log.Printf("[vector] port %d already has a healthy process, reusing", v.port)
-		return fmt.Errorf("reuse_existing")
+		return fmt.Errorf("failed to load model: %w", err)
 	}
 
-	// Port responds but not healthy — kill and restart
-	log.Printf("[vector] port %d responds but unhealthy (status %d), killing", v.port, resp.StatusCode)
-	v.killPortProcess()
-	time.Sleep(1 * time.Second)
+	v.model = model
 	return nil
 }
 
-// killPortProcess finds and kills any process occupying the vector engine port.
-func (v *VectorEngine) killPortProcess() {
-	out, err := exec.Command("lsof", "-ti", fmt.Sprintf(":%d", v.port)).Output()
-	if err != nil || len(strings.TrimSpace(string(out))) == 0 {
-		return
-	}
-	pids := strings.Fields(strings.TrimSpace(string(out)))
-	for _, pidStr := range pids {
-		pid, err := strconv.Atoi(pidStr)
-		if err != nil || pid <= 0 {
-			continue
-		}
-		log.Printf("[vector] killing residual process pid=%d on port %d", pid, v.port)
-		killProcessGroup(pid, true)
-	}
-	time.Sleep(500 * time.Millisecond)
-}
+func (v *VectorEngine) loadData() error {
+	os.MkdirAll(v.dataDir, 0755)
 
-func (v *VectorEngine) startProcess() error {
-	// Check if port is already occupied by a residual process
-	if err := v.handlePortConflict(); err != nil {
+	entries, err := os.ReadDir(v.dataDir)
+	if err != nil {
 		return err
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	mainPy := filepath.Join(v.scriptDir, "main.py")
-	cmd := exec.CommandContext(ctx, v.pythonPath, mainPy)
-	cmd.Env = append(os.Environ(),
-		"VIRTUAL_ENV="+v.venvDir,
-		fmt.Sprintf("VECTOR_ENGINE_PORT=%d", v.port),
-		"VECTOR_DB_PATH="+filepath.Join(v.baseDir, "data"),
-		"EMBEDDING_MODEL_PATH="+filepath.Join(v.baseDir, "models"),
-		"HF_HUB_OFFLINE=1",
-		"TRANSFORMERS_OFFLINE=1",
-	)
-	cmd.SysProcAttr = newProcessGroupAttr()
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".json") {
+			scope := strings.TrimSuffix(entry.Name(), ".json")
+			if err := v.loadCollection(scope); err != nil {
+				log.Printf("[vector] failed to load collection %s: %v", scope, err)
+			}
+		}
+	}
+	return nil
+}
 
-	if err := cmd.Start(); err != nil {
-		cancel()
+func (v *VectorEngine) loadCollection(scope string) error {
+	filePath := filepath.Join(v.dataDir, scope+".json")
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return err
+	}
+
+	var records map[string]*VectorRecord
+	if err := json.Unmarshal(data, &records); err != nil {
 		return err
 	}
 
 	v.mu.Lock()
-	v.cmd = cmd
-	v.cancel = cancel
+	v.collections[scope] = records
 	v.mu.Unlock()
 
-	// monitor process exit
-	go func() {
-		err := cmd.Wait()
-		v.mu.Lock()
-		v.ready = false
-		if err != nil {
-			v.err = "process exited: " + err.Error()
-		}
-		v.mu.Unlock()
-		log.Printf("[vector] process exited: %v", err)
-	}()
-
+	log.Printf("[vector] loaded collection %s with %d records", scope, len(records))
 	return nil
 }
 
-func (v *VectorEngine) waitHealthy(ctx context.Context, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	url := v.baseURL + "/health"
-	for time.Now().Before(deadline) {
-		if ctx.Err() != nil {
-			return fmt.Errorf("cancelled")
-		}
-		resp, err := http.Get(url)
-		if err == nil {
-			resp.Body.Close()
-			if resp.StatusCode == 200 {
-				return nil
-			}
-		}
-		time.Sleep(2 * time.Second)
+func (v *VectorEngine) saveCollection(scope string) error {
+	v.mu.RLock()
+	records := v.collections[scope]
+	v.mu.RUnlock()
+
+	if records == nil {
+		return nil
 	}
-	return fmt.Errorf("timeout after %s", timeout)
+
+	data, err := json.MarshalIndent(records, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	filePath := filepath.Join(v.dataDir, scope+".json")
+	return os.WriteFile(filePath, data, 0644)
 }
 
-// Stop shuts down the vector engine subprocess gracefully
+// scopeToFileName converts scope to safe filename
+func scopeToFileName(scope string) string {
+	if scope == "memory" {
+		return "memory"
+	}
+	// Team scope: "TeamName/memory" -> "team_memory_<hash>"
+	parts := strings.SplitN(scope, "/", 2)
+	if len(parts) == 2 {
+		h := md5.Sum([]byte(scope))
+		return fmt.Sprintf("team_%s_%s", parts[1], hex.EncodeToString(h[:6]))
+	}
+	return scope
+}
+
+func (v *VectorEngine) encode(text string) ([]float64, error) {
+	result, err := v.model.Encode(context.Background(), text, int(bert.MeanPooling))
+	if err != nil {
+		return nil, err
+	}
+	return result.Vector.Data().F64(), nil
+}
+
+// cosineSimilarity calculates cosine similarity between two vectors
+func cosineSimilarity(a, b []float64) float64 {
+	if len(a) != len(b) {
+		return 0
+	}
+	var dotProduct, normA, normB float64
+	for i := range a {
+		dotProduct += a[i] * b[i]
+		normA += a[i] * a[i]
+		normB += b[i] * b[i]
+	}
+	if normA == 0 || normB == 0 {
+		return 0
+	}
+	return dotProduct / (sqrt(normA) * sqrt(normB))
+}
+
+func sqrt(x float64) float64 {
+	if x <= 0 {
+		return 0
+	}
+	z := x
+	for i := 0; i < 10; i++ {
+		z = (z + x/z) / 2
+	}
+	return z
+}
+
+// Stop shuts down the vector engine
 func (v *VectorEngine) Stop() {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.ready = false
-
-	if v.cmd != nil && v.cmd.Process != nil {
-		pid := v.cmd.Process.Pid
-		// Send SIGTERM to process group (Unix) or kill process (Windows)
-		killProcessGroup(pid, false)
-		log.Printf("[vector] sent terminate signal to pid %d", pid)
-
-		// Wait up to 5 seconds for graceful exit
-		done := make(chan struct{})
-		go func() {
-			v.cmd.Wait()
-			close(done)
-		}()
-		select {
-		case <-done:
-			log.Println("[vector] process exited gracefully")
-		case <-time.After(5 * time.Second):
-			// Force kill
-			killProcessGroup(pid, true)
-			log.Printf("[vector] force killed pid %d", pid)
-			<-done
-		}
-	}
-
-	if v.cancel != nil {
-		v.cancel()
-		v.cancel = nil
-	}
 	log.Println("[vector] stopped")
 }
 
-// Restart stops the current engine (if any) and re-bootstraps from scratch.
-// Safe to call even when the engine is disabled or not ready.
+// Restart restarts the vector engine
 func (v *VectorEngine) Restart() {
 	log.Println("[vector] restart requested")
-
-	// Cancel any in-progress bootstrap to prevent state race
-	v.mu.Lock()
-	if v.bootstrapCancel != nil {
-		v.bootstrapCancel()
-		v.bootstrapCancel = nil
-	}
-	v.mu.Unlock()
-
 	v.Stop()
 
-	// Reset state
 	v.mu.Lock()
 	v.disabled = false
 	v.err = ""
-	v.cmd = nil
-	v.cancel = nil
 	v.mu.Unlock()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	v.mu.Lock()
-	v.bootstrapCancel = cancel
-	v.mu.Unlock()
-
-	v.bootstrap(ctx)
+	v.bootstrap()
 }
 
 // IsReady returns whether the vector engine is available
@@ -452,19 +271,11 @@ func (v *VectorEngine) IsDisabled() bool {
 	return v.disabled
 }
 
-// WaitReady blocks until the engine is ready, disabled, or timeout.
-// Returns true if ready, false otherwise.
+// WaitReady blocks until the engine is ready, disabled, or timeout
 func (v *VectorEngine) WaitReady(timeout time.Duration) bool {
 	if v == nil {
 		return false
 	}
-	if v.IsReady() {
-		return true
-	}
-	if v.IsDisabled() {
-		return false
-	}
-	// Engine is bootstrapping — poll until ready, disabled, or timeout
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if v.IsReady() {
@@ -473,12 +284,12 @@ func (v *VectorEngine) WaitReady(timeout time.Duration) bool {
 		if v.IsDisabled() {
 			return false
 		}
-		time.Sleep(1 * time.Second)
+		time.Sleep(500 * time.Millisecond)
 	}
 	return v.IsReady()
 }
 
-// Status returns current engine status for API
+// Status returns current engine status
 func (v *VectorEngine) Status() map[string]interface{} {
 	if v == nil {
 		return map[string]interface{}{"ready": false, "disabled": true, "error": "not initialized"}
@@ -489,7 +300,7 @@ func (v *VectorEngine) Status() map[string]interface{} {
 		"ready":    v.ready,
 		"disabled": v.disabled,
 		"error":    v.err,
-		"port":     v.port,
+		"model":    DefaultModelName,
 	}
 }
 
@@ -501,93 +312,189 @@ func (v *VectorEngine) setDisabled(reason string) {
 	log.Printf("[vector] disabled: %s", reason)
 }
 
-// Embed sends text to the vector engine for embedding
+// Embed adds or updates a vector record
 func (v *VectorEngine) Embed(scope, docID, text string, metadata map[string]interface{}) error {
 	if !v.IsReady() {
 		return fmt.Errorf("vector engine not ready")
 	}
-	body := map[string]interface{}{
-		"scope":  scope,
-		"doc_id": docID,
-		"text":   text,
+
+	vector, err := v.encode(text)
+	if err != nil {
+		return fmt.Errorf("encode failed: %w", err)
 	}
-	if metadata != nil {
-		body["metadata"] = metadata
+
+	now := time.Now().Format("2006-01-02T15:04:05")
+	fileName := scopeToFileName(scope)
+
+	v.mu.Lock()
+	if v.collections[fileName] == nil {
+		v.collections[fileName] = make(map[string]*VectorRecord)
 	}
-	_, err := v.post("/embed", body)
-	return err
+
+	existing := v.collections[fileName][docID]
+	record := &VectorRecord{
+		ID:        docID,
+		Document:  text,
+		Vector:    vector,
+		Metadata:  metadata,
+		UpdatedAt: now,
+	}
+
+	if existing != nil {
+		record.CreatedAt = existing.CreatedAt
+		record.HitCount = existing.HitCount
+		record.LastHitAt = existing.LastHitAt
+	} else {
+		record.CreatedAt = now
+	}
+
+	if record.Metadata == nil {
+		record.Metadata = make(map[string]interface{})
+	}
+	record.Metadata["created_at"] = record.CreatedAt
+	record.Metadata["updated_at"] = record.UpdatedAt
+	record.Metadata["hit_count"] = record.HitCount
+	record.Metadata["last_hit_time"] = record.LastHitAt
+
+	v.collections[fileName][docID] = record
+	v.mu.Unlock()
+
+	return v.saveCollection(fileName)
 }
 
-// UpdateMetadata merges updates into existing metadata for a doc.
+// UpdateMetadata merges updates into existing metadata
 func (v *VectorEngine) UpdateMetadata(scope, docID string, updates map[string]interface{}) (map[string]interface{}, error) {
 	if !v.IsReady() {
 		return nil, fmt.Errorf("vector engine not ready")
 	}
-	body := map[string]interface{}{
-		"scope":    scope,
-		"doc_id":   docID,
-		"metadata": updates,
+
+	fileName := scopeToFileName(scope)
+
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if v.collections[fileName] == nil {
+		return nil, fmt.Errorf("doc not found: %s", docID)
 	}
-	resp, err := v.post("/update_metadata", body)
-	if err != nil {
-		return nil, err
+
+	record := v.collections[fileName][docID]
+	if record == nil {
+		return nil, fmt.Errorf("doc not found: %s", docID)
 	}
-	if meta, ok := resp["metadata"].(map[string]interface{}); ok {
-		return meta, nil
+
+	if record.Metadata == nil {
+		record.Metadata = make(map[string]interface{})
 	}
-	return nil, nil
+	for k, val := range updates {
+		record.Metadata[k] = val
+	}
+	record.UpdatedAt = time.Now().Format("2006-01-02T15:04:05")
+	record.Metadata["updated_at"] = record.UpdatedAt
+
+	go v.saveCollection(fileName)
+	return record.Metadata, nil
 }
 
-// GetDoc retrieves a single document with its metadata.
+// GetDoc retrieves a single document
 func (v *VectorEngine) GetDoc(scope, docID string) (map[string]interface{}, error) {
 	if !v.IsReady() {
 		return nil, fmt.Errorf("vector engine not ready")
 	}
-	body := map[string]interface{}{
-		"scope":  scope,
-		"doc_id": docID,
+
+	fileName := scopeToFileName(scope)
+
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	if v.collections[fileName] == nil {
+		return nil, fmt.Errorf("doc not found: %s", docID)
 	}
-	return v.post("/get_doc", body)
+
+	record := v.collections[fileName][docID]
+	if record == nil {
+		return nil, fmt.Errorf("doc not found: %s", docID)
+	}
+
+	return map[string]interface{}{
+		"id":       record.ID,
+		"document": record.Document,
+		"metadata": record.Metadata,
+	}, nil
 }
 
-// Search performs semantic search with automatic retry on transient errors.
+// Search performs semantic search
 func (v *VectorEngine) Search(scope, query string, topK int) ([]map[string]interface{}, error) {
 	if !v.IsReady() {
 		return nil, fmt.Errorf("vector engine not ready")
 	}
-	body := map[string]interface{}{
-		"scope": scope,
-		"query": query,
-		"top_k": topK,
+
+	queryVector, err := v.encode(query)
+	if err != nil {
+		return nil, fmt.Errorf("encode query failed: %w", err)
 	}
 
-	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
-		if attempt > 0 {
-			log.Printf("[vector] search retry %d/3 for scope=%s: %v", attempt+1, scope, lastErr)
-			time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
-			// If engine became not-ready (process crashed), try restart
-			if !v.IsReady() {
-				log.Println("[vector] engine not ready, attempting restart")
-				go v.Restart()
-				return nil, fmt.Errorf("vector engine restarting after failure: %w", lastErr)
-			}
-		}
-		resp, err := v.post("/search", body)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		results, _ := resp["results"].([]interface{})
-		items := make([]map[string]interface{}, 0, len(results))
-		for _, r := range results {
-			if m, ok := r.(map[string]interface{}); ok {
-				items = append(items, m)
-			}
-		}
-		return items, nil
+	fileName := scopeToFileName(scope)
+
+	v.mu.RLock()
+	records := v.collections[fileName]
+	v.mu.RUnlock()
+
+	if records == nil || len(records) == 0 {
+		return []map[string]interface{}{}, nil
 	}
-	return nil, fmt.Errorf("search failed after 3 attempts: %w", lastErr)
+
+	// Calculate similarities
+	type scored struct {
+		record     *VectorRecord
+		similarity float64
+	}
+	var results []scored
+
+	for _, record := range records {
+		sim := cosineSimilarity(queryVector, record.Vector)
+		results = append(results, scored{record: record, similarity: sim})
+	}
+
+	// Sort by similarity (descending)
+	for i := 0; i < len(results)-1; i++ {
+		for j := i + 1; j < len(results); j++ {
+			if results[j].similarity > results[i].similarity {
+				results[i], results[j] = results[j], results[i]
+			}
+		}
+	}
+
+	// Take top K
+	if topK > len(results) {
+		topK = len(results)
+	}
+	results = results[:topK]
+
+	// Record hits and format output
+	items := make([]map[string]interface{}, 0, len(results))
+	now := time.Now().Format("2006-01-02T15:04:05")
+
+	v.mu.Lock()
+	for _, r := range results {
+		r.record.HitCount++
+		r.record.LastHitAt = now
+		if r.record.Metadata != nil {
+			r.record.Metadata["hit_count"] = r.record.HitCount
+			r.record.Metadata["last_hit_time"] = r.record.LastHitAt
+		}
+
+		items = append(items, map[string]interface{}{
+			"id":         r.record.ID,
+			"document":   r.record.Document,
+			"similarity": r.similarity,
+			"metadata":   r.record.Metadata,
+		})
+	}
+	v.mu.Unlock()
+
+	go v.saveCollection(fileName)
+
+	return items, nil
 }
 
 // Delete removes a vector record
@@ -595,32 +502,39 @@ func (v *VectorEngine) Delete(scope, docID string) error {
 	if !v.IsReady() {
 		return fmt.Errorf("vector engine not ready")
 	}
-	body := map[string]interface{}{
-		"scope":  scope,
-		"doc_id": docID,
+
+	fileName := scopeToFileName(scope)
+
+	v.mu.Lock()
+	if v.collections[fileName] != nil {
+		delete(v.collections[fileName], docID)
 	}
-	_, err := v.post("/delete", body)
-	return err
+	v.mu.Unlock()
+
+	return v.saveCollection(fileName)
 }
 
-// ListMetadata returns all vector records' full metadata for a scope (doc_id -> metadata map).
-// Non-fatal: returns nil if engine is not ready or request fails.
+// ListMetadata returns all records' metadata for a scope
 func (v *VectorEngine) ListMetadata(scope string) map[string]map[string]interface{} {
 	if !v.IsReady() {
 		return nil
 	}
-	resp, err := http.Get(fmt.Sprintf("%s/list_metadata?scope=%s", v.baseURL, url.QueryEscape(scope)))
-	if err != nil {
+
+	fileName := scopeToFileName(scope)
+
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	records := v.collections[fileName]
+	if records == nil {
 		return nil
 	}
-	defer resp.Body.Close()
-	var result struct {
-		Items map[string]map[string]interface{} `json:"items"`
+
+	result := make(map[string]map[string]interface{})
+	for id, record := range records {
+		result[id] = record.Metadata
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil
-	}
-	return result.Items
+	return result
 }
 
 // Stats returns hit statistics
@@ -628,28 +542,37 @@ func (v *VectorEngine) Stats(scope string) (map[string]interface{}, error) {
 	if !v.IsReady() {
 		return nil, fmt.Errorf("vector engine not ready")
 	}
-	resp, err := http.Get(fmt.Sprintf("%s/stats?scope=%s", v.baseURL, url.QueryEscape(scope)))
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	var result map[string]interface{}
-	json.NewDecoder(resp.Body).Decode(&result)
-	return result, nil
-}
 
-func (v *VectorEngine) post(path string, body map[string]interface{}) (map[string]interface{}, error) {
-	data, _ := json.Marshal(body)
-	resp, err := http.Post(v.baseURL+path, "application/json", bytes.NewReader(data))
-	if err != nil {
-		return nil, err
+	fileName := scopeToFileName(scope)
+
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	records := v.collections[fileName]
+	if records == nil {
+		return map[string]interface{}{"total": 0, "records": []interface{}{}}, nil
 	}
-	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("vector engine %s returned %d: %s", path, resp.StatusCode, string(respBody))
+
+	var statRecords []map[string]interface{}
+	for _, record := range records {
+		statRecords = append(statRecords, map[string]interface{}{
+			"id":            record.ID,
+			"hit_count":     record.HitCount,
+			"last_hit_time": record.LastHitAt,
+		})
 	}
-	var result map[string]interface{}
-	json.Unmarshal(respBody, &result)
-	return result, nil
+
+	// Sort by hit_count descending
+	for i := 0; i < len(statRecords)-1; i++ {
+		for j := i + 1; j < len(statRecords); j++ {
+			if statRecords[j]["hit_count"].(int) > statRecords[i]["hit_count"].(int) {
+				statRecords[i], statRecords[j] = statRecords[j], statRecords[i]
+			}
+		}
+	}
+
+	return map[string]interface{}{
+		"total":   len(records),
+		"records": statRecords,
+	}, nil
 }

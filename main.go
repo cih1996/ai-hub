@@ -31,9 +31,6 @@ var builtinSkillsFS embed.FS
 //go:embed claude/*
 var claudeRulesFS embed.FS
 
-//go:embed vector-engine/*
-var vectorEngineFS embed.FS
-
 var (
 	Version = "dev"
 	BuildAt = ""
@@ -125,9 +122,8 @@ func main() {
 	// Clean up legacy ~/.claude/rules/ and ~/.claude/skills/ (migrated to ~/.ai-hub/ since v1.17.0)
 	cleanLegacyClaudeDirs()
 
-	// Install vector engine scripts and start engine
-	vectorScriptDir := installVectorEngine()
-	core.InitVectorEngine(vectorScriptDir)
+	// Init Go-native vector engine (no Python dependency)
+	core.InitVectorEngine("")
 	defer func() {
 		if core.Vector != nil {
 			core.Vector.Stop()
@@ -388,37 +384,6 @@ func installBuiltinSkills(dataDir string) {
 	log.Printf("[skills] built-in skills installed to %s", targetBase)
 }
 
-// installVectorEngine extracts embedded vector-engine/* to ~/.ai-hub/vector-engine/scripts/
-// and returns the script directory path.
-func installVectorEngine() string {
-	home, _ := os.UserHomeDir()
-	targetBase := filepath.Join(home, ".ai-hub", "vector-engine", "scripts")
-
-	fs.WalkDir(vectorEngineFS, "vector-engine", func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		rel, _ := filepath.Rel("vector-engine", p)
-		if rel == "." {
-			return nil
-		}
-		target := filepath.Join(targetBase, rel)
-		if d.IsDir() {
-			os.MkdirAll(target, 0755)
-			return nil
-		}
-		data, err := vectorEngineFS.ReadFile(p)
-		if err != nil {
-			return nil
-		}
-		os.MkdirAll(filepath.Dir(target), 0755)
-		os.WriteFile(target, data, 0644)
-		return nil
-	})
-	log.Printf("[vector] scripts installed to %s", targetBase)
-	return targetBase
-}
-
 // migrateNestedRules moves files from rules/rules/ to rules/ (flatten).
 func migrateNestedRules(dataDir string) {
 	nested := filepath.Join(dataDir, "rules", "rules")
@@ -455,7 +420,7 @@ func migrateTeamDirs(dataDir string) {
 	systemDirs := map[string]bool{
 		"rules": true, "knowledge": true, "memory": true,
 		"skills": true, "notes": true, "scripts": true,
-		"vector-engine": true, "logs": true, "session-rules": true,
+		"logs": true, "session-rules": true, "models": true, "vector-data": true,
 		"team": true, "teams": true,
 	}
 	teamsDir := filepath.Join(dataDir, "teams")
