@@ -92,13 +92,27 @@ export const switchProvider = (id: number, providerId: string) =>
 export const toggleAttention = (id: number, enabled: boolean) =>
   request<{ ok: boolean; attention_enabled: boolean; session_id: number }>(`/sessions/${id}/attention`, { method: 'PUT', body: JSON.stringify({ enabled }) })
 
-// Get attention rules
+// Get attention rules (v2: includes system rules and custom rules)
 export const getAttentionRules = (id: number) =>
-  request<{ session_id: number; attention_rules: string }>(`/sessions/${id}/attention-rules`)
+  request<{
+    session_id: number
+    attention_rules: string
+    system_activation_rule: string
+    system_review_rule: string
+    activation_custom: string
+    review_custom: string
+  }>(`/sessions/${id}/attention-rules`)
 
-// Update attention rules
+// Update attention rules (legacy format)
 export const updateAttentionRules = (id: number, rules: string) =>
   request<{ ok: boolean; session_id: number; attention_rules: string }>(`/sessions/${id}/attention-rules`, { method: 'PUT', body: JSON.stringify({ rules }) })
+
+// Update attention rules (v2 format: separate activation and review custom rules)
+export const updateAttentionRulesV2 = (id: number, activationCustom: string, reviewCustom: string) =>
+  request<{ ok: boolean; session_id: number; attention_rules: string; activation_custom: string; review_custom: string }>(`/sessions/${id}/attention-rules`, {
+    method: 'PUT',
+    body: JSON.stringify({ activation_custom: activationCustom, review_custom: reviewCustom })
+  })
 
 // Chat
 export const sendChat = (sessionId: number, content: string, workDir?: string, sessionRules?: string, providerId?: string, groupName?: string) =>

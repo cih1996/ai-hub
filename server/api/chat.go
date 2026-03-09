@@ -361,7 +361,9 @@ func SendChat(c *gin.Context) {
 		// Attention system: intercept message when enabled
 		originalContent := req.Content
 		if session.AttentionEnabled {
-			req.Content = buildAttentionPrompt(originalContent)
+			// Parse custom activation rules from session
+			rulesData := core.ParseAttentionRules(session.AttentionRules)
+			req.Content = buildAttentionPrompt(originalContent, rulesData.ActivationCustom)
 		}
 
 		// Check if session is already streaming — queue message instead of rejecting
@@ -545,6 +547,9 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 		if usageInput > 0 {
 			go maybeAutoCompress(session, usageInput)
 		}
+		// Attention system: check for _attention_trigger and run review if found
+		// This is a universal mechanism that works regardless of attention_enabled flag
+		maybeRunAttentionReview(session, fullResponse, provider)
 	} else {
 		// No content received — remove the empty pre-inserted message
 		store.DeleteMessage(progressMsgID)
@@ -1055,23 +1060,190 @@ func extractAndSaveErrors(sessionID, messageID int64, content string) {
 	}
 }
 
-// buildAttentionPrompt wraps user content with attention system planning template.
-// When attention mode is enabled, the AI is asked to plan before executing.
-func buildAttentionPrompt(userContent string) string {
-	return `【注意力模式】请先规划再执行。
-
-用户原始请求：
-` + userContent + `
+// buildAttentionPrompt wraps user content with attention system activation rules.
+// When attention mode is enabled, the AI is asked to output a structured plan JSON.
+func buildAttentionPrompt(userContent string, customActivationRules string) string {
+	activationPrompt := core.BuildActivationPrompt(customActivationRules)
+	return `【注意力模式】` + activationPrompt + `
 
 ---
 
-请按以下步骤处理：
+用户原始请求：
+` + userContent
+}
 
-1. **理解需求**：简要复述用户的核心诉求（1-2句话）
-2. **分析影响**：列出可能涉及的文件、模块或系统
-3. **制定计划**：用编号列表说明执行步骤
-4. **风险评估**：指出潜在风险或需要确认的点
-5. **等待确认**：询问用户是否同意执行计划
+// attentionReviewState tracks the review retry count per session
+var (
+	attentionRetryCount   = make(map[int64]int)
+	attentionRetryCountMu sync.Mutex
+)
 
-注意：在用户确认前，不要执行任何实际操作（如写文件、运行命令等）。`
+// resetAttentionRetry resets the retry count for a session
+func resetAttentionRetry(sessionID int64) {
+	attentionRetryCountMu.Lock()
+	delete(attentionRetryCount, sessionID)
+	attentionRetryCountMu.Unlock()
+}
+
+// incrementAttentionRetry increments and returns the retry count
+func incrementAttentionRetry(sessionID int64) int {
+	attentionRetryCountMu.Lock()
+	defer attentionRetryCountMu.Unlock()
+	attentionRetryCount[sessionID]++
+	return attentionRetryCount[sessionID]
+}
+
+// maybeRunAttentionReview checks if the AI response contains _attention_trigger
+// and runs the review process if found. Returns true if review was triggered.
+func maybeRunAttentionReview(session *model.Session, fullResponse string, provider *model.Provider) bool {
+	// Detect attention trigger in response
+	trigger := core.DetectAttentionTrigger(fullResponse)
+	if trigger == nil {
+		// No trigger found, reset retry count and continue normally
+		resetAttentionRetry(session.ID)
+		return false
+	}
+
+	log.Printf("[attention] session %d: detected trigger, action=%s", session.ID, trigger.Action)
+
+	// Check retry count
+	retryCount := incrementAttentionRetry(session.ID)
+	if retryCount > core.MaxReviewRetries {
+		log.Printf("[attention] session %d: max retries (%d) exceeded, blocking", session.ID, core.MaxReviewRetries)
+		// Send block message to session
+		blockMsg := "【注意力系统】审核重试次数超过上限（" + strconv.Itoa(core.MaxReviewRetries) + " 次），请人工介入检查。"
+		sendAttentionFeedback(session.ID, blockMsg)
+		resetAttentionRetry(session.ID)
+		return true
+	}
+
+	// Run review in background
+	go runAttentionReview(session, trigger, provider, retryCount)
+	return true
+}
+
+// runAttentionReview executes the review process in an independent context
+func runAttentionReview(session *model.Session, trigger *core.AttentionTrigger, provider *model.Provider, retryCount int) {
+	log.Printf("[attention] session %d: starting review (retry %d/%d)", session.ID, retryCount, core.MaxReviewRetries)
+
+	// Build review context
+	rulesData := core.ParseAttentionRules(session.AttentionRules)
+	reviewPrompt := core.BuildReviewPrompt(rulesData.ReviewCustom)
+
+	// Gather context for review: session rules, team rules, global rules, memory
+	var contextParts []string
+
+	// Session rules
+	if sessionRules, err := ReadSessionRules(session.ID); err == nil && sessionRules != "" {
+		contextParts = append(contextParts, "【会话规则】\n"+sessionRules)
+	}
+
+	// Team rules
+	if session.GroupName != "" {
+		if teamRules := core.BuildTeamRulesWithVars(session.GroupName, nil); teamRules != "" {
+			contextParts = append(contextParts, "【团队规则】\n"+teamRules)
+		}
+	}
+
+	// Global rules
+	if globalRules := core.BuildSystemPromptWithVars(nil); globalRules != "" {
+		// Truncate if too long
+		if len(globalRules) > 2000 {
+			globalRules = globalRules[:2000] + "...(已截断)"
+		}
+		contextParts = append(contextParts, "【全局规则】\n"+globalRules)
+	}
+
+	// Build the review query
+	reviewQuery := reviewPrompt + "\n\n---\n\n"
+	if len(contextParts) > 0 {
+		reviewQuery += "审核依据：\n\n" + strings.Join(contextParts, "\n\n---\n\n") + "\n\n---\n\n"
+	}
+	reviewQuery += "待审核的执行计划：\n" + trigger.Plan
+
+	// Create a simple one-shot request for review (no session state)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	var reviewResponse string
+	err := claudeClient.Stream(ctx, core.ClaudeCodeRequest{
+		Query:        reviewQuery,
+		BaseURL:      provider.BaseURL,
+		APIKey:       provider.APIKey,
+		AuthMode:     provider.AuthMode,
+		ProxyURL:     provider.ProxyURL,
+		ModelID:      provider.ModelID,
+		HubSessionID: 0, // Independent context, no session binding
+	}, func(line string) {
+		// Parse response to extract text
+		var wrapper struct {
+			Type  string `json:"type"`
+			Event json.RawMessage `json:"event"`
+		}
+		if err := json.Unmarshal([]byte(line), &wrapper); err != nil {
+			return
+		}
+		if wrapper.Type == "stream_event" {
+			var inner struct {
+				Type  string `json:"type"`
+				Delta struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"delta"`
+			}
+			if err := json.Unmarshal(wrapper.Event, &inner); err != nil {
+				return
+			}
+			if inner.Type == "content_block_delta" && inner.Delta.Type == "text_delta" {
+				reviewResponse += inner.Delta.Text
+			}
+		}
+	})
+
+	if err != nil {
+		log.Printf("[attention] session %d: review failed: %v", session.ID, err)
+		sendAttentionFeedback(session.ID, "【注意力系统】审核失败: "+err.Error())
+		return
+	}
+
+	// Parse review result
+	passed, reason := core.ParseReviewResult(reviewResponse)
+	log.Printf("[attention] session %d: review result passed=%v reason=%s", session.ID, passed, reason)
+
+	if passed {
+		// Review passed, send approval and let AI continue
+		resetAttentionRetry(session.ID)
+		sendAttentionFeedback(session.ID, "【注意力系统】审核通过，请继续执行计划。")
+	} else {
+		// Review rejected, send rejection reason
+		sendAttentionFeedback(session.ID, "【注意力系统】审核未通过: "+reason+"\n\n请根据反馈修正计划后重新提交。")
+	}
+}
+
+// sendAttentionFeedback sends a system message to the session as user input
+// This triggers the AI to respond to the feedback
+func sendAttentionFeedback(sessionID int64, message string) {
+	session, err := store.GetSession(sessionID)
+	if err != nil {
+		log.Printf("[attention] session %d not found: %v", sessionID, err)
+		return
+	}
+
+	// Save as user message
+	userMsg := &model.Message{
+		SessionID: sessionID,
+		Role:      "user",
+		Content:   message,
+	}
+	if err := store.AddMessage(userMsg); err != nil {
+		log.Printf("[attention] failed to save feedback message: %v", err)
+		return
+	}
+
+	// Broadcast the message
+	broadcast(WSMessage{Type: "message_queued", SessionID: sessionID, Content: message})
+
+	// Trigger AI response
+	triggerMsgID := userMsg.ID
+	go runStream(session, message, false, triggerMsgID)
 }

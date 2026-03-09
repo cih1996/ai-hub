@@ -625,6 +625,7 @@ func ToggleAttention(c *gin.Context) {
 }
 
 // GetAttentionRules returns the attention rules for a session.
+// Returns both system built-in rules (read-only) and user custom rules (editable).
 func GetAttentionRules(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
@@ -638,10 +639,24 @@ func GetAttentionRules(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"session_id": session.ID, "attention_rules": session.AttentionRules})
+	// Parse stored JSON rules
+	rulesData := core.ParseAttentionRules(session.AttentionRules)
+
+	c.JSON(http.StatusOK, gin.H{
+		"session_id": session.ID,
+		// System built-in rules (read-only)
+		"system_activation_rule": core.SystemActivationRule,
+		"system_review_rule":     core.SystemReviewRule,
+		// User custom rules (editable)
+		"activation_custom": rulesData.ActivationCustom,
+		"review_custom":     rulesData.ReviewCustom,
+		// Legacy field for backward compatibility
+		"attention_rules": session.AttentionRules,
+	})
 }
 
 // UpdateAttentionRules updates the attention rules for a session.
+// Accepts both legacy format (rules string) and new format (activation_custom, review_custom).
 func UpdateAttentionRules(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
@@ -650,7 +665,9 @@ func UpdateAttentionRules(c *gin.Context) {
 	}
 
 	var body struct {
-		Rules string `json:"rules"`
+		Rules            string `json:"rules"`             // Legacy format
+		ActivationCustom string `json:"activation_custom"` // New format
+		ReviewCustom     string `json:"review_custom"`     // New format
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -663,13 +680,33 @@ func UpdateAttentionRules(c *gin.Context) {
 		return
 	}
 
-	if err := store.UpdateAttentionRules(id, body.Rules); err != nil {
+	// Determine the rules to save
+	var rulesJSON string
+	if body.ActivationCustom != "" || body.ReviewCustom != "" {
+		// New format: serialize as JSON
+		rulesData := &core.AttentionRulesData{
+			ActivationCustom: body.ActivationCustom,
+			ReviewCustom:     body.ReviewCustom,
+		}
+		rulesJSON = core.SerializeAttentionRules(rulesData)
+	} else {
+		// Legacy format: store as-is (will be parsed as activation_custom)
+		rulesJSON = body.Rules
+	}
+
+	if err := store.UpdateAttentionRules(id, rulesJSON); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	// Broadcast rules change to all WS clients
-	broadcast(WSMessage{Type: "attention_rules_update", SessionID: id, Content: body.Rules})
+	broadcast(WSMessage{Type: "attention_rules_update", SessionID: id, Content: rulesJSON})
 
-	c.JSON(http.StatusOK, gin.H{"ok": true, "session_id": session.ID, "attention_rules": body.Rules})
+	c.JSON(http.StatusOK, gin.H{
+		"ok":                rulesJSON != "",
+		"session_id":        session.ID,
+		"attention_rules":   rulesJSON,
+		"activation_custom": body.ActivationCustom,
+		"review_custom":     body.ReviewCustom,
+	})
 }
