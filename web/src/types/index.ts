@@ -26,6 +26,7 @@ export interface Session {
   error_count: number
   warning_count: number
   attention_enabled: boolean
+  attention_rules: string
   created_at: string
   updated_at: string
 }

@@ -93,11 +93,68 @@ async function toggleAttention() {
   }
 }
 
+// Open attention rules modal (right-click on attention button)
+async function openAttentionRulesModal() {
+  const session = store.currentSession
+  if (!session) return
+  attentionRulesLoading.value = true
+  showAttentionRulesModal.value = true
+  try {
+    const res = await api.getAttentionRules(session.id)
+    attentionRulesContent.value = res.attention_rules || ''
+  } catch (e: unknown) {
+    showToast('加载注意力规则失败: ' + (e instanceof Error ? e.message : String(e)), 'error')
+    attentionRulesContent.value = ''
+  } finally {
+    attentionRulesLoading.value = false
+  }
+}
+
+// Save attention rules
+async function saveAttentionRules() {
+  const session = store.currentSession
+  if (!session) return
+  attentionRulesSaving.value = true
+  try {
+    await api.updateAttentionRules(session.id, attentionRulesContent.value)
+    session.attention_rules = attentionRulesContent.value
+    showToast('注意力规则已保存', 'success')
+    showAttentionRulesModal.value = false
+  } catch (e: unknown) {
+    showToast('保存失败: ' + (e instanceof Error ? e.message : String(e)), 'error')
+  } finally {
+    attentionRulesSaving.value = false
+  }
+}
+
+// Clear attention rules
+async function clearAttentionRules() {
+  const session = store.currentSession
+  if (!session) return
+  attentionRulesSaving.value = true
+  try {
+    await api.updateAttentionRules(session.id, '')
+    attentionRulesContent.value = ''
+    session.attention_rules = ''
+    showToast('注意力规则已清除', 'success')
+  } catch (e: unknown) {
+    showToast('清除失败: ' + (e instanceof Error ? e.message : String(e)), 'error')
+  } finally {
+    attentionRulesSaving.value = false
+  }
+}
+
 // Session rules modal state
 const showSessionRulesModal = ref(false)
 const sessionRulesContent = ref('')
 const sessionRulesSaving = ref(false)
 const sessionRulesLoading = ref(false)
+
+// Attention rules modal state
+const showAttentionRulesModal = ref(false)
+const attentionRulesContent = ref('')
+const attentionRulesSaving = ref(false)
+const attentionRulesLoading = ref(false)
 
 // Memory modal state
 const showMemoryModal = ref(false)
@@ -1122,23 +1179,24 @@ function formatToolInput(raw: string): string {
 
     <div class="input-area">
       <div class="input-row">
-        <button
-          class="btn-attention"
-          :class="{ active: store.currentSession?.attention_enabled }"
-          @click="toggleAttention"
-          :title="store.currentSession?.attention_enabled ? '关闭注意力模式' : '开启注意力模式（AI 先规划后执行）'"
-        >
-          <svg class="attention-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="10"/>
-            <circle cx="12" cy="12" r="6"/>
-            <circle cx="12" cy="12" r="2"/>
-            <line x1="12" y1="2" x2="12" y2="4"/>
-            <line x1="12" y1="20" x2="12" y2="22"/>
-            <line x1="2" y1="12" x2="4" y2="12"/>
-            <line x1="20" y1="12" x2="22" y2="12"/>
-          </svg>
-        </button>
-        <div class="input-wrapper" :class="{ disabled: store.streaming }">
+        <div class="input-wrapper" :class="{ disabled: store.streaming, 'attention-active': store.currentSession?.attention_enabled }">
+          <button
+            class="btn-attention"
+            :class="{ active: store.currentSession?.attention_enabled, 'has-rules': store.currentSession?.attention_rules }"
+            @click="toggleAttention"
+            @contextmenu.prevent="openAttentionRulesModal"
+            :title="store.currentSession?.attention_enabled ? '关闭注意力模式（右键配置规则）' : '开启注意力模式（右键配置规则）'"
+          >
+            <svg class="attention-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <circle cx="12" cy="12" r="6"/>
+              <circle cx="12" cy="12" r="2"/>
+              <line x1="12" y1="2" x2="12" y2="4"/>
+              <line x1="12" y1="20" x2="12" y2="22"/>
+              <line x1="2" y1="12" x2="4" y2="12"/>
+              <line x1="20" y1="12" x2="22" y2="12"/>
+            </svg>
+          </button>
           <textarea
             ref="textareaEl"
             v-model="input"
@@ -1201,6 +1259,52 @@ function formatToolInput(raw: string): string {
                   @click="saveSessionRules"
                 >
                   {{ sessionRulesSaving ? '保存中...' : '保存' }}
+                </button>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Attention rules modal -->
+    <Teleport to="body">
+      <div v-if="showAttentionRulesModal" class="modal-overlay" @click="showAttentionRulesModal = false">
+        <div class="rules-modal attention-rules-modal" @click.stop>
+          <div class="rules-modal-header">
+            <span class="rules-modal-title">注意力规则</span>
+            <span class="rules-modal-dir">会话 #{{ store.currentSession?.id }}</span>
+            <button class="rules-modal-close" @click="showAttentionRulesModal = false">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 6L6 18M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+          <div class="attention-rules-body">
+            <div v-if="attentionRulesLoading" class="rules-empty">加载中...</div>
+            <template v-else>
+              <div class="attention-rules-hint">
+                定义 AI 在注意力模式下需要遵守的规则。AI 会在执行前先规划，并根据这些规则进行自我审核。
+              </div>
+              <textarea
+                v-model="attentionRulesContent"
+                class="rules-textarea attention-rules-textarea"
+                placeholder="输入注意力规则（Markdown 格式）...&#10;&#10;例如：&#10;- 修改代码前必须先读取相关文件&#10;- 执行危险操作前需要确认&#10;- 优先使用项目已有的工具和库"
+              />
+              <div class="rules-editor-actions attention-rules-actions">
+                <button
+                  class="btn-delete-rule"
+                  @click="clearAttentionRules"
+                  :disabled="!attentionRulesContent || attentionRulesSaving"
+                >
+                  清除
+                </button>
+                <button
+                  class="btn-save-rule"
+                  :disabled="attentionRulesSaving"
+                  @click="saveAttentionRules"
+                >
+                  {{ attentionRulesSaving ? '保存中...' : '保存' }}
                 </button>
               </div>
             </template>
@@ -2039,26 +2143,26 @@ function formatToolInput(raw: string): string {
 }
 .input-row {
   max-width: 720px; margin: 0 auto;
-  display: flex; align-items: flex-end; gap: 8px;
+  display: flex; align-items: flex-end;
 }
 .btn-attention {
   flex-shrink: 0;
-  width: 40px; height: 40px;
+  position: relative;
+  width: 32px; height: 32px;
   display: flex; align-items: center; justify-content: center;
-  border-radius: var(--radius-lg);
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: transparent;
+  border: none;
   transition: all var(--transition);
   cursor: pointer;
+  margin-right: 4px;
 }
 .btn-attention:hover {
-  border-color: var(--accent);
   background: var(--accent-soft);
 }
 .btn-attention.active {
   background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
-  border-color: transparent;
-  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
+  border-radius: var(--radius);
 }
 .btn-attention .attention-icon {
   color: var(--text-secondary);
@@ -2072,12 +2176,16 @@ function formatToolInput(raw: string): string {
 }
 .input-wrapper {
   flex: 1;
-  display: flex; align-items: flex-end; gap: 8px;
+  display: flex; align-items: flex-end; gap: 4px;
   background: var(--bg-secondary); border: 1px solid var(--border);
   border-radius: var(--radius-lg); padding: 8px 12px;
-  transition: border-color var(--transition);
+  transition: border-color var(--transition), box-shadow var(--transition);
 }
 .input-wrapper:focus-within { border-color: var(--accent); }
+.input-wrapper.attention-active {
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.2);
+}
 .input-wrapper.disabled { opacity: 0.7; }
 .input-wrapper.disabled textarea { cursor: not-allowed; }
 .input-wrapper textarea {
@@ -2195,7 +2303,36 @@ function formatToolInput(raw: string): string {
 }
 .btn-delete-rule:hover:not(:disabled) { opacity: 0.8; }
 .btn-delete-rule:disabled { opacity: 0.4; cursor: not-allowed; }
-/* Memory modal */
+/* Attention rules modal */
+.attention-rules-modal {
+  width: 600px; max-width: 95vw;
+}
+.attention-rules-body {
+  display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 16px;
+}
+.attention-rules-hint {
+  font-size: 13px; color: var(--text-secondary);
+  margin-bottom: 12px; line-height: 1.5;
+  padding: 10px 12px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius);
+  border-left: 3px solid #f59e0b;
+}
+.attention-rules-textarea {
+  min-height: 250px;
+}
+.attention-rules-actions {
+  gap: 8px;
+}
+.btn-attention.has-rules::after {
+  content: '';
+  position: absolute;
+  top: 4px; right: 4px;
+  width: 6px; height: 6px;
+  background: #f59e0b;
+  border-radius: 50%;
+}
+/* Memory modal -->
 .memory-modal {
   background: var(--bg-secondary);
   border: 1px solid var(--border);

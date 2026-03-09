@@ -53,6 +53,7 @@ type Session struct {
 	GroupName         string    `json:"group_name"`           // 会话分组名称
 	LastCompressMsgID int64     `json:"last_compress_msg_id"` // 上次压缩时最新消息 ID，用于增量统计
 	AttentionEnabled  bool      `json:"attention_enabled"`    // 注意力系统开关
+	AttentionRules    string    `json:"attention_rules"`      // 注意力规则（会话级别）
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
 }
