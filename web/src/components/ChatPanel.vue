@@ -1122,23 +1122,23 @@ function formatToolInput(raw: string): string {
 
     <div class="input-area">
       <div class="input-row">
-        <button
-          class="btn-attention"
-          :class="{ active: store.currentSession?.attention_enabled }"
-          @click="toggleAttention"
-          :title="store.currentSession?.attention_enabled ? '关闭注意力模式' : '开启注意力模式（AI 先规划后执行）'"
-        >
-          <svg class="attention-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="10"/>
-            <circle cx="12" cy="12" r="6"/>
-            <circle cx="12" cy="12" r="2"/>
-            <line x1="12" y1="2" x2="12" y2="4"/>
-            <line x1="12" y1="20" x2="12" y2="22"/>
-            <line x1="2" y1="12" x2="4" y2="12"/>
-            <line x1="20" y1="12" x2="22" y2="12"/>
-          </svg>
-        </button>
-        <div class="input-wrapper" :class="{ disabled: store.streaming }">
+        <div class="input-wrapper" :class="{ disabled: store.streaming, 'attention-active': store.currentSession?.attention_enabled }">
+          <button
+            class="btn-attention"
+            :class="{ active: store.currentSession?.attention_enabled }"
+            @click="toggleAttention"
+            :title="store.currentSession?.attention_enabled ? '关闭注意力模式' : '开启注意力模式（AI 先规划后执行）'"
+          >
+            <svg class="attention-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <circle cx="12" cy="12" r="6"/>
+              <circle cx="12" cy="12" r="2"/>
+              <line x1="12" y1="2" x2="12" y2="4"/>
+              <line x1="12" y1="20" x2="12" y2="22"/>
+              <line x1="2" y1="12" x2="4" y2="12"/>
+              <line x1="20" y1="12" x2="22" y2="12"/>
+            </svg>
+          </button>
           <textarea
             ref="textareaEl"
             v-model="input"
@@ -2039,26 +2039,25 @@ function formatToolInput(raw: string): string {
 }
 .input-row {
   max-width: 720px; margin: 0 auto;
-  display: flex; align-items: flex-end; gap: 8px;
+  display: flex; align-items: flex-end;
 }
 .btn-attention {
   flex-shrink: 0;
-  width: 40px; height: 40px;
+  width: 32px; height: 32px;
   display: flex; align-items: center; justify-content: center;
-  border-radius: var(--radius-lg);
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: transparent;
+  border: none;
   transition: all var(--transition);
   cursor: pointer;
+  margin-right: 4px;
 }
 .btn-attention:hover {
-  border-color: var(--accent);
   background: var(--accent-soft);
 }
 .btn-attention.active {
   background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
-  border-color: transparent;
-  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
+  border-radius: var(--radius);
 }
 .btn-attention .attention-icon {
   color: var(--text-secondary);
@@ -2072,12 +2071,16 @@ function formatToolInput(raw: string): string {
 }
 .input-wrapper {
   flex: 1;
-  display: flex; align-items: flex-end; gap: 8px;
+  display: flex; align-items: flex-end; gap: 4px;
   background: var(--bg-secondary); border: 1px solid var(--border);
   border-radius: var(--radius-lg); padding: 8px 12px;
-  transition: border-color var(--transition);
+  transition: border-color var(--transition), box-shadow var(--transition);
 }
 .input-wrapper:focus-within { border-color: var(--accent); }
+.input-wrapper.attention-active {
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.2);
+}
 .input-wrapper.disabled { opacity: 0.7; }
 .input-wrapper.disabled textarea { cursor: not-allowed; }
 .input-wrapper textarea {
