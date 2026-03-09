@@ -6,6 +6,8 @@ import (
 	"ai-hub/cli/mem"
 	"fmt"
 	"os"
+	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -92,6 +94,11 @@ func ParseGlobalFlags(args []string) (*GlobalFlags, []string, error) {
 
 // Run is the CLI entry point
 func Run(args []string) int {
+	// Set Windows console to UTF-8 to fix Chinese character display
+	if runtime.GOOS == "windows" {
+		exec.Command("cmd", "/c", "chcp", "65001").Run()
+	}
+
 	globalFlags, remaining, err := ParseGlobalFlags(args)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error parsing flags: %v\n", err)

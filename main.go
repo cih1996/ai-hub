@@ -42,6 +42,11 @@ var (
 )
 
 func main() {
+	// Set Windows console to UTF-8 to fix Chinese character display
+	if runtime.GOOS == "windows" {
+		exec.Command("cmd", "/c", "chcp", "65001").Run()
+	}
+
 	// Self-install mode: when run without arguments, check and install/upgrade
 	if len(os.Args) == 1 {
 		if runSelfInstall() {
