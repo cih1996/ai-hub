@@ -19,7 +19,9 @@ import (
 // the file path. Caller must os.Remove() the file when done.
 // This avoids Windows CreateProcess 32767-char limit and GBK/UTF-8 encoding issues.
 func writeSystemPromptFile(hubSessionID int64, content string) (string, error) {
-	dir := filepath.Join(os.TempDir(), "ai-hub")
+	// Use data directory instead of system temp to avoid permission issues
+	// (e.g., /tmp with noexec or fuse mounts on some Linux systems)
+	dir := filepath.Join(GetDataDir(), "tmp")
 	os.MkdirAll(dir, 0755)
 	name := filepath.Join(dir, fmt.Sprintf("sysprompt-%d.md", hubSessionID))
 	if err := os.WriteFile(name, []byte(content), 0644); err != nil {

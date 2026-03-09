@@ -302,6 +302,9 @@ func (p *ProcessPool) spawnProcess(req ClaudeCodeRequest, isResume bool) (*Persi
 
 	log.Printf("[pool] spawned pid=%d session=%d args: %s %s",
 		cmd.Process.Pid, req.HubSessionID, p.client.BinaryPath, strings.Join(args, " "))
+	log.Printf("[pool] session %d env: HOME=%s, ANTHROPIC_BASE_URL set=%v, ANTHROPIC_API_KEY set=%v",
+		req.HubSessionID, cmd.Dir, strings.Contains(strings.Join(cmd.Env, " "), "ANTHROPIC_BASE_URL="),
+		strings.Contains(strings.Join(cmd.Env, " "), "ANTHROPIC_API_KEY="))
 
 	// Collect stderr in background
 	var stderrBuf strings.Builder
@@ -351,7 +354,9 @@ func (proc *PersistentProcess) readLoop(stdout io.Reader) {
 	// Wait for process to fully exit and capture exit code
 	if proc.cmd != nil {
 		if waitErr := proc.cmd.Wait(); waitErr != nil {
-			log.Printf("[pool] session %d process exited: %v", proc.hubSessionID, waitErr)
+			log.Printf("[pool] session %d process exited with error: %v", proc.hubSessionID, waitErr)
+		} else {
+			log.Printf("[pool] session %d process exited normally (code 0)", proc.hubSessionID)
 		}
 	}
 	proc.mu.Lock()
