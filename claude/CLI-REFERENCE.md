@@ -91,7 +91,7 @@ ai-hub daemon status     # 状态
 安装位置：
 - macOS: /usr/local/bin/ai-hub + launchd
 - Linux: ~/.local/bin/ai-hub + systemd --user
-- Windows: %LOCALAPPDATA%\ai-hub\ai-hub.exe + 任务计划程序
+- Windows: %LOCALAPPDATA%\ai-hub\ai-hub.exe + 启动文件夹快捷方式
 
 ## 热重载
 

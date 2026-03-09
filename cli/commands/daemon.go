@@ -442,9 +442,7 @@ func stopSystemd() int {
 	return 0
 }
 
-// ============ Windows (Task Scheduler) ============
-
-const windowsTaskName = "AIHub"
+// ============ Windows (Startup Folder) ============
 
 func installWindows(binaryPath string) int {
 	installPath := getInstallPath()
@@ -464,79 +462,58 @@ func installWindows(binaryPath string) int {
 		fmt.Printf("Installed binary to %s\n", installPath)
 	}
 
-	// Delete existing task if any
-	exec.Command("schtasks", "/Delete", "/TN", windowsTaskName, "/F").Run()
+	// Get Startup folder path
+	startupDir := filepath.Join(home, "AppData", "Roaming", "Microsoft", "Windows", "Start Menu", "Programs", "Startup")
+	os.MkdirAll(startupDir, 0755)
 
-	// Create scheduled task that runs at logon
-	// Using XML for more control
-	xmlPath := filepath.Join(dataDir, "task.xml")
-	taskXML := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-16"?>
-<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-  <Triggers>
-    <LogonTrigger>
-      <Enabled>true</Enabled>
-    </LogonTrigger>
-  </Triggers>
-  <Principals>
-    <Principal id="Author">
-      <LogonType>InteractiveToken</LogonType>
-      <RunLevel>LeastPrivilege</RunLevel>
-    </Principal>
-  </Principals>
-  <Settings>
-    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
-    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
-    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
-    <AllowHardTerminate>true</AllowHardTerminate>
-    <StartWhenAvailable>true</StartWhenAvailable>
-    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
-    <AllowStartOnDemand>true</AllowStartOnDemand>
-    <Enabled>true</Enabled>
-    <Hidden>false</Hidden>
-    <RunOnlyIfIdle>false</RunOnlyIfIdle>
-    <WakeToRun>false</WakeToRun>
-    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
-    <Priority>7</Priority>
-    <RestartOnFailure>
-      <Interval>PT1M</Interval>
-      <Count>3</Count>
-    </RestartOnFailure>
-  </Settings>
-  <Actions Context="Author">
-    <Exec>
-      <Command>%s</Command>
-      <Arguments>-port 8080</Arguments>
-      <WorkingDirectory>%s</WorkingDirectory>
-    </Exec>
-  </Actions>
-</Task>`, strings.ReplaceAll(installPath, `\`, `\\`), strings.ReplaceAll(dataDir, `\`, `\\`))
+	// Create a VBS script to launch AI Hub hidden (no console window)
+	vbsPath := filepath.Join(dataDir, "ai-hub-launcher.vbs")
+	vbsContent := fmt.Sprintf(`Set WshShell = CreateObject("WScript.Shell")
+WshShell.Run """%s"" -port 8080", 0, False
+`, strings.ReplaceAll(installPath, `\`, `\\`))
 
-	if err := os.WriteFile(xmlPath, []byte(taskXML), 0644); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to write task XML: %v\n", err)
+	if err := os.WriteFile(vbsPath, []byte(vbsContent), 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to write launcher script: %v\n", err)
 		return 1
 	}
 
-	// Create task from XML
-	cmd := exec.Command("schtasks", "/Create", "/TN", windowsTaskName, "/XML", xmlPath, "/F")
+	// Create shortcut in Startup folder
+	shortcutPath := filepath.Join(startupDir, "AI Hub.lnk")
+	psScript := fmt.Sprintf(`
+$WshShell = New-Object -ComObject WScript.Shell
+$Shortcut = $WshShell.CreateShortcut('%s')
+$Shortcut.TargetPath = '%s'
+$Shortcut.WorkingDirectory = '%s'
+$Shortcut.Description = 'AI Hub Server'
+$Shortcut.Save()
+`, strings.ReplaceAll(shortcutPath, `'`, `''`),
+		strings.ReplaceAll(vbsPath, `'`, `''`),
+		strings.ReplaceAll(dataDir, `'`, `''`))
+
+	cmd := exec.Command("powershell", "-Command", psScript)
 	if output, err := cmd.CombinedOutput(); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create scheduled task: %v\n%s\n", err, output)
+		fmt.Fprintf(os.Stderr, "Failed to create startup shortcut: %v\n%s\n", err, output)
 		return 1
 	}
 
-	// Start the task immediately
-	exec.Command("schtasks", "/Run", "/TN", windowsTaskName).Run()
-
+	fmt.Printf("Created startup shortcut: %s\n", shortcutPath)
 	fmt.Println("AI Hub service installed and started")
 	fmt.Println("Service will auto-start on login")
 	return 0
 }
 
 func uninstallWindows() int {
-	// Stop the task
-	exec.Command("schtasks", "/End", "/TN", windowsTaskName).Run()
+	home, _ := os.UserHomeDir()
+	dataDir := filepath.Join(home, ".ai-hub")
 
-	// Delete the task
-	exec.Command("schtasks", "/Delete", "/TN", windowsTaskName, "/F").Run()
+	// Remove startup shortcut
+	startupDir := filepath.Join(home, "AppData", "Roaming", "Microsoft", "Windows", "Start Menu", "Programs", "Startup")
+	shortcutPath := filepath.Join(startupDir, "AI Hub.lnk")
+	os.Remove(shortcutPath)
+
+	// Remove VBS launcher
+	vbsPath := filepath.Join(dataDir, "ai-hub-launcher.vbs")
+	os.Remove(vbsPath)
 
 	// Remove binary
 	installPath := getInstallPath()
@@ -549,16 +526,28 @@ func uninstallWindows() int {
 }
 
 func startWindows() int {
-	if err := exec.Command("schtasks", "/Run", "/TN", windowsTaskName).Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to start service. Run 'ai-hub daemon install' first.\n")
+	home, _ := os.UserHomeDir()
+	dataDir := filepath.Join(home, ".ai-hub")
+	vbsPath := filepath.Join(dataDir, "ai-hub-launcher.vbs")
+
+	if _, err := os.Stat(vbsPath); os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "Service not installed. Run 'ai-hub daemon install' first.\n")
 		return 1
 	}
+
+	cmd := exec.Command("wscript", vbsPath)
+	if err := cmd.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to start service: %v\n", err)
+		return 1
+	}
+
 	fmt.Println("AI Hub service started")
 	return 0
 }
 
 func stopWindows() int {
-	exec.Command("schtasks", "/End", "/TN", windowsTaskName).Run()
+	// Kill ai-hub process by name
+	exec.Command("taskkill", "/IM", "ai-hub.exe", "/F").Run()
 	fmt.Println("AI Hub service stopped")
 	return 0
 }

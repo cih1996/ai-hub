@@ -712,8 +712,11 @@ func isServiceInstalled() bool {
 		_, err := os.Stat(servicePath)
 		return err == nil
 	case "windows":
-		cmd := exec.Command("schtasks", "/Query", "/TN", "AIHub")
-		return cmd.Run() == nil
+		// Check for startup shortcut
+		home, _ := os.UserHomeDir()
+		shortcutPath := filepath.Join(home, "AppData", "Roaming", "Microsoft", "Windows", "Start Menu", "Programs", "Startup", "AI Hub.lnk")
+		_, err := os.Stat(shortcutPath)
+		return err == nil
 	default:
 		return false
 	}
@@ -1020,70 +1023,55 @@ func appendToFile(path, content string) error {
 	return err
 }
 
-// installWindowsService installs Windows scheduled task
+// installWindowsService installs AI Hub to start on Windows login
+// Uses Startup folder shortcut (no admin required) instead of Task Scheduler
 func installWindowsService(binaryPath string) bool {
 	home, _ := os.UserHomeDir()
 	dataDir := filepath.Join(home, ".ai-hub")
-	xmlPath := filepath.Join(dataDir, "task.xml")
 
 	os.MkdirAll(dataDir, 0755)
 
-	// Delete existing task
-	exec.Command("schtasks", "/Delete", "/TN", "AIHub", "/F").Run()
+	// Get Startup folder path
+	startupDir := filepath.Join(home, "AppData", "Roaming", "Microsoft", "Windows", "Start Menu", "Programs", "Startup")
+	os.MkdirAll(startupDir, 0755)
 
-	taskXML := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-16"?>
-<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-  <Triggers>
-    <LogonTrigger>
-      <Enabled>true</Enabled>
-    </LogonTrigger>
-  </Triggers>
-  <Principals>
-    <Principal id="Author">
-      <LogonType>InteractiveToken</LogonType>
-      <RunLevel>LeastPrivilege</RunLevel>
-    </Principal>
-  </Principals>
-  <Settings>
-    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
-    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
-    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
-    <AllowHardTerminate>true</AllowHardTerminate>
-    <StartWhenAvailable>true</StartWhenAvailable>
-    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
-    <AllowStartOnDemand>true</AllowStartOnDemand>
-    <Enabled>true</Enabled>
-    <Hidden>false</Hidden>
-    <RunOnlyIfIdle>false</RunOnlyIfIdle>
-    <WakeToRun>false</WakeToRun>
-    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
-    <Priority>7</Priority>
-    <RestartOnFailure>
-      <Interval>PT1M</Interval>
-      <Count>3</Count>
-    </RestartOnFailure>
-  </Settings>
-  <Actions Context="Author">
-    <Exec>
-      <Command>%s</Command>
-      <Arguments>-port 8080</Arguments>
-      <WorkingDirectory>%s</WorkingDirectory>
-    </Exec>
-  </Actions>
-</Task>`, strings.ReplaceAll(binaryPath, `\`, `\\`), strings.ReplaceAll(dataDir, `\`, `\\`))
+	// Create a VBS script to launch AI Hub hidden (no console window)
+	vbsPath := filepath.Join(dataDir, "ai-hub-launcher.vbs")
+	vbsContent := fmt.Sprintf(`Set WshShell = CreateObject("WScript.Shell")
+WshShell.Run """%s"" -port 8080", 0, False
+`, strings.ReplaceAll(binaryPath, `\`, `\\`))
 
-	if err := os.WriteFile(xmlPath, []byte(taskXML), 0644); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to write task XML: %v\n", err)
+	if err := os.WriteFile(vbsPath, []byte(vbsContent), 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to write launcher script: %v\n", err)
 		return false
 	}
 
-	cmd := exec.Command("schtasks", "/Create", "/TN", "AIHub", "/XML", xmlPath, "/F")
+	// Create shortcut in Startup folder pointing to the VBS script
+	shortcutPath := filepath.Join(startupDir, "AI Hub.lnk")
+
+	// Use PowerShell to create shortcut
+	psScript := fmt.Sprintf(`
+$WshShell = New-Object -ComObject WScript.Shell
+$Shortcut = $WshShell.CreateShortcut('%s')
+$Shortcut.TargetPath = '%s'
+$Shortcut.WorkingDirectory = '%s'
+$Shortcut.Description = 'AI Hub Server'
+$Shortcut.Save()
+`, strings.ReplaceAll(shortcutPath, `'`, `''`),
+		strings.ReplaceAll(vbsPath, `'`, `''`),
+		strings.ReplaceAll(dataDir, `'`, `''`))
+
+	cmd := exec.Command("powershell", "-Command", psScript)
 	if output, err := cmd.CombinedOutput(); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create scheduled task: %v\n%s\n", err, output)
+		fmt.Fprintf(os.Stderr, "Failed to create startup shortcut: %v\n%s\n", err, output)
 		return false
 	}
 
-	exec.Command("schtasks", "/Run", "/TN", "AIHub").Run()
+	fmt.Printf("Created startup shortcut: %s\n", shortcutPath)
+
+	// Start AI Hub now (hidden)
+	cmd = exec.Command("wscript", vbsPath)
+	cmd.Start()
 
 	// Add install directory to user PATH
 	addWindowsPathConfig(filepath.Dir(binaryPath))
