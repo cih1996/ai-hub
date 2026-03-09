@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,6 +24,8 @@ const (
 	DefaultModelName = "BAAI/bge-small-zh-v1.5"
 	// VectorDimension is the output dimension of the model
 	VectorDimension = 512
+	// HuggingFace mirror for China
+	HFMirrorEndpoint = "https://hf-mirror.com"
 )
 
 // VectorRecord represents a stored vector with metadata
@@ -108,6 +111,12 @@ func (v *VectorEngine) loadModel() error {
 		// Model doesn't exist, need to download
 		downloadPolicy = tasks.DownloadMissing
 		log.Printf("[vector] downloading model: %s", DefaultModelName)
+
+		// Check if HuggingFace is accessible, if not use mirror
+		if !isHuggingFaceAccessible() {
+			log.Println("[vector] HuggingFace not accessible, using mirror: " + HFMirrorEndpoint)
+			os.Setenv("HF_ENDPOINT", HFMirrorEndpoint)
+		}
 	}
 
 	model, err := tasks.Load[textencoding.Interface](&tasks.Config{
@@ -116,11 +125,25 @@ func (v *VectorEngine) loadModel() error {
 		DownloadPolicy: downloadPolicy,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to load model: %w", err)
+		// Provide manual download instructions on failure
+		return fmt.Errorf("模型加载失败: %w\n\n手动下载方法:\n1. 访问 %s/%s\n2. 下载所有文件到 %s\n3. 重启 AI Hub",
+			HFMirrorEndpoint, DefaultModelName, modelPath)
 	}
 
 	v.model = model
 	return nil
+}
+
+// isHuggingFaceAccessible checks if huggingface.co is accessible (3s timeout)
+func isHuggingFaceAccessible() bool {
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Head("https://huggingface.co")
+	if err != nil {
+		log.Printf("[vector] HuggingFace accessibility check failed: %v", err)
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode < 400
 }
 
 func (v *VectorEngine) loadData() error {
