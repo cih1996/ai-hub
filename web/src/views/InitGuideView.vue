@@ -24,6 +24,13 @@ interface DepsStatus {
   install_error: string
 }
 
+interface ClaudeAuthInfo {
+  logged_in: boolean
+  auth_method?: string
+  email?: string
+  error?: string
+}
+
 interface InitStatus {
   is_first_run: boolean
   has_provider: boolean
@@ -32,6 +39,9 @@ interface InitStatus {
   deps_status: DepsStatus
   platform: string
   package_manager: string
+  claude_auth?: ClaudeAuthInfo
+  running_as_root: boolean
+  current_user: string
 }
 
 interface Provider {
@@ -257,11 +267,21 @@ function skipGuide() {
               <p class="subtitle">配置环境以释放 AI 智能体的潜力。</p>
             </div>
 
+            <!-- Root user warning -->
+            <div v-if="initStatus?.running_as_root" class="warning-card">
+              <div class="warning-icon">⚠️</div>
+              <div class="warning-content">
+                <h4>以 root 身份运行</h4>
+                <p>当前以 root 用户运行 AI Hub。请确保 root 用户已登录 Claude CLI，否则会话将无法正常工作。</p>
+                <code class="cmd-inline">sudo su - && claude login</code>
+              </div>
+            </div>
+
             <div class="env-status-card" v-if="initStatus">
               <div class="card-header">
                 <h3>系统状态</h3>
-                <span class="status-badge" :class="{ 'all-ok': initStatus.deps_status.node_installed && initStatus.deps_status.npm_installed }">
-                  {{ initStatus.deps_status.node_installed && initStatus.deps_status.npm_installed ? '就绪' : '检测到问题' }}
+                <span class="status-badge" :class="{ 'all-ok': initStatus.deps_status.node_installed && initStatus.deps_status.npm_installed && initStatus.claude_auth?.logged_in }">
+                  {{ initStatus.deps_status.node_installed && initStatus.deps_status.npm_installed && initStatus.claude_auth?.logged_in ? '就绪' : '检测到问题' }}
                 </span>
               </div>
               <div class="status-grid">
@@ -280,6 +300,14 @@ function skipGuide() {
                   <span class="value">{{ initStatus.deps_status.claude_version || '未安装' }}</span>
                   <div class="indicator" :class="{ active: initStatus.deps_status.claude_installed }"></div>
                 </div>
+                <div class="status-item">
+                  <span class="label">Claude 登录</span>
+                  <span class="value">{{ initStatus.claude_auth?.logged_in ? (initStatus.claude_auth.auth_method || '已登录') : '未登录' }}</span>
+                  <div class="indicator" :class="{ active: initStatus.claude_auth?.logged_in }"></div>
+                </div>
+              </div>
+              <div v-if="initStatus.current_user" class="user-info">
+                当前用户: {{ initStatus.current_user }}
               </div>
             </div>
 
@@ -650,6 +678,56 @@ function skipGuide() {
 
 .indicator.active {
   background: var(--success);
+}
+
+/* Warning Card */
+.warning-card {
+  display: flex;
+  gap: 12px;
+  padding: 16px;
+  background: rgba(255, 193, 7, 0.1);
+  border: 1px solid rgba(255, 193, 7, 0.3);
+  border-radius: 12px;
+  text-align: left;
+}
+
+.warning-icon {
+  font-size: 24px;
+  flex-shrink: 0;
+}
+
+.warning-content h4 {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: var(--text-primary);
+}
+
+.warning-content p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+
+.cmd-inline {
+  display: inline-block;
+  padding: 4px 8px;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: monospace;
+  color: var(--text-primary);
+}
+
+/* User Info */
+.user-info {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
 }
 
 /* Dependencies */

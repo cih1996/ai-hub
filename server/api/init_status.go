@@ -3,8 +3,11 @@ package api
 import (
 	"ai-hub/server/core"
 	"ai-hub/server/store"
+	"encoding/json"
 	"net/http"
+	"os"
 	"os/exec"
+	"os/user"
 	"runtime"
 	"strings"
 
@@ -20,6 +23,17 @@ type InitStatusResponse struct {
 	DepsStatus     core.DepsStatus `json:"deps_status"`
 	Platform       string          `json:"platform"`        // darwin, linux, windows
 	PackageManager string          `json:"package_manager"` // brew, apt, winget, choco, none
+	ClaudeAuth     *ClaudeAuthInfo `json:"claude_auth,omitempty"`
+	RunningAsRoot  bool            `json:"running_as_root"`
+	CurrentUser    string          `json:"current_user"`
+}
+
+// ClaudeAuthInfo represents Claude CLI authentication status
+type ClaudeAuthInfo struct {
+	LoggedIn   bool   `json:"logged_in"`
+	AuthMethod string `json:"auth_method,omitempty"` // claude.ai, api_key
+	Email      string `json:"email,omitempty"`
+	Error      string `json:"error,omitempty"`
 }
 
 // MissingDep represents a missing dependency
@@ -57,6 +71,21 @@ func GetInitStatus(c *gin.Context) {
 	missingDeps := checkMissingDeps(pkgMgr)
 	depsStatus := core.Deps.GetStatus()
 
+	// Check if running as root
+	runningAsRoot := isRunningAsRoot()
+	currentUser := getCurrentUsername()
+
+	// Check Claude CLI auth status
+	var claudeAuth *ClaudeAuthInfo
+	if checkCommand("claude", "--version") {
+		claudeAuth = checkClaudeAuthStatus()
+		// If not logged in, add to missing deps with appropriate hint
+		if claudeAuth != nil && !claudeAuth.LoggedIn {
+			authDep := getClaudeAuthDep(runningAsRoot, currentUser)
+			missingDeps = append(missingDeps, authDep)
+		}
+	}
+
 	c.JSON(http.StatusOK, InitStatusResponse{
 		IsFirstRun:     isFirstRun,
 		HasProvider:    hasProvider,
@@ -65,7 +94,90 @@ func GetInitStatus(c *gin.Context) {
 		DepsStatus:     depsStatus,
 		Platform:       runtime.GOOS,
 		PackageManager: pkgMgr,
+		ClaudeAuth:     claudeAuth,
+		RunningAsRoot:  runningAsRoot,
+		CurrentUser:    currentUser,
 	})
+}
+
+// isRunningAsRoot checks if the current process is running as root/admin
+func isRunningAsRoot() bool {
+	if runtime.GOOS == "windows" {
+		// On Windows, check if running as Administrator
+		// Simple heuristic: try to read a protected registry key
+		cmd := exec.Command("net", "session")
+		err := cmd.Run()
+		return err == nil
+	}
+	// On Unix, check UID
+	return os.Getuid() == 0
+}
+
+// getCurrentUsername returns the current user's username
+func getCurrentUsername() string {
+	u, err := user.Current()
+	if err != nil {
+		return "unknown"
+	}
+	return u.Username
+}
+
+// checkClaudeAuthStatus checks Claude CLI authentication status
+func checkClaudeAuthStatus() *ClaudeAuthInfo {
+	cmd := exec.Command("claude", "auth", "status")
+	out, err := cmd.Output()
+	if err != nil {
+		// Try to get stderr for error message
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return &ClaudeAuthInfo{
+				LoggedIn: false,
+				Error:    strings.TrimSpace(string(exitErr.Stderr)),
+			}
+		}
+		return &ClaudeAuthInfo{
+			LoggedIn: false,
+			Error:    err.Error(),
+		}
+	}
+
+	// Parse JSON output
+	var status struct {
+		LoggedIn   bool   `json:"loggedIn"`
+		AuthMethod string `json:"authMethod"`
+		Email      string `json:"email"`
+	}
+	if err := json.Unmarshal(out, &status); err != nil {
+		return &ClaudeAuthInfo{
+			LoggedIn: false,
+			Error:    "无法解析认证状态",
+		}
+	}
+
+	return &ClaudeAuthInfo{
+		LoggedIn:   status.LoggedIn,
+		AuthMethod: status.AuthMethod,
+		Email:      status.Email,
+	}
+}
+
+// getClaudeAuthDep returns a MissingDep for Claude CLI authentication
+func getClaudeAuthDep(runningAsRoot bool, currentUser string) MissingDep {
+	dep := MissingDep{
+		Name:        "Claude CLI 登录",
+		Description: "Claude CLI 需要登录才能使用",
+		InstallCmd:  "claude login",
+		Required:    true,
+	}
+
+	if runningAsRoot {
+		// Running as root but root hasn't logged in
+		dep.Hint = "当前以 root 身份运行，但 root 用户未登录 Claude CLI。请执行: sudo su - 然后 claude login"
+		dep.CopyCmd = "sudo su - && claude login"
+	} else {
+		dep.Hint = "请在终端执行 claude login 完成登录"
+	}
+
+	return dep
 }
 
 // detectPackageManager detects available package manager
