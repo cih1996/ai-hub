@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
 
 var (
@@ -28,8 +29,16 @@ func ParseGlobalFlags(args []string) (*GlobalFlags, []string, error) {
 
 	// Manual parsing: extract global flags from anywhere in args, leave the rest as remaining.
 	// This allows: ai-hub mem add --port 8081  (not just: ai-hub --port 8081 mem add)
+	// Note: --help is only consumed before the command, after command it's passed through
 	var remaining []string
+	commandFound := false
 	for i := 0; i < len(args); i++ {
+		// Once we find a non-flag argument (the command), pass everything through
+		if commandFound {
+			remaining = append(remaining, args[i])
+			continue
+		}
+
 		switch args[i] {
 		case "--session":
 			if i+1 < len(args) {
@@ -51,6 +60,10 @@ func ParseGlobalFlags(args []string) (*GlobalFlags, []string, error) {
 		case "--version":
 			flags.Version = true
 		default:
+			// First non-flag argument is the command
+			if !strings.HasPrefix(args[i], "-") {
+				commandFound = true
+			}
 			remaining = append(remaining, args[i])
 		}
 	}

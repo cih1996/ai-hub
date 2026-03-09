@@ -38,6 +38,14 @@ ai-hub rules get [session_id]            # 读取会话规则（默认当前）
 ai-hub rules set <session_id> --content "内容"  # 写入会话规则
 ai-hub rules delete <session_id>         # 删除会话规则
 
+# 团队/全局规则（基于文件）
+ai-hub rules list --level <global|team>  # 列出规则文件
+ai-hub rules get <filename.md> --level <global|team>  # 读取规则文件
+ai-hub rules set <filename.md> --level <global|team> --content "内容"  # 写入规则文件
+ai-hub rules delete <filename.md> --level <global|team>  # 删除规则文件
+
+level 解析：team 需要 GROUP_NAME，global 无需。
+
 ## 笔记管理
 
 ai-hub notes list                        # 列出笔记
