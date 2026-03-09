@@ -955,7 +955,69 @@ WantedBy=default.target
 		exec.Command("loginctl", "enable-linger", user).Run()
 	}
 
+	// Add ~/.local/bin to PATH in shell rc files
+	addLinuxPathConfig(home)
+
 	return true
+}
+
+// addLinuxPathConfig adds ~/.local/bin to PATH in .bashrc and .zshrc
+func addLinuxPathConfig(home string) {
+	localBin := filepath.Join(home, ".local", "bin")
+	pathLine := fmt.Sprintf(`export PATH="$HOME/.local/bin:$PATH"`)
+	marker := ".local/bin"
+
+	// Check and update .bashrc
+	bashrc := filepath.Join(home, ".bashrc")
+	if _, err := os.Stat(bashrc); err == nil {
+		if !fileContains(bashrc, marker) {
+			appendToFile(bashrc, "\n# Added by AI Hub\n"+pathLine+"\n")
+			fmt.Println("Added ~/.local/bin to PATH in ~/.bashrc")
+		}
+	}
+
+	// Check and update .zshrc
+	zshrc := filepath.Join(home, ".zshrc")
+	if _, err := os.Stat(zshrc); err == nil {
+		if !fileContains(zshrc, marker) {
+			appendToFile(zshrc, "\n# Added by AI Hub\n"+pathLine+"\n")
+			fmt.Println("Added ~/.local/bin to PATH in ~/.zshrc")
+		}
+	}
+
+	// Also create .profile if neither exists (for login shells)
+	if _, err := os.Stat(bashrc); os.IsNotExist(err) {
+		if _, err := os.Stat(zshrc); os.IsNotExist(err) {
+			profile := filepath.Join(home, ".profile")
+			if !fileContains(profile, marker) {
+				appendToFile(profile, "\n# Added by AI Hub\n"+pathLine+"\n")
+				fmt.Println("Added ~/.local/bin to PATH in ~/.profile")
+			}
+		}
+	}
+
+	// Ensure the directory exists
+	os.MkdirAll(localBin, 0755)
+}
+
+// fileContains checks if a file contains a substring
+func fileContains(path, substr string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(data), substr)
+}
+
+// appendToFile appends content to a file
+func appendToFile(path, content string) error {
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.WriteString(content)
+	return err
 }
 
 // installWindowsService installs Windows scheduled task
@@ -1022,5 +1084,55 @@ func installWindowsService(binaryPath string) bool {
 	}
 
 	exec.Command("schtasks", "/Run", "/TN", "AIHub").Run()
+
+	// Add install directory to user PATH
+	addWindowsPathConfig(filepath.Dir(binaryPath))
+
 	return true
+}
+
+// addWindowsPathConfig adds the install directory to user PATH on Windows
+func addWindowsPathConfig(installDir string) {
+	// Get current user PATH
+	cmd := exec.Command("powershell", "-Command",
+		"[Environment]::GetEnvironmentVariable('PATH', 'User')")
+	output, err := cmd.Output()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Failed to get user PATH: %v\n", err)
+		return
+	}
+
+	currentPath := strings.TrimSpace(string(output))
+
+	// Check if already in PATH (case-insensitive on Windows)
+	pathLower := strings.ToLower(currentPath)
+	installDirLower := strings.ToLower(installDir)
+	if strings.Contains(pathLower, installDirLower) {
+		return // Already in PATH
+	}
+
+	// Add to PATH using setx
+	var newPath string
+	if currentPath == "" {
+		newPath = installDir
+	} else {
+		newPath = installDir + ";" + currentPath
+	}
+
+	// setx has a 1024 character limit, use PowerShell for longer paths
+	if len(newPath) > 1024 {
+		cmd = exec.Command("powershell", "-Command",
+			fmt.Sprintf("[Environment]::SetEnvironmentVariable('PATH', '%s', 'User')",
+				strings.ReplaceAll(newPath, "'", "''")))
+	} else {
+		cmd = exec.Command("setx", "PATH", newPath)
+	}
+
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Failed to add to PATH: %v\n", err)
+		return
+	}
+
+	fmt.Printf("Added %s to user PATH\n", installDir)
+	fmt.Println("Note: Restart your terminal for PATH changes to take effect")
 }
