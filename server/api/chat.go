@@ -1168,6 +1168,7 @@ func runAttentionReview(session *model.Session, trigger *core.AttentionTrigger, 
 	var reviewResponse string
 	err := claudeClient.Stream(ctx, core.ClaudeCodeRequest{
 		Query:        reviewQuery,
+		SystemPrompt: "你是注意力审核 AI。只输出审核结果，格式为 [PASS] 或 [REJECT:原因]。不要调用任何工具，不要执行任何操作。",
 		BaseURL:      provider.BaseURL,
 		APIKey:       provider.APIKey,
 		AuthMode:     provider.AuthMode,
@@ -1177,13 +1178,21 @@ func runAttentionReview(session *model.Session, trigger *core.AttentionTrigger, 
 	}, func(line string) {
 		// Parse response to extract text
 		var wrapper struct {
-			Type  string `json:"type"`
-			Event json.RawMessage `json:"event"`
+			Type    string          `json:"type"`
+			Event   json.RawMessage `json:"event"`
+			Message struct {
+				Content []struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"content"`
+			} `json:"message"`
 		}
 		if err := json.Unmarshal([]byte(line), &wrapper); err != nil {
 			return
 		}
-		if wrapper.Type == "stream_event" {
+
+		switch wrapper.Type {
+		case "stream_event":
 			var inner struct {
 				Type  string `json:"type"`
 				Delta struct {
@@ -1197,6 +1206,13 @@ func runAttentionReview(session *model.Session, trigger *core.AttentionTrigger, 
 			if inner.Type == "content_block_delta" && inner.Delta.Type == "text_delta" {
 				reviewResponse += inner.Delta.Text
 			}
+		case "assistant":
+			// Handle assistant message type (final response)
+			for _, block := range wrapper.Message.Content {
+				if block.Type == "text" && block.Text != "" {
+					reviewResponse += block.Text
+				}
+			}
 		}
 	})
 
@@ -1206,9 +1222,16 @@ func runAttentionReview(session *model.Session, trigger *core.AttentionTrigger, 
 		return
 	}
 
+	// Check for empty response
+	if strings.TrimSpace(reviewResponse) == "" {
+		log.Printf("[attention] session %d: review returned empty response", session.ID)
+		sendAttentionFeedback(session.ID, "【注意力系统】审核失败: 审核 AI 未返回有效响应，请重试。")
+		return
+	}
+
 	// Parse review result
 	passed, reason := core.ParseReviewResult(reviewResponse)
-	log.Printf("[attention] session %d: review result passed=%v reason=%s", session.ID, passed, reason)
+	log.Printf("[attention] session %d: review result passed=%v reason=%s response=%s", session.ID, passed, reason, reviewResponse)
 
 	if passed {
 		// Review passed, send approval and let AI continue

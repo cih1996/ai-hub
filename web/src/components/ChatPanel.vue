@@ -2486,7 +2486,7 @@ function formatToolInput(raw: string): string {
 .attention-custom-textarea::placeholder {
   color: var(--text-muted);
 }
-/* Memory modal -->
+/* Memory modal */
 .memory-modal {
   background: var(--bg-secondary);
   border: 1px solid var(--border);
