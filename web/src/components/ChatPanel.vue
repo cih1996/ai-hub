@@ -1128,7 +1128,15 @@ function formatToolInput(raw: string): string {
           @click="toggleAttention"
           :title="store.currentSession?.attention_enabled ? '关闭注意力模式' : '开启注意力模式（AI 先规划后执行）'"
         >
-          <span class="attention-icon">{{ store.currentSession?.attention_enabled ? '🎯' : '👁️' }}</span>
+          <svg class="attention-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <circle cx="12" cy="12" r="6"/>
+            <circle cx="12" cy="12" r="2"/>
+            <line x1="12" y1="2" x2="12" y2="4"/>
+            <line x1="12" y1="20" x2="12" y2="22"/>
+            <line x1="2" y1="12" x2="4" y2="12"/>
+            <line x1="20" y1="12" x2="22" y2="12"/>
+          </svg>
         </button>
         <div class="input-wrapper" :class="{ disabled: store.streaming }">
           <textarea
@@ -2053,8 +2061,14 @@ function formatToolInput(raw: string): string {
   box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
 }
 .btn-attention .attention-icon {
-  font-size: 18px;
-  line-height: 1;
+  color: var(--text-secondary);
+  transition: color var(--transition);
+}
+.btn-attention:hover .attention-icon {
+  color: var(--accent);
+}
+.btn-attention.active .attention-icon {
+  color: white;
 }
 .input-wrapper {
   flex: 1;
