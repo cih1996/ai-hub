@@ -57,8 +57,7 @@ var Vector *VectorEngine
 
 // InitVectorEngine initializes the vector engine
 func InitVectorEngine(_ string) {
-	home, _ := os.UserHomeDir()
-	baseDir := filepath.Join(home, ".ai-hub")
+	baseDir := GetDataDir()
 	modelDir := filepath.Join(baseDir, "models")
 	dataDir := filepath.Join(baseDir, "vector-data")
 

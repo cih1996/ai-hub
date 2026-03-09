@@ -38,11 +38,11 @@ var (
 
 func main() {
 	// CLI mode detection: if first arg is not a server flag, route to CLI
-	// Server flags: -port, -data
+	// Server flags: -port, -data, --data-dir
 	// CLI triggers: --version, --help, or any non-flag argument
 	if len(os.Args) > 1 {
 		firstArg := os.Args[1]
-		isServerFlag := firstArg == "-port" || firstArg == "-data"
+		isServerFlag := firstArg == "-port" || firstArg == "-data" || firstArg == "--data-dir"
 		if !isServerFlag {
 			cli.Version = Version
 			os.Exit(cli.Run(os.Args[1:]))
@@ -50,16 +50,22 @@ func main() {
 	}
 
 	port := flag.Int("port", 8080, "server port")
-	dataDir := flag.String("data", "", "data directory (default: ~/.ai-hub)")
+	dataDir := flag.String("data", "", "data directory (default: ~/.ai-hub or AI_HUB_DATA_DIR)")
+	dataDirLong := flag.String("data-dir", "", "data directory (alias for -data)")
 	flag.Parse()
 
-	if *dataDir == "" {
-		home, _ := os.UserHomeDir()
-		*dataDir = filepath.Join(home, ".ai-hub")
+	// Priority: --data-dir > -data > AI_HUB_DATA_DIR > ~/.ai-hub
+	effectiveDataDir := *dataDir
+	if *dataDirLong != "" {
+		effectiveDataDir = *dataDirLong
 	}
 
-	// Setup log file: ~/.ai-hub/logs/ai-hub.log (truncate on startup)
-	logDir := filepath.Join(*dataDir, "logs")
+	// Initialize global data directory (handles env var fallback)
+	core.InitDataDir(effectiveDataDir)
+	effectiveDataDir = core.GetDataDir()
+
+	// Setup log file: <data-dir>/logs/ai-hub.log (truncate on startup)
+	logDir := filepath.Join(effectiveDataDir, "logs")
 	os.MkdirAll(logDir, 0755)
 	logFile, err := os.OpenFile(filepath.Join(logDir, "ai-hub.log"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
@@ -67,9 +73,10 @@ func main() {
 	}
 	log.SetOutput(logFile)
 	log.SetFlags(log.LstdFlags)
+	log.Printf("[main] data directory: %s", effectiveDataDir)
 
 	// Init database
-	if err := store.Init(*dataDir); err != nil {
+	if err := store.Init(effectiveDataDir); err != nil {
 		log.Fatalf("Failed to init database: %v", err)
 	}
 	defer store.Close()
@@ -79,7 +86,7 @@ func main() {
 	core.Deps.AutoInstallClaude()
 
 	// Init template system
-	core.InitTemplates(*dataDir)
+	core.InitTemplates(effectiveDataDir)
 	core.SetPort(*port)
 
 	// Init persistent process pool
@@ -97,25 +104,25 @@ func main() {
 	api.SetVersion(Version)
 
 	// Init API data dir (for skills disable path)
-	api.InitDataDir(*dataDir)
+	api.InitDataDir(effectiveDataDir)
 
 	// Pass embedded default templates to API for "restore default" feature
 	api.SetDefaultTemplatesFS(claudeRulesFS)
 
-	// Install built-in skills to ~/.ai-hub/skills/
-	installBuiltinSkills(*dataDir)
+	// Install built-in skills to <data-dir>/skills/
+	installBuiltinSkills(effectiveDataDir)
 
 	// Migrate rules/rules/ → rules/ (flatten legacy nested structure)
-	migrateNestedRules(*dataDir)
+	migrateNestedRules(effectiveDataDir)
 
-	// Migrate team dirs: ~/.ai-hub/<团队名>/ → ~/.ai-hub/teams/<团队名>/
-	migrateTeamDirs(*dataDir)
+	// Migrate team dirs: <data-dir>/<团队名>/ → <data-dir>/teams/<团队名>/
+	migrateTeamDirs(effectiveDataDir)
 
 	// Install default rules (skip if already exists)
-	installClaudeRules(*dataDir)
+	installClaudeRules(effectiveDataDir)
 
-	// Create symlink: ~/.ai-hub/bin/ai-hub → self binary (for CLI in Claude subprocess)
-	installCLISymlink(*dataDir)
+	// Create symlink: <data-dir>/bin/ai-hub → self binary (for CLI in Claude subprocess)
+	installCLISymlink(effectiveDataDir)
 
 	// No longer render templates to ~/.claude/ — system prompt is built on-the-fly
 

@@ -46,8 +46,7 @@ type FileContentRequest struct {
 }
 
 func aiHubDir() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".ai-hub")
+	return core.GetDataDir()
 }
 
 func scopeDir(base, scope string) string {

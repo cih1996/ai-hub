@@ -24,14 +24,14 @@ type fileSnapshot struct {
 }
 
 // StartVectorWatcher begins polling watched directories.
-// Also discovers existing team-level memory dirs under ~/.ai-hub/teams/<groupname>/.
+// Also discovers existing team-level memory dirs under <data-dir>/teams/<groupname>/.
 func StartVectorWatcher() *VectorWatcher {
-	home, _ := os.UserHomeDir()
+	baseDir := GetDataDir()
 	dirs := map[string]string{
-		filepath.Join(home, ".ai-hub", "memory"): "memory",
+		filepath.Join(baseDir, "memory"): "memory",
 	}
-	// Discover existing team-level memory directories under ~/.ai-hub/teams/
-	teamsDir := filepath.Join(home, ".ai-hub", "teams")
+	// Discover existing team-level memory directories under <data-dir>/teams/
+	teamsDir := filepath.Join(baseDir, "teams")
 	if entries, err := os.ReadDir(teamsDir); err == nil {
 		for _, e := range entries {
 			if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
