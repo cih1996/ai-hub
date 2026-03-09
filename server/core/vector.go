@@ -127,7 +127,7 @@ func (v *VectorEngine) loadModel() error {
 	if err != nil {
 		// Provide manual download instructions on failure
 		return fmt.Errorf("模型加载失败: %w\n\n手动下载方法:\n1. 访问 %s/%s\n2. 下载所有文件到 %s\n3. 重启 AI Hub",
-			HFMirrorEndpoint, DefaultModelName, modelPath)
+			err, HFMirrorEndpoint, DefaultModelName, modelPath)
 	}
 
 	v.model = model
