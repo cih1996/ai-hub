@@ -92,6 +92,14 @@ export const switchProvider = (id: number, providerId: string) =>
 export const toggleAttention = (id: number, enabled: boolean) =>
   request<{ ok: boolean; attention_enabled: boolean; session_id: number }>(`/sessions/${id}/attention`, { method: 'PUT', body: JSON.stringify({ enabled }) })
 
+// Get attention rules
+export const getAttentionRules = (id: number) =>
+  request<{ session_id: number; attention_rules: string }>(`/sessions/${id}/attention-rules`)
+
+// Update attention rules
+export const updateAttentionRules = (id: number, rules: string) =>
+  request<{ ok: boolean; session_id: number; attention_rules: string }>(`/sessions/${id}/attention-rules`, { method: 'PUT', body: JSON.stringify({ rules }) })
+
 // Chat
 export const sendChat = (sessionId: number, content: string, workDir?: string, sessionRules?: string, providerId?: string, groupName?: string) =>
   request<{ session_id: number; status: string }>('/chat/send', {

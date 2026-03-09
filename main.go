@@ -190,6 +190,8 @@ func main() {
 		v1.GET("/sessions/:id/messages/:msg_id", api.GetMessageWithContext)
 		v1.PUT("/sessions/:id/provider", api.SwitchProvider)
 		v1.PUT("/sessions/:id/attention", api.ToggleAttention)
+		v1.GET("/sessions/:id/attention-rules", api.GetAttentionRules)
+		v1.PUT("/sessions/:id/attention-rules", api.UpdateAttentionRules)
 
 		// AI error tracking
 		v1.GET("/sessions/:id/errors", api.GetSessionErrors)

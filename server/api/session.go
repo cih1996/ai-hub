@@ -623,3 +623,53 @@ func ToggleAttention(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"ok": true, "attention_enabled": body.Enabled, "session_id": session.ID})
 }
+
+// GetAttentionRules returns the attention rules for a session.
+func GetAttentionRules(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid session id"})
+		return
+	}
+
+	session, err := store.GetSession(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"session_id": session.ID, "attention_rules": session.AttentionRules})
+}
+
+// UpdateAttentionRules updates the attention rules for a session.
+func UpdateAttentionRules(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid session id"})
+		return
+	}
+
+	var body struct {
+		Rules string `json:"rules"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	session, err := store.GetSession(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return
+	}
+
+	if err := store.UpdateAttentionRules(id, body.Rules); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Broadcast rules change to all WS clients
+	broadcast(WSMessage{Type: "attention_rules_update", SessionID: id, Content: body.Rules})
+
+	c.JSON(http.StatusOK, gin.H{"ok": true, "session_id": session.ID, "attention_rules": body.Rules})
+}

@@ -32,7 +32,7 @@ func CreateSession(s *model.Session) error {
 }
 
 func ListSessions() ([]model.Session, error) {
-	rows, err := DB.Query(`SELECT id, title, provider_id, claude_session_id, work_dir, group_name, last_compress_msg_id, attention_enabled, created_at, updated_at FROM sessions ORDER BY updated_at DESC`)
+	rows, err := DB.Query(`SELECT id, title, provider_id, claude_session_id, work_dir, group_name, last_compress_msg_id, attention_enabled, attention_rules, created_at, updated_at FROM sessions ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -40,7 +40,7 @@ func ListSessions() ([]model.Session, error) {
 	var list []model.Session
 	for rows.Next() {
 		var s model.Session
-		if err := rows.Scan(&s.ID, &s.Title, &s.ProviderID, &s.ClaudeSessionID, &s.WorkDir, &s.GroupName, &s.LastCompressMsgID, &s.AttentionEnabled, &s.CreatedAt, &s.UpdatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.Title, &s.ProviderID, &s.ClaudeSessionID, &s.WorkDir, &s.GroupName, &s.LastCompressMsgID, &s.AttentionEnabled, &s.AttentionRules, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			return nil, err
 		}
 		list = append(list, s)
@@ -51,8 +51,8 @@ func ListSessions() ([]model.Session, error) {
 func GetSession(id int64) (*model.Session, error) {
 	var s model.Session
 	err := DB.QueryRow(
-		`SELECT id, title, provider_id, claude_session_id, work_dir, group_name, last_compress_msg_id, attention_enabled, created_at, updated_at FROM sessions WHERE id = ?`, id,
-	).Scan(&s.ID, &s.Title, &s.ProviderID, &s.ClaudeSessionID, &s.WorkDir, &s.GroupName, &s.LastCompressMsgID, &s.AttentionEnabled, &s.CreatedAt, &s.UpdatedAt)
+		`SELECT id, title, provider_id, claude_session_id, work_dir, group_name, last_compress_msg_id, attention_enabled, attention_rules, created_at, updated_at FROM sessions WHERE id = ?`, id,
+	).Scan(&s.ID, &s.Title, &s.ProviderID, &s.ClaudeSessionID, &s.WorkDir, &s.GroupName, &s.LastCompressMsgID, &s.AttentionEnabled, &s.AttentionRules, &s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -396,6 +396,12 @@ func UpdateAttentionEnabled(sessionID int64, enabled bool) error {
 		val = 1
 	}
 	_, err := DB.Exec(`UPDATE sessions SET attention_enabled=?, updated_at=? WHERE id=?`, val, time.Now(), sessionID)
+	return err
+}
+
+// UpdateAttentionRules updates the attention rules for a session.
+func UpdateAttentionRules(sessionID int64, rules string) error {
+	_, err := DB.Exec(`UPDATE sessions SET attention_rules=?, updated_at=? WHERE id=?`, rules, time.Now(), sessionID)
 	return err
 }
 
