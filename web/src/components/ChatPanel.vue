@@ -375,7 +375,7 @@ onMounted(async () => {
 async function fixVectorEngine() {
   vectorFixing.value = true
   try {
-    await api.sendChat(0, '请执行系统自检，重点修复向量引擎问题。确保 Python3、pip、sentence-transformers 已安装，向量引擎正常运行。', undefined, '你是 AI Hub 系统维护专家。全自动修复，不要询问用户。修复完成后汇报结果。')
+    await api.sendChat(0, '请执行系统自检，重点检查向量引擎状态。确保模型已下载到 ~/.ai-hub/models/，向量引擎正常运行。', undefined, '你是 AI Hub 系统维护专家。全自动修复，不要询问用户。修复完成后汇报结果。')
     vectorError.value = '正在自动修复，请在新会话中查看进度...'
   } catch (e: any) {
     vectorError.value = '修复启动失败: ' + e.message

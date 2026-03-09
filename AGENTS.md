@@ -7,7 +7,6 @@
 - `server/core/`: runtime logic (Claude process pool, vector watcher/engine integration, templates).
 - `server/store/`: SQLite data access models and persistence.
 - `web/`: Vue 3 + TypeScript frontend (`src/views`, `src/components`, `src/stores`, `src/composables`).
-- `vector-engine/`: Python vector service scripts used by backend features.
 - `skills/`, `claude/`: embedded built-in skill/rule assets.
 - Build output: `dist/` and `web/dist/`.
 
