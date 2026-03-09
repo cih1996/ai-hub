@@ -6,6 +6,10 @@ interface MissingDep {
   name: string
   description: string
   install_cmd?: string
+  install_url?: string
+  needs_sudo?: boolean
+  copy_cmd?: string
+  hint?: string
   required: boolean
 }
 
@@ -26,6 +30,8 @@ interface InitStatus {
   has_session: boolean
   missing_deps: MissingDep[] | null
   deps_status: DepsStatus
+  platform: string
+  package_manager: string
 }
 
 interface Provider {
@@ -95,6 +101,15 @@ async function checkInitStatus() {
 async function installDep(dep: MissingDep) {
   if (!dep.install_cmd) return
 
+  // If needs sudo, show hint instead of auto-install
+  if (dep.needs_sudo) {
+    installProgress.value[dep.name] = {
+      status: 'needs_manual',
+      output: `需要管理员权限，请在终端手动执行:\n${dep.install_cmd}`
+    }
+    return
+  }
+
   installProgress.value[dep.name] = { status: 'installing', output: '' }
 
   try {
@@ -109,11 +124,34 @@ async function installDep(dep: MissingDep) {
       installProgress.value[dep.name] = { status: 'success', output: result.output }
       await checkInitStatus()
     } else {
-      installProgress.value[dep.name] = { status: 'error', output: result.error || result.output }
+      let errorMsg = result.error || result.output
+      if (result.hint) {
+        errorMsg += '\n提示: ' + result.hint
+      }
+      installProgress.value[dep.name] = { status: 'error', output: errorMsg }
     }
   } catch (e) {
     installProgress.value[dep.name] = { status: 'error', output: String(e) }
   }
+}
+
+async function copyCommand(cmd: string) {
+  try {
+    await navigator.clipboard.writeText(cmd)
+    // Show brief feedback
+    const btn = document.activeElement as HTMLElement
+    if (btn) {
+      const originalText = btn.textContent
+      btn.textContent = '已复制!'
+      setTimeout(() => { btn.textContent = originalText }, 1500)
+    }
+  } catch (e) {
+    console.error('Failed to copy:', e)
+  }
+}
+
+async function openUrl(url: string) {
+  window.open(url, '_blank')
 }
 
 async function installAllDeps() {
@@ -274,24 +312,60 @@ function skipGuide() {
                     <span class="dep-name">{{ dep.name }}</span>
                     <span v-if="dep.required" class="tag-required">必需</span>
                     <span v-else class="tag-optional">可选</span>
+                    <span v-if="dep.needs_sudo" class="tag-sudo">需要 sudo</span>
                   </div>
                   <p class="dep-desc">{{ dep.description }}</p>
+                  <p v-if="dep.hint" class="dep-hint">{{ dep.hint }}</p>
+
+                  <!-- Show install command for manual copy -->
+                  <div v-if="dep.install_cmd && (dep.needs_sudo || installProgress[dep.name]?.status === 'needs_manual' || installProgress[dep.name]?.status === 'error')" class="cmd-box">
+                    <code>{{ dep.install_cmd }}</code>
+                    <button class="btn-copy" @click="copyCommand(dep.install_cmd)" title="复制命令">复制</button>
+                  </div>
+
+                  <!-- Show error output -->
+                  <div v-if="installProgress[dep.name]?.status === 'error'" class="error-output">
+                    <pre>{{ installProgress[dep.name]?.output }}</pre>
+                  </div>
                 </div>
                 <div class="dep-action">
-                   <template v-if="installProgress[dep.name]">
+                  <template v-if="installProgress[dep.name]">
                     <span v-if="installProgress[dep.name]?.status === 'installing'" class="status-text installing">安装中...</span>
                     <span v-else-if="installProgress[dep.name]?.status === 'success'" class="status-text success">已安装</span>
+                    <span v-else-if="installProgress[dep.name]?.status === 'needs_manual'" class="status-text warning">手动安装</span>
                     <span v-else class="status-text error">失败</span>
                   </template>
-                  <button v-else class="btn-icon" @click="installDep(dep)" :disabled="!dep.install_cmd" title="安装">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M12 5V19M12 19L5 12M12 19L19 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                  </button>
+                  <template v-else>
+                    <button v-if="dep.install_cmd && !dep.needs_sudo" class="btn-icon" @click="installDep(dep)" title="自动安装">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M12 5V19M12 19L5 12M12 19L19 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                      </svg>
+                    </button>
+                    <button v-else-if="dep.install_url" class="btn-icon" @click="openUrl(dep.install_url)" title="打开下载页">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M18 13V19C18 20.1 17.1 21 16 21H5C3.9 21 3 20.1 3 19V8C3 6.9 3.9 6 5 6H11" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M15 3H21V9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M10 14L21 3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                      </svg>
+                    </button>
+                    <button v-else-if="dep.needs_sudo" class="btn-icon" @click="copyCommand(dep.install_cmd || '')" title="复制命令">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="9" y="9" width="13" height="13" rx="2" stroke="currentColor" stroke-width="2"/>
+                        <path d="M5 15H4C2.9 15 2 14.1 2 13V4C2 2.9 2.9 2 4 2H13C14.1 2 15 2.9 15 4V5" stroke="currentColor" stroke-width="2"/>
+                      </svg>
+                    </button>
+                  </template>
                 </div>
               </div>
-              
-              <button class="btn-secondary full-width" @click="installAllDeps">一键安装缺失项</button>
+
+              <!-- Platform info -->
+              <div v-if="initStatus" class="platform-info">
+                <span>平台: {{ initStatus.platform }}</span>
+                <span v-if="initStatus.package_manager !== 'none'">包管理器: {{ initStatus.package_manager }}</span>
+                <span v-else class="warning-text">未检测到包管理器</span>
+              </div>
+
+              <button class="btn-secondary full-width" @click="installAllDeps">一键安装可自动安装的项</button>
             </div>
 
             <div class="step-actions">
@@ -618,7 +692,7 @@ function skipGuide() {
   font-size: 15px;
 }
 
-.tag-required, .tag-optional {
+.tag-required, .tag-optional, .tag-sudo {
   font-size: 10px;
   padding: 2px 6px;
   border-radius: 4px;
@@ -637,12 +711,94 @@ function skipGuide() {
   color: var(--text-muted);
 }
 
+.tag-sudo {
+  background: var(--warning);
+  color: #000;
+}
+
 .dep-desc {
   font-size: 13px;
   color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.dep-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  font-style: italic;
+}
+
+.cmd-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: var(--bg-primary);
+  border-radius: 6px;
+  font-family: monospace;
+  font-size: 12px;
+  overflow-x: auto;
+}
+
+.cmd-box code {
+  flex: 1;
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+
+.btn-copy {
+  padding: 4px 8px;
+  font-size: 11px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-copy:hover {
+  background: var(--text-primary);
+  color: var(--bg-primary);
+}
+
+.error-output {
+  margin-top: 8px;
+  padding: 8px;
+  background: rgba(239, 68, 68, 0.1);
+  border-radius: 6px;
+  max-height: 100px;
+  overflow-y: auto;
+}
+
+.error-output pre {
+  font-size: 11px;
+  color: var(--danger);
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+}
+
+.platform-info {
+  display: flex;
+  gap: 16px;
+  padding: 12px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.platform-info .warning-text {
+  color: var(--warning);
+}
+
+.status-text.warning {
+  color: var(--warning);
 }
 
 .btn-icon {
