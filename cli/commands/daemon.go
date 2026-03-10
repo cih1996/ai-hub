@@ -195,7 +195,8 @@ func getLaunchdPlistPath() string {
 func getInstallPath() string {
 	switch runtime.GOOS {
 	case "darwin":
-		return "/usr/local/bin/ai-hub"
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, ".local", "bin", "ai-hub")
 	case "linux":
 		home, _ := os.UserHomeDir()
 		return filepath.Join(home, ".local", "bin", "ai-hub")
@@ -258,10 +259,10 @@ func installLaunchd(binaryPath string) int {
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <string>%s/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     </dict>
 </dict>
-</plist>`, launchdLabel, installPath, logPath, logPath, dataDir)
+</plist>`, launchdLabel, installPath, logPath, logPath, dataDir, home)
 
 	plistPath := getLaunchdPlistPath()
 	if err := os.WriteFile(plistPath, []byte(plist), 0644); err != nil {

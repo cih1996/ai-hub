@@ -703,7 +703,8 @@ func runSelfInstall() bool {
 func getInstallPath() string {
 	switch runtime.GOOS {
 	case "darwin":
-		return "/usr/local/bin/ai-hub"
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, ".local", "bin", "ai-hub")
 	case "linux":
 		home, _ := os.UserHomeDir()
 		return filepath.Join(home, ".local", "bin", "ai-hub")
@@ -921,10 +922,10 @@ func installLaunchdService(binaryPath string) bool {
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <string>%s/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     </dict>
 </dict>
-</plist>`, binaryPath, logPath, logPath, dataDir)
+</plist>`, binaryPath, logPath, logPath, dataDir, home)
 
 	if err := os.WriteFile(plistPath, []byte(plist), 0644); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to write plist: %v\n", err)
