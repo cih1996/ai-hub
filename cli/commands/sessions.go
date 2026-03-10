@@ -9,7 +9,7 @@ import (
 )
 
 // RunSessions executes the sessions command
-// Usage: ai-hub sessions [id] [messages] [--with-errors]
+// Usage: ai-hub sessions [id] [messages|move] [--with-errors]
 func RunSessions(c *client.Client, args []string) int {
 	// Check for --with-errors flag
 	var withErrors bool
@@ -37,6 +37,11 @@ func RunSessions(c *client.Client, args []string) int {
 	// Check for "messages" subcommand
 	if len(args) > 1 && args[1] == "messages" {
 		return sessionMessages(c, id, args[2:])
+	}
+
+	// Check for "move" subcommand
+	if len(args) > 1 && args[1] == "move" {
+		return sessionMove(c, id, args[2:])
 	}
 
 	return sessionDetail(c, id)
@@ -369,4 +374,47 @@ func showMessageWithContext(c *client.Client, sessionID, msgID int64, lines int)
 // ShowMessageWithContextPublic is exported for use by errors command
 func ShowMessageWithContextPublic(c *client.Client, sessionID, msgID int64, lines int) int {
 	return showMessageWithContext(c, sessionID, msgID, lines)
+}
+
+// sessionMove moves a session to a different group
+func sessionMove(c *client.Client, id int64, args []string) int {
+	var groupName string
+
+	// Parse --group flag
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--group" && i+1 < len(args) {
+			groupName = args[i+1]
+			break
+		}
+	}
+
+	if groupName == "" {
+		fmt.Fprintln(os.Stderr, "Usage: ai-hub sessions <id> move --group <group_name>")
+		fmt.Fprintln(os.Stderr, "  Use empty string to remove from group: --group \"\"")
+		return 1
+	}
+
+	body := map[string]string{"group_name": groupName}
+	respData, err := c.PUT(fmt.Sprintf("/sessions/%d/group", id), body)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return 1
+	}
+
+	var resp struct {
+		SessionID int64  `json:"session_id"`
+		OldGroup  string `json:"old_group"`
+		NewGroup  string `json:"new_group"`
+	}
+	json.Unmarshal(respData, &resp)
+
+	if resp.OldGroup == "" {
+		resp.OldGroup = "(none)"
+	}
+	if resp.NewGroup == "" {
+		resp.NewGroup = "(none)"
+	}
+
+	fmt.Printf("Session #%d moved: %s → %s\n", id, resp.OldGroup, resp.NewGroup)
+	return 0
 }

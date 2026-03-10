@@ -165,6 +165,15 @@ func migrate() error {
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	)`)
 
+	// Groups table
+	DB.Exec(`CREATE TABLE IF NOT EXISTS groups (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL UNIQUE,
+		description TEXT NOT NULL DEFAULT '',
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`)
+
 	return nil
 }
 

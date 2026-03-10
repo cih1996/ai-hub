@@ -202,6 +202,15 @@ func main() {
 		v1.GET("/sessions/:id/errors", api.GetSessionErrors)
 		v1.GET("/stats/errors", api.GetErrorStats)
 
+		// Session group transfer
+		v1.PUT("/sessions/:id/group", api.UpdateSessionGroup)
+
+		// Groups
+		v1.GET("/groups", api.ListGroups)
+		v1.POST("/groups", api.CreateGroup)
+		v1.GET("/groups/:name", api.GetGroup)
+		v1.DELETE("/groups/:name", api.DeleteGroup)
+
 		// Session rules
 		v1.GET("/session-rules/:id", api.GetSessionRules)
 		v1.PUT("/session-rules/:id", api.PutSessionRules)

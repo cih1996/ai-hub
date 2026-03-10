@@ -139,6 +139,8 @@ func Run(args []string) int {
 		return commands.RunEdit(c, commandArgs)
 	case "sessions":
 		return commands.RunSessions(c, commandArgs)
+	case "groups":
+		return commands.RunGroups(c, commandArgs)
 	case "send":
 		return commands.RunSend(c, commandArgs)
 	case "rules":
@@ -244,7 +246,14 @@ Sessions:
   sessions           List all sessions
   sessions <id>      Session detail
   sessions <id> messages   View recent messages
+  sessions <id> move --group <name>  Move session to group
   send               Send message to a session (0=new)
+
+Groups:
+  groups             List all groups
+  groups <name>      Group detail
+  groups create <name> [--desc <desc>]  Create group
+  groups delete <name>  Delete group
 
 Services:
   services           List all services
