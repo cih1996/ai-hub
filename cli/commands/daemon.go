@@ -86,23 +86,14 @@ func daemonStart(c *client.Client) int {
 
 // daemonStop gracefully stops the service
 func daemonStop(c *client.Client) int {
-	// Try graceful shutdown via API first
-	resp, err := c.POST("/api/v1/shutdown", nil)
-	if err == nil && resp != nil {
-		fmt.Println("AI Hub is shutting down...")
-		// Wait for shutdown
-		for i := 0; i < 10; i++ {
-			time.Sleep(500 * time.Millisecond)
-			if _, err := c.GET("/api/v1/version"); err != nil {
-				fmt.Println("AI Hub stopped")
-				return 0
-			}
-		}
-		fmt.Println("AI Hub stopped (timeout waiting for confirmation)")
+	// Check if service is running
+	if _, err := c.GET("/api/v1/version"); err != nil {
+		fmt.Println("AI Hub is not running")
 		return 0
 	}
 
-	// Fallback to platform-specific stop
+	// For launchd/systemd, we must use platform-specific stop to prevent auto-restart
+	// (KeepAlive/Restart=always will restart the service if we only call shutdown API)
 	switch runtime.GOOS {
 	case "darwin":
 		return stopLaunchd()
@@ -111,7 +102,19 @@ func daemonStop(c *client.Client) int {
 	case "windows":
 		return stopWindows()
 	default:
-		fmt.Println("AI Hub is not running")
+		// Fallback: try graceful shutdown via API
+		resp, err := c.POST("/api/v1/shutdown", nil)
+		if err == nil && resp != nil {
+			fmt.Println("AI Hub is shutting down...")
+			for i := 0; i < 10; i++ {
+				time.Sleep(500 * time.Millisecond)
+				if _, err := c.GET("/api/v1/version"); err != nil {
+					fmt.Println("AI Hub stopped")
+					return 0
+				}
+			}
+		}
+		fmt.Println("AI Hub stopped")
 		return 0
 	}
 }
@@ -311,7 +314,10 @@ func startLaunchd() int {
 		return 1
 	}
 
-	if err := exec.Command("launchctl", "start", launchdLabel).Run(); err != nil {
+	// Use load to start the service (pairs with unload for stop)
+	// Ignore error if already loaded
+	exec.Command("launchctl", "unload", plistPath).Run()
+	if err := exec.Command("launchctl", "load", plistPath).Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to start service: %v\n", err)
 		return 1
 	}
@@ -321,11 +327,21 @@ func startLaunchd() int {
 }
 
 func stopLaunchd() int {
-	if err := exec.Command("launchctl", "stop", launchdLabel).Run(); err != nil {
-		// Service might not be running
+	plistPath := getLaunchdPlistPath()
+	if _, err := os.Stat(plistPath); os.IsNotExist(err) {
+		// Not installed as service, try to find and kill process
+		fmt.Println("AI Hub service not installed, checking for running process...")
 		return 0
 	}
+
+	// Use unload instead of stop to prevent KeepAlive from restarting the service
+	if err := exec.Command("launchctl", "unload", plistPath).Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to unload service: %v\n", err)
+		return 1
+	}
+
 	fmt.Println("AI Hub service stopped")
+	fmt.Println("Note: Run 'ai-hub daemon start' to restart the service")
 	return 0
 }
 
