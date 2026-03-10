@@ -365,7 +365,6 @@ func getGitDep(pkgMgr string) MissingDep {
 // checkCommand checks if a command is available
 func checkCommand(name string, args ...string) bool {
 	cmd := exec.Command(name, args...)
-	cmd.Env = core.EnhancedEnv()
 	err := cmd.Run()
 	return err == nil
 }
@@ -374,7 +373,6 @@ func checkCommand(name string, args ...string) bool {
 func checkNpmPermissionIssue() bool {
 	// Check if npm global prefix is in a system directory
 	cmd := exec.Command("npm", "config", "get", "prefix")
-	cmd.Env = core.EnhancedEnv()
 	out, err := cmd.Output()
 	if err != nil {
 		return false

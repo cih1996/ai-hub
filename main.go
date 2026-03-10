@@ -43,6 +43,10 @@ var (
 )
 
 func main() {
+	// Expand PATH early so exec.Command LookPath can find node, npm, etc.
+	// Critical for launchd/systemd service mode where PATH is minimal.
+	core.InitEnhancedPATH()
+
 	// Set Windows console to UTF-8 to fix Chinese character display
 	if runtime.GOOS == "windows" {
 		exec.Command("cmd", "/c", "chcp", "65001").Run()

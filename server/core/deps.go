@@ -223,16 +223,20 @@ func generateHint(output string, globalDir string) string {
 
 func runCmd(name string, args ...string) (string, error) {
 	cmd := exec.Command(name, args...)
-	cmd.Env = EnhancedEnv()
 	out, err := cmd.Output()
 	return string(out), err
 }
 
 // EnhancedEnv returns os.Environ() with common binary paths appended to PATH.
-// This fixes detection failures when running as a launchd/systemd service
-// where PATH is minimal and doesn't include /usr/local/bin, /opt/homebrew/bin, etc.
+// Used for child process environments. For LookPath to work, call InitEnhancedPATH() at startup.
 func EnhancedEnv() []string {
-	env := os.Environ()
+	return os.Environ()
+}
+
+// InitEnhancedPATH expands the current process PATH with common binary locations.
+// Must be called early in main() so that exec.Command LookPath can find binaries
+// when running as a launchd/systemd service where PATH is minimal.
+func InitEnhancedPATH() {
 	extraPaths := []string{
 		"/usr/local/bin",
 		"/usr/bin",
@@ -243,10 +247,8 @@ func EnhancedEnv() []string {
 	if runtime.GOOS == "darwin" {
 		extraPaths = append(extraPaths, "/opt/homebrew/bin", "/opt/homebrew/sbin")
 	}
-	// Also add user-level paths
 	if home, err := os.UserHomeDir(); err == nil {
 		extraPaths = append(extraPaths,
-			filepath.Join(home, ".nvm/versions/node/*/bin"),
 			filepath.Join(home, ".local/bin"),
 			filepath.Join(home, "go/bin"),
 		)
@@ -260,13 +262,21 @@ func EnhancedEnv() []string {
 		}
 	}
 
-	for i, e := range env {
-		if strings.HasPrefix(e, "PATH=") {
-			env[i] = e + ":" + strings.Join(extraPaths, ":")
-			return env
+	currentPATH := os.Getenv("PATH")
+	// Deduplicate: only add paths not already present
+	existing := make(map[string]bool)
+	for _, p := range strings.Split(currentPATH, ":") {
+		existing[p] = true
+	}
+	var toAdd []string
+	for _, p := range extraPaths {
+		if !existing[p] {
+			toAdd = append(toAdd, p)
 		}
 	}
-	// No PATH found, set one
-	env = append(env, "PATH="+strings.Join(extraPaths, ":"))
-	return env
+	if len(toAdd) > 0 {
+		newPATH := currentPATH + ":" + strings.Join(toAdd, ":")
+		os.Setenv("PATH", newPATH)
+		log.Printf("[deps] Enhanced PATH with %d additional directories", len(toAdd))
+	}
 }
