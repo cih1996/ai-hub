@@ -151,6 +151,9 @@ ai-hub sessions 25 messages --limit 50
 # 发消息（session_id=0 创建新会话）
 ai-hub send 25 "你好"
 ai-hub send 0 "初始化" --group "团队A" --work-dir "/path/to/project"
+
+# 转移会话到其他团队
+ai-hub sessions 25 move --group "新团队"
 ```
 
 ### 调度模式
@@ -168,7 +171,46 @@ ai-hub send 0 "初始化" --group "团队A" --work-dir "/path/to/project"
 
 ---
 
-## §4 规则管理
+## §4 团队管理
+
+### CLI 命令
+
+```bash
+# 列出所有团队
+ai-hub groups
+
+# 查看团队详情（含会话列表）
+ai-hub groups "团队名"
+
+# 创建团队
+ai-hub groups create "团队名"
+ai-hub groups create "团队名" --desc "团队描述"
+
+# 删除团队（仅限空团队）
+ai-hub groups delete "团队名"
+```
+
+### API 接口
+
+```bash
+# 列出团队
+GET /api/v1/groups
+
+# 创建团队
+POST /api/v1/groups
+{"name": "团队名", "description": "描述"}
+
+# 删除团队
+DELETE /api/v1/groups/:name
+
+# 转移会话到其他团队
+PUT /api/v1/sessions/:id/group
+{"group_name": "新团队名"}
+```
+
+---
+
+## §5 规则管理
 
 ### CLI 命令
 
@@ -198,7 +240,7 @@ ai-hub rules delete 25
 
 ---
 
-## §5 笔记管理
+## §6 笔记管理
 
 ### CLI 命令
 
@@ -220,7 +262,7 @@ ai-hub notes delete todo.md
 
 ---
 
-## §6 定时器
+## §7 定时器
 
 ### CLI 命令
 
@@ -258,7 +300,7 @@ ai-hub triggers delete 1
 
 ---
 
-## §7 系统诊断
+## §8 系统诊断
 
 ### CLI 命令
 
@@ -290,7 +332,7 @@ grep -i "error\|forbidden\|timeout" ~/.ai-hub/logs/ai-hub.log | tail -20
 
 ---
 
-## §8 脚本引擎
+## §9 脚本引擎
 
 ### 规范
 
