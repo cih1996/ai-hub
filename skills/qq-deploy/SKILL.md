@@ -121,7 +121,7 @@ AI 自动检测网络环境：
 
 ```bash
 # 1. 获取端口
-PORT=${AI_HUB_PORT:-8080}
+PORT=${AI_HUB_PORT:-9527}
 # 2. 获取公网 IP
 PUBLIC_IP=$(curl -s --max-time 5 ifconfig.me)
 # 3. 检测公网可达性
@@ -185,7 +185,7 @@ NapCat 启动后自带 WebUI（默认 http://localhost:6099）。
 先获取可用会话列表：
 
 ```bash
-curl -s http://localhost:${AI_HUB_PORT:-8080}/api/v1/sessions | \
+curl -s http://localhost:${AI_HUB_PORT:-9527}/api/v1/sessions | \
   python3 -c "import sys,json; [print(f'#{s[\"id\"]} {s[\"name\"]}') for s in json.load(sys.stdin)]"
 ```
 
@@ -206,7 +206,7 @@ curl -s http://localhost:${AI_HUB_PORT:-8080}/api/v1/sessions | \
 用户确认会话 ID 后，执行：
 
 ```bash
-curl -s -X POST "http://localhost:${AI_HUB_PORT:-8080}/api/v1/channels" \
+curl -s -X POST "http://localhost:${AI_HUB_PORT:-9527}/api/v1/channels" \
   -H "Content-Type: application/json" \
   -d "{
     \"name\": \"QQ Bot\",
@@ -222,7 +222,7 @@ curl -s -X POST "http://localhost:${AI_HUB_PORT:-8080}/api/v1/channels" \
 询问用户需要分流的群号 / QQ 号及对应会话，然后执行：
 
 ```bash
-curl -s -X POST "http://localhost:${AI_HUB_PORT:-8080}/api/v1/channels" \
+curl -s -X POST "http://localhost:${AI_HUB_PORT:-9527}/api/v1/channels" \
   -H "Content-Type: application/json" \
   -d "{
     \"name\": \"QQ Bot\",
@@ -242,7 +242,7 @@ curl -s -X POST "http://localhost:${AI_HUB_PORT:-8080}/api/v1/channels" \
 ### 第三步：验证频道创建
 
 ```bash
-curl -s http://localhost:${AI_HUB_PORT:-8080}/api/v1/channels | \
+curl -s http://localhost:${AI_HUB_PORT:-9527}/api/v1/channels | \
   python3 -c "import sys,json; [print(f'#{c[\"id\"]} {c[\"name\"]} platform={c[\"platform\"]} session={c[\"session_id\"]}') for c in json.load(sys.stdin)]"
 ```
 

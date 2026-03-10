@@ -52,7 +52,7 @@ description: "飞书自建应用全自动部署。当需要在飞书开放平台
 ```bash
 echo $AI_HUB_PORT
 ```
-如果为空，默认使用 `8080`。
+如果为空，默认使用 `9527`。
 
 ### 2. 获取公网 IP
 
@@ -198,7 +198,7 @@ cloudflared tunnel --url http://localhost:<端口>
 先获取可用会话列表供用户选择：
 
 ```bash
-curl -s http://localhost:${AI_HUB_PORT:-8080}/api/v1/sessions | \
+curl -s http://localhost:${AI_HUB_PORT:-9527}/api/v1/sessions | \
   python3 -c "import sys,json; [print(f'#{s[\"id\"]} {s[\"name\"]}') for s in json.load(sys.stdin)]"
 ```
 
@@ -212,7 +212,7 @@ curl -s http://localhost:${AI_HUB_PORT:-8080}/api/v1/sessions | \
 用户确认会话 ID 后，AI 自动创建频道：
 
 ```bash
-curl -s -X POST "http://localhost:${AI_HUB_PORT:-8080}/api/v1/channels" \
+curl -s -X POST "http://localhost:${AI_HUB_PORT:-9527}/api/v1/channels" \
   -H "Content-Type: application/json" \
   -d "{
     \"name\": \"飞书 Bot\",
@@ -227,7 +227,7 @@ curl -s -X POST "http://localhost:${AI_HUB_PORT:-8080}/api/v1/channels" \
 
 ```bash
 # 检查频道是否创建成功
-curl -s http://localhost:${AI_HUB_PORT:-8080}/api/v1/channels | \
+curl -s http://localhost:${AI_HUB_PORT:-9527}/api/v1/channels | \
   python3 -c "import sys,json; [print(f'#{c[\"id\"]} {c[\"name\"]} platform={c[\"platform\"]} session={c[\"session_id\"]}') for c in json.load(sys.stdin)]"
 ```
 

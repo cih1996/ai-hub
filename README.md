@@ -53,7 +53,7 @@ chmod +x ai-hub-*
 ai-hub-windows-amd64.exe
 ```
 
-打开 `http://localhost:8080`
+打开 `http://localhost:9527`
 
 ### 从源码编译
 
@@ -75,13 +75,13 @@ make release  # 交叉编译所有平台（macOS/Linux/Windows）
 ./ai-hub [选项]
 
 选项:
-  --port <端口>    服务端口，默认 8080
+  --port <端口>    服务端口，默认 9527
   --data <目录>    数据目录，默认 ~/.ai-hub
 ```
 
 ### 首次使用
 
-1. 启动后打开浏览器访问 `http://localhost:8080`
+1. 启动后打开浏览器访问 `http://localhost:9527`
 2. 系统会自动检测 Node.js / npm / Claude Code CLI 是否已安装
 3. 如果 Claude Code CLI 未安装，页面顶部会提示一键安装
 4. 进入 Settings 页面添加 Provider（供应商配置）
@@ -94,7 +94,7 @@ make release  # 交叉编译所有平台（macOS/Linux/Windows）
 
 ## API 接口
 
-Base URL: `http://localhost:8080/api/v1`
+Base URL: `http://localhost:9527/api/v1`
 
 ### 发送消息
 
@@ -244,7 +244,7 @@ PUT 接口支持 partial update，可更新的字段：`content`、`trigger_time
 
 ## WebSocket
 
-连接地址：`ws://localhost:8080/ws/chat`
+连接地址：`ws://localhost:9527/ws/chat`
 
 WebSocket 用于接收实时推送，不用于发送消息。
 

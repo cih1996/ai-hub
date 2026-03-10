@@ -27,7 +27,7 @@ type GlobalFlags struct {
 
 // ParseGlobalFlags parses global flags from args
 func ParseGlobalFlags(args []string) (*GlobalFlags, []string, error) {
-	flags := &GlobalFlags{Port: 8080}
+	flags := &GlobalFlags{Port: 9527}
 
 	// Manual parsing: extract global flags from anywhere in args, leave the rest as remaining.
 	// This allows: ai-hub mem add --port 8081  (not just: ai-hub --port 8081 mem add)
@@ -81,7 +81,7 @@ func ParseGlobalFlags(args []string) (*GlobalFlags, []string, error) {
 	if flags.GroupName == "" {
 		flags.GroupName = os.Getenv("AI_HUB_GROUP_NAME")
 	}
-	if flags.Port == 8080 {
+	if flags.Port == 9527 {
 		if envPort := os.Getenv("AI_HUB_PORT"); envPort != "" {
 			if port, err := strconv.Atoi(envPort); err == nil {
 				flags.Port = port
@@ -227,7 +227,7 @@ Usage:
 Global Flags:
   --session <id>     Session ID (env: AI_HUB_SESSION_ID)
   --group <name>     Group name (env: AI_HUB_GROUP_NAME)
-  --port <port>      Server port (env: AI_HUB_PORT, default: 8080)
+  --port <port>      Server port (env: AI_HUB_PORT, default: 9527)
   --help             Show this help
   --version          Show version
 

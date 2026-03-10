@@ -27,7 +27,7 @@ CLI 命令自动继承以下环境变量（由 AI Hub 进程注入）：
 |------|------|
 | `AI_HUB_SESSION_ID` | 当前会话 ID |
 | `AI_HUB_GROUP_NAME` | 当前团队名 |
-| `AI_HUB_PORT` | 服务端口（默认 8080） |
+| `AI_HUB_PORT` | 服务端口（默认 9527） |
 
 也可通过全局 flag 覆盖：`--session <id>` / `--group <name>` / `--port <port>`
 

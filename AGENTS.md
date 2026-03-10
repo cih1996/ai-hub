@@ -17,7 +17,7 @@
 - `make release`: cross-compile macOS/Linux/Windows artifacts.
 - `make clean`: remove build artifacts.
 - `cd web && npm run dev`: start frontend dev server (Vite).
-- `go run . --port 8080`: run backend locally.
+- `go run . --port 9527`: run backend locally.
 
 ## Coding Style & Naming Conventions
 - Go: always `gofmt`-formatted (tabs, idiomatic Go naming, exported identifiers in PascalCase).

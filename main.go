@@ -664,7 +664,7 @@ func runSelfInstall() bool {
 			fmt.Printf("Upgrading AI Hub from %s to %s...\n", runningVersion, Version)
 			if upgradeService(selfPath, installPath) {
 				fmt.Printf("AI Hub upgraded to %s\n", Version)
-				openBrowser("http://localhost:8080")
+				openBrowser("http://localhost:9527")
 			}
 			return true
 		} else if cmp < 0 {
@@ -675,7 +675,7 @@ func runSelfInstall() bool {
 		} else {
 			// Same version, just open browser
 			fmt.Printf("AI Hub %s is already running\n", Version)
-			openBrowser("http://localhost:8080")
+			openBrowser("http://localhost:9527")
 			return true
 		}
 	}
@@ -685,7 +685,7 @@ func runSelfInstall() bool {
 		fmt.Println("AI Hub service is installed but not running. Starting...")
 		startService()
 		waitForService(5 * time.Second)
-		openBrowser("http://localhost:8080")
+		openBrowser("http://localhost:9527")
 		return true
 	}
 
@@ -694,7 +694,7 @@ func runSelfInstall() bool {
 	if installService(selfPath, installPath) {
 		fmt.Printf("AI Hub %s installed and started\n", Version)
 		waitForService(5 * time.Second)
-		openBrowser("http://localhost:8080")
+		openBrowser("http://localhost:9527")
 	}
 	return true
 }
@@ -747,7 +747,7 @@ func isServiceInstalled() bool {
 // getRunningVersion returns the version of the running service, or empty if not running
 func getRunningVersion() string {
 	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get("http://localhost:8080/api/v1/version")
+	resp, err := client.Get("http://localhost:9527/api/v1/version")
 	if err != nil {
 		return ""
 	}
@@ -842,7 +842,7 @@ func startService() {
 func stopService() {
 	// Try graceful shutdown via API first
 	client := &http.Client{Timeout: 2 * time.Second}
-	client.Post("http://localhost:8080/api/v1/shutdown", "application/json", nil)
+	client.Post("http://localhost:9527/api/v1/shutdown", "application/json", nil)
 	time.Sleep(500 * time.Millisecond)
 
 	// Fallback to platform-specific stop
@@ -861,7 +861,7 @@ func waitForService(timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	client := &http.Client{Timeout: 1 * time.Second}
 	for time.Now().Before(deadline) {
-		resp, err := client.Get("http://localhost:8080/api/v1/version")
+		resp, err := client.Get("http://localhost:9527/api/v1/version")
 		if err == nil {
 			resp.Body.Close()
 			return true
@@ -907,7 +907,7 @@ func installLaunchdService(binaryPath string) bool {
     <array>
         <string>%s</string>
         <string>-port</string>
-        <string>8080</string>
+        <string>9527</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -955,7 +955,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=%s -port 8080
+ExecStart=%s -port 9527
 WorkingDirectory=%s
 Restart=always
 RestartSec=5
@@ -1060,7 +1060,7 @@ func installWindowsService(binaryPath string) bool {
 	// Create a VBS script to launch AI Hub hidden (no console window)
 	vbsPath := filepath.Join(dataDir, "ai-hub-launcher.vbs")
 	vbsContent := fmt.Sprintf(`Set WshShell = CreateObject("WScript.Shell")
-WshShell.Run """%s"" -port 8080", 0, False
+WshShell.Run """%s"" -port 9527", 0, False
 `, strings.ReplaceAll(binaryPath, `\`, `\\`))
 
 	if err := os.WriteFile(vbsPath, []byte(vbsContent), 0644); err != nil {

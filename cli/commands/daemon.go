@@ -244,7 +244,7 @@ func installLaunchd(binaryPath string) int {
     <array>
         <string>%s</string>
         <string>-port</string>
-        <string>8080</string>
+        <string>9527</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -364,7 +364,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=%s -port 8080
+ExecStart=%s -port 9527
 WorkingDirectory=%s
 Restart=always
 RestartSec=5
@@ -470,7 +470,7 @@ func installWindows(binaryPath string) int {
 	// Create a VBS script to launch AI Hub hidden (no console window)
 	vbsPath := filepath.Join(dataDir, "ai-hub-launcher.vbs")
 	vbsContent := fmt.Sprintf(`Set WshShell = CreateObject("WScript.Shell")
-WshShell.Run """%s"" -port 8080", 0, False
+WshShell.Run """%s"" -port 9527", 0, False
 `, strings.ReplaceAll(installPath, `\`, `\\`))
 
 	if err := os.WriteFile(vbsPath, []byte(vbsContent), 0644); err != nil {
