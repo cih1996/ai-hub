@@ -847,7 +847,10 @@ func startService() {
 	case "linux":
 		exec.Command("systemctl", "--user", "start", "ai-hub").Run()
 	case "windows":
-		exec.Command("schtasks", "/Run", "/TN", "AIHub").Run()
+		// Use VBS launcher script (consistent with installWindowsService)
+		home, _ := os.UserHomeDir()
+		vbsPath := filepath.Join(home, ".ai-hub", "ai-hub-launcher.vbs")
+		exec.Command("wscript", vbsPath).Start()
 	}
 }
 
