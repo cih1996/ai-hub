@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Agent Dashboard</title>
+    <!-- Vue 3 -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Marked.js for Markdown -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#6366f1', // Indigo 500
+                        secondary: '#ec4899', // Pink 500
+                        dark: {
+                            bg: '#0f172a', // Slate 900
+                            card: '#1e293b', // Slate 800
+                            text: '#f1f5f9', // Slate 100
+                            border: '#334155' // Slate 700
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        .dark ::-webkit-scrollbar-thumb {
+            background: #475569;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+        .dark ::-webkit-scrollbar-thumb:hover {
+            background: #64748b;
+        }
+        
+        /* Markdown Styles */
+        .markdown-body p { margin-bottom: 0.75em; }
+        .markdown-body pre { background: rgba(0,0,0,0.1); padding: 10px; border-radius: 6px; overflow-x: auto; }
+        .dark .markdown-body pre { background: rgba(0,0,0,0.3); }
+        .markdown-body code { font-family: monospace; background: rgba(0,0,0,0.05); padding: 2px 4px; border-radius: 4px; }
+        .dark .markdown-body code { background: rgba(255,255,255,0.1); }
+        .markdown-body ul { list-style-type: disc; margin-left: 1.5em; margin-bottom: 0.75em; }
+        .markdown-body ol { list-style-type: decimal; margin-left: 1.5em; margin-bottom: 0.75em; }
+        
+        .fade-enter-active, .fade-leave-active { transition: opacity 0.3s ease; }
+        .fade-enter-from, .fade-leave-to { opacity: 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-900 dark:bg-dark-bg dark:text-dark-text transition-colors duration-300 h-screen overflow-hidden font-sans">
+    <div id="app" class="h-full flex flex-col">
+        
+        <!-- Top Navigation Bar -->
+        <header class="h-16 bg-white dark:bg-dark-card border-b border-gray-200 dark:border-dark-border flex items-center justify-between px-6 shadow-sm z-10 shrink-0">
+            <div class="flex items-center gap-4">
+                <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-secondary flex items-center justify-center text-white font-bold shadow-lg">
+                    <i class="fa-solid fa-robot"></i>
+                </div>
+                <h1 class="text-xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-primary to-secondary">
+                    AI Nexus
+                </h1>
+                
+                <!-- Breadcrumbs / Navigation -->
+                <div class="ml-8 flex items-center text-sm font-medium text-gray-500 dark:text-gray-400">
+                    <button @click="goHome" class="hover:text-primary transition-colors flex items-center gap-2">
+                        <i class="fa-solid fa-grid-2"></i> Dashboard
+                    </button>
+                    <template v-if="currentTeam">
+                        <i class="fa-solid fa-chevron-right text-xs mx-3 opacity-50"></i>
+                        <span class="text-gray-900 dark:text-white flex items-center gap-2">
+                            <i class="fa-solid fa-users"></i> {{ currentTeam }}
+                        </span>
+                    </template>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-4">
+                <!-- Theme Toggle -->
+                <button @click="toggleTheme" class="w-10 h-10 rounded-full flex items-center justify-center bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-gray-600 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-primary">
+                    <i v-if="isDark" class="fa-solid fa-sun text-yellow-400"></i>
+                    <i v-else class="fa-solid fa-moon text-indigo-600"></i>
+                </button>
+                
+                <div class="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden border border-gray-300 dark:border-gray-600">
+                    <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Admin" alt="User" class="w-full h-full object-cover">
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content Area -->
+        <main class="flex-1 overflow-hidden relative">
+            
+            <!-- Loading State -->
+            <div v-if="loading" class="absolute inset-0 flex items-center justify-center bg-white/80 dark:bg-dark-bg/80 z-50 backdrop-blur-sm">
+                <div class="flex flex-col items-center gap-3">
+                    <div class="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+                    <span class="text-sm font-medium text-gray-500 dark:text-gray-400">Syncing with Neural Network...</span>
+                </div>
+            </div>
+
+            <!-- Dashboard View (Team Selection) -->
+            <transition name="fade">
+                <div v-if="!currentTeam" class="h-full overflow-y-auto p-8">
+                    <div class="max-w-7xl mx-auto">
+                        <div class="mb-8">
+                            <h2 class="text-3xl font-bold mb-2">Operational Teams</h2>
+                            <p class="text-gray-500 dark:text-gray-400">Select a specialized unit to monitor activities and engage.</p>
+                        </div>
+
+                        <!-- Team Cards Grid -->
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            <div v-for="(members, teamName) in groupedTeams" :key="teamName" 
+                                 @click="selectTeam(teamName)"
+                                 class="group relative bg-white dark:bg-dark-card rounded-2xl p-6 border border-gray-200 dark:border-dark-border shadow-sm hover:shadow-xl hover:border-primary/50 dark:hover:border-primary/50 transition-all duration-300 cursor-pointer overflow-hidden">
+                                
+                                <!-- Decorative Background Gradient -->
+                                <div class="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-primary/10 to-secondary/10 rounded-bl-full -mr-10 -mt-10 transition-transform group-hover:scale-110"></div>
+                                
+                                <div class="relative z-10">
+                                    <div class="flex justify-between items-start mb-4">
+                                        <div class="w-12 h-12 rounded-xl bg-gray-100 dark:bg-gray-700/50 flex items-center justify-center text-xl text-primary group-hover:bg-primary group-hover:text-white transition-colors duration-300 shadow-inner">
+                                            <i class="fa-solid fa-layer-group"></i>
+                                        </div>
+                                        <span class="bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs font-bold px-3 py-1 rounded-full">
+                                            {{ members.length }} Agents
+                                        </span>
+                                    </div>
+                                    
+                                    <h3 class="text-xl font-bold mb-2 group-hover:text-primary transition-colors">{{ teamName }}</h3>
+                                    <p class="text-sm text-gray-500 dark:text-gray-400 line-clamp-2 h-10">
+                                        Active unit coordinating {{ members.map(m => m.title).join(', ') }}
+                                    </p>
+                                    
+                                    <!-- Avatars Preview -->
+                                    <div class="flex items-center mt-6 -space-x-3">
+                                        <div v-for="(member, idx) in members.slice(0, 4)" :key="member.id" 
+                                             class="w-8 h-8 rounded-full border-2 border-white dark:border-dark-card bg-gray-200 dark:bg-gray-600 overflow-hidden"
+                                             :style="{ zIndex: 5-idx }">
+                                            <img :src="getAvatar(member)" class="w-full h-full object-cover">
+                                        </div>
+                                        <div v-if="members.length > 4" class="w-8 h-8 rounded-full border-2 border-white dark:border-dark-card bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-xs font-bold text-gray-500 dark:text-gray-400 z-0">
+                                            +{{ members.length - 4 }}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </transition>
+
+            <!-- Team View (Master-Detail) -->
+            <transition name="fade">
+                <div v-if="currentTeam" class="h-full flex flex-col md:flex-row">
+                    
+                    <!-- Left Sidebar: Team Members -->
+                    <div class="w-full md:w-80 border-r border-gray-200 dark:border-dark-border bg-white dark:bg-dark-card flex flex-col shrink-0">
+                        <div class="p-4 border-b border-gray-200 dark:border-dark-border bg-gray-50/50 dark:bg-gray-800/50">
+                            <h3 class="font-bold text-gray-700 dark:text-gray-200 flex items-center gap-2">
+                                <i class="fa-solid fa-users-viewfinder text-primary"></i>
+                                {{ currentTeam }}
+                            </h3>
+                            <div class="mt-2 relative">
+                                <input type="text" placeholder="Filter agents..." class="w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg pl-9 pr-3 py-2 text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all">
+                                <i class="fa-solid fa-search absolute left-3 top-2.5 text-gray-400 text-xs"></i>
+                            </div>
+                        </div>
+                        
+                        <div class="flex-1 overflow-y-auto p-3 space-y-2">
+                            <div v-for="session in teamSessions" :key="session.id" 
+                                 @click="selectSession(session)"
+                                 class="p-3 rounded-xl cursor-pointer transition-all duration-200 border border-transparent group"
+                                 :class="currentSession?.id === session.id ? 'bg-primary/10 border-primary/20 shadow-sm' : 'hover:bg-gray-100 dark:hover:bg-gray-800'">
+                                <div class="flex items-start gap-3">
+                                    <div class="relative">
+                                        <div class="w-10 h-10 rounded-lg bg-gray-200 dark:bg-gray-700 overflow-hidden shadow-sm">
+                                            <img :src="getAvatar(session)" class="w-full h-full object-cover">
+                                        </div>
+                                        <div v-if="session.process_alive" class="absolute -bottom-1 -right-1 w-3 h-3 bg-green-500 border-2 border-white dark:border-dark-card rounded-full"></div>
+                                    </div>
+                                    <div class="flex-1 min-w-0">
+                                        <div class="flex justify-between items-center mb-0.5">
+                                            <h4 class="font-semibold text-sm truncate" :class="currentSession?.id === session.id ? 'text-primary' : 'text-gray-900 dark:text-gray-100'">{{ session.title }}</h4>
+                                            <span class="text-[10px] text-gray-400">{{ formatTime(session.updated_at) }}</span>
+                                        </div>
+                                        <p class="text-xs text-gray-500 dark:text-gray-400 truncate">
+                                            ID: {{ session.id }} • {{ session.provider_id ? 'Active' : 'Idle' }}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right Panel: Chat Interface -->
+                    <div class="flex-1 flex flex-col bg-gray-50 dark:bg-dark-bg h-full min-w-0">
+                        <template v-if="currentSession">
+                            <!-- Chat Header -->
+                            <div class="h-16 border-b border-gray-200 dark:border-dark-border bg-white/80 dark:bg-dark-card/80 backdrop-blur-md flex items-center justify-between px-6 shrink-0">
+                                <div class="flex items-center gap-3">
+                                    <div class="w-9 h-9 rounded-full bg-gradient-to-r from-primary to-secondary p-[2px]">
+                                        <div class="w-full h-full rounded-full bg-white dark:bg-dark-card overflow-hidden">
+                                            <img :src="getAvatar(currentSession)" class="w-full h-full object-cover">
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <h2 class="font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                                            {{ currentSession.title }}
+                                            <span v-if="currentSession.has_triggers" class="px-2 py-0.5 rounded-full bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 text-[10px] uppercase font-bold tracking-wider">Triggers</span>
+                                        </h2>
+                                        <p class="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2">
+                                            <span class="w-1.5 h-1.5 rounded-full" :class="currentSession.process_alive ? 'bg-green-500 animate-pulse' : 'bg-gray-400'"></span>
+                                            {{ currentSession.process_alive ? 'Online & Processing' : 'Offline' }}
+                                        </p>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-3 text-gray-400">
+                                    <button class="w-8 h-8 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-center transition-colors">
+                                        <i class="fa-solid fa-phone"></i>
+                                    </button>
+                                    <button class="w-8 h-8 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-center transition-colors">
+                                        <i class="fa-solid fa-video"></i>
+                                    </button>
+                                    <button class="w-8 h-8 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-center transition-colors">
+                                        <i class="fa-solid fa-ellipsis-vertical"></i>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Messages Area -->
+                            <div id="messages-container" class="flex-1 overflow-y-auto p-6 space-y-6 scroll-smooth">
+                                <div v-if="loadingMessages" class="flex justify-center py-8">
+                                    <div class="animate-bounce text-primary"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading conversation...</div>
+                                </div>
+                                
+                                <template v-else>
+                                    <div v-for="msg in messages" :key="msg.id" 
+                                         class="flex gap-4 group"
+                                         :class="msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'">
+                                        
+                                        <!-- Avatar -->
+                                        <div class="w-8 h-8 rounded-full overflow-hidden shrink-0 mt-1 shadow-sm border border-gray-200 dark:border-gray-700">
+                                            <img :src="msg.role === 'user' ? 'https://api.dicebear.com/7.x/avataaars/svg?seed=User' : getAvatar(currentSession)" class="w-full h-full object-cover">
+                                        </div>
+
+                                        <!-- Message Bubble -->
+                                        <div class="max-w-[70%]">
+                                            <div class="flex items-center gap-2 mb-1" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
+                                                <span class="text-xs font-bold text-gray-500 dark:text-gray-400">{{ msg.role === 'user' ? 'You' : currentSession.title }}</span>
+                                                <span class="text-[10px] text-gray-400">{{ formatTime(msg.created_at) }}</span>
+                                            </div>
+                                            
+                                            <div class="p-4 rounded-2xl shadow-sm text-sm leading-relaxed overflow-hidden relative"
+                                                 :class="msg.role === 'user' 
+                                                    ? 'bg-primary text-white rounded-tr-sm' 
+                                                    : 'bg-white dark:bg-dark-card border border-gray-200 dark:border-dark-border text-gray-800 dark:text-gray-200 rounded-tl-sm'">
+                                                
+                                                <div class="markdown-body" v-html="renderMarkdown(msg.content)"></div>
+                                                
+                                                <!-- Metadata/Tools Indicator -->
+                                                <div v-if="msg.metadata" class="mt-3 pt-3 border-t border-gray-200/20 text-xs opacity-70">
+                                                    <div class="flex items-center gap-1 cursor-help" title="Click to view raw metadata">
+                                                        <i class="fa-solid fa-terminal"></i> Tool Output Available
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div v-if="messages.length === 0" class="flex flex-col items-center justify-center h-full text-gray-400">
+                                        <i class="fa-regular fa-comments text-4xl mb-3"></i>
+                                        <p>No messages in this timeline yet.</p>
+                                    </div>
+                                </template>
+                            </div>
+
+                            <!-- Input Area (Mock) -->
+                            <div class="p-4 bg-white dark:bg-dark-card border-t border-gray-200 dark:border-dark-border shrink-0">
+                                <div class="flex gap-2 items-end bg-gray-100 dark:bg-gray-800 rounded-xl p-2 border border-transparent focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/20 transition-all">
+                                    <button class="w-8 h-8 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400 transition-colors">
+                                        <i class="fa-solid fa-plus"></i>
+                                    </button>
+                                    <textarea placeholder="Type a message to agent..." class="flex-1 bg-transparent border-none resize-none focus:ring-0 text-sm max-h-32 py-2 text-gray-800 dark:text-gray-200" rows="1"></textarea>
+                                    <button class="w-8 h-8 rounded-lg bg-primary text-white shadow-md hover:bg-indigo-600 transition-colors flex items-center justify-center">
+                                        <i class="fa-solid fa-paper-plane text-xs"></i>
+                                    </button>
+                                </div>
+                                <div class="text-center mt-2">
+                                    <p class="text-[10px] text-gray-400">AI agents may generate incorrect information.</p>
+                                </div>
+                            </div>
+                        </template>
+
+                        <!-- Empty State for Right Panel -->
+                        <div v-else class="flex-1 flex flex-col items-center justify-center text-gray-400 bg-gray-50/50 dark:bg-dark-bg/50">
+                            <div class="w-24 h-24 bg-gray-200 dark:bg-gray-800 rounded-full flex items-center justify-center mb-4 animate-pulse">
+                                <i class="fa-solid fa-users text-4xl text-gray-400 dark:text-gray-600"></i>
+                            </div>
+                            <h3 class="text-lg font-medium text-gray-600 dark:text-gray-300">Select an Agent</h3>
+                            <p class="text-sm max-w-xs text-center mt-2">Choose a team member from the sidebar to view their operational history and dialogue.</p>
+                        </div>
+                    </div>
+                </div>
+            </transition>
+        </main>
+    </div>
+
+    <script>
+        const { createApp, ref, computed, onMounted, watch } = Vue;
+
+        createApp({
+            setup() {
+                const isDark = ref(true); // Default to dark mode
+                const loading = ref(true);
+                const loadingMessages = ref(false);
+                const sessions = ref([]);
+                const currentTeam = ref(null);
+                const currentSession = ref(null);
+                const messages = ref([]);
+
+                // Initialize Theme
+                if (localStorage.theme === 'light') {
+                    isDark.value = false;
+                    document.documentElement.classList.remove('dark');
+                } else {
+                    document.documentElement.classList.add('dark');
+                }
+
+                const toggleTheme = () => {
+                    isDark.value = !isDark.value;
+                    if (isDark.value) {
+                        document.documentElement.classList.add('dark');
+                        localStorage.theme = 'dark';
+                    } else {
+                        document.documentElement.classList.remove('dark');
+                        localStorage.theme = 'light';
+                    }
+                };
+
+                const goHome = () => {
+                    currentTeam.value = null;
+                    currentSession.value = null;
+                };
+
+                // Group sessions by team
+                const groupedTeams = computed(() => {
+                    const groups = {};
+                    sessions.value.forEach(s => {
+                        const name = s.group_name || 'Unassigned Units';
+                        if (!groups[name]) groups[name] = [];
+                        groups[name].push(s);
+                    });
+                    return groups;
+                });
+
+                const teamSessions = computed(() => {
+                    if (!currentTeam.value) return [];
+                    return groupedTeams.value[currentTeam.value] || [];
+                });
+
+                const fetchSessions = async () => {
+                    try {
+                        const res = await fetch('http://localhost:9527/api/v1/sessions');
+                        if (!res.ok) throw new Error('Failed to fetch');
+                        const data = await res.json();
+                        // Sort by updated_at desc
+                        sessions.value = data.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+                    } catch (e) {
+                        console.error("API Error, using mock data for demo if empty");
+                        // Only use mock if fetch fails hard (e.g. CORS or server down)
+                        // For now we assume server is up as per user context
+                    } finally {
+                        loading.value = false;
+                    }
+                };
+
+                const selectTeam = (name) => {
+                    currentTeam.value = name;
+                    currentSession.value = null;
+                };
+
+                const selectSession = async (session) => {
+                    currentSession.value = session;
+                    loadingMessages.value = true;
+                    messages.value = [];
+                    try {
+                        const res = await fetch(`http://localhost:9527/api/v1/sessions/${session.id}/messages?limit=50`);
+                        const data = await res.json();
+                        // API returns { messages: [], ... }
+                        // We want chronological order for chat view (oldest top, newest bottom)
+                        // API usually returns newest first? Let's check.
+                        // Based on typical chat APIs, usually newest first for pagination.
+                        // We reverse it for display.
+                        if (data.messages) {
+                            messages.value = data.messages.reverse(); 
+                        }
+                    } catch (e) {
+                        console.error(e);
+                    } finally {
+                        loadingMessages.value = false;
+                        // Scroll to bottom
+                        setTimeout(() => {
+                            const container = document.getElementById('messages-container');
+                            if (container) container.scrollTop = container.scrollHeight;
+                        }, 100);
+                    }
+                };
+
+                const getAvatar = (session) => {
+                    // Generate consistent avatar based on ID or Title
+                    const seed = session.title || session.id;
+                    return `https://api.dicebear.com/7.x/bottts/svg?seed=${seed}&backgroundColor=transparent`;
+                };
+
+                const formatTime = (isoString) => {
+                    const date = new Date(isoString);
+                    const now = new Date();
+                    const diff = now - date;
+                    
+                    // If today, show time
+                    if (date.toDateString() === now.toDateString()) {
+                        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    }
+                    // If this year, show Month Day
+                    if (date.getFullYear() === now.getFullYear()) {
+                        return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+                    }
+                    return date.toLocaleDateString();
+                };
+
+                const renderMarkdown = (text) => {
+                    if (!text) return '';
+                    return marked.parse(text);
+                };
+
+                onMounted(() => {
+                    fetchSessions();
+                });
+
+                return {
+                    isDark,
+                    toggleTheme,
+                    loading,
+                    loadingMessages,
+                    groupedTeams,
+                    currentTeam,
+                    currentSession,
+                    teamSessions,
+                    messages,
+                    selectTeam,
+                    selectSession,
+                    goHome,
+                    getAvatar,
+                    formatTime,
+                    renderMarkdown
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
