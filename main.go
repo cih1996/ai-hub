@@ -13,6 +13,7 @@ import (
 	"io/fs"
 	"log"
 	"mime"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -67,7 +68,7 @@ func main() {
 		}
 	}
 
-	port := flag.Int("port", 8080, "server port")
+	port := flag.Int("port", 9527, "server port")
 	dataDir := flag.String("data", "", "data directory (default: ~/.ai-hub or AI_HUB_DATA_DIR)")
 	dataDirLong := flag.String("data-dir", "", "data directory (alias for -data)")
 	flag.Parse()
@@ -382,7 +383,19 @@ func main() {
 	}()
 
 	addr := fmt.Sprintf(":%d", *port)
+
+	// Check if port is available before starting
+	if err := checkPortAvailable(*port); err != nil {
+		fmt.Fprintf(os.Stderr, "\n❌ 端口 %d 已被占用\n\n", *port)
+		fmt.Fprintf(os.Stderr, "解决方案：\n")
+		fmt.Fprintf(os.Stderr, "  1. 使用其他端口启动：ai-hub -port 9528\n")
+		fmt.Fprintf(os.Stderr, "  2. 查找占用进程：lsof -i:%d (macOS/Linux) 或 netstat -ano | findstr %d (Windows)\n", *port, *port)
+		fmt.Fprintf(os.Stderr, "  3. 终止占用进程后重试\n\n")
+		os.Exit(1)
+	}
+
 	log.Printf("AI Hub running at http://localhost%s", addr)
+	fmt.Printf("AI Hub running at http://localhost%s\n", addr)
 	if err := r.Run(addr); err != nil {
 		log.Fatal(err)
 	}
@@ -1131,4 +1144,16 @@ func addWindowsPathConfig(installDir string) {
 
 	fmt.Printf("Added %s to user PATH\n", installDir)
 	fmt.Println("Note: Restart your terminal for PATH changes to take effect")
+}
+
+
+// checkPortAvailable checks if a port is available for binding
+func checkPortAvailable(port int) error {
+	addr := fmt.Sprintf(":%d", port)
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	ln.Close()
+	return nil
 }
