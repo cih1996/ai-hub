@@ -409,6 +409,9 @@ func main() {
 
 	addr := fmt.Sprintf(":%d", *port)
 
+	// Windows environment bootstrap (checks and fixes)
+	windowsBootstrap(*port)
+
 	// Check if port is available before starting
 	if err := checkPortAvailable(*port); err != nil {
 		fmt.Fprintf(os.Stderr, "\n❌ 端口 %d 已被占用\n\n", *port)
@@ -1185,4 +1188,110 @@ func checkPortAvailable(port int) error {
 	}
 	ln.Close()
 	return nil
+}
+
+// windowsBootstrap performs Windows-specific environment checks and fixes
+// Called at startup on Windows to ensure proper environment
+func windowsBootstrap(port int) {
+	if runtime.GOOS != "windows" {
+		return
+	}
+
+	fmt.Println()
+	fmt.Println("═══════════════════════════════════════════════════════════")
+	fmt.Println("  AI Hub 环境检测")
+	fmt.Println("═══════════════════════════════════════════════════════════")
+
+	// 1. Check admin privileges (informational only)
+	checkWindowsAdmin()
+
+	// 2. Check and fix PowerShell execution policy
+	checkWindowsPowerShellPolicy()
+
+	// 3. Check for Chinese characters in path
+	checkWindowsChinesePath()
+
+	// 4. Check Node.js
+	checkWindowsNodeJS()
+
+	fmt.Println()
+	fmt.Printf("  启动服务中... http://localhost:%d\n", port)
+	fmt.Println("═══════════════════════════════════════════════════════════")
+	fmt.Println()
+}
+
+// checkWindowsAdmin checks if running with admin privileges
+func checkWindowsAdmin() {
+	cmd := exec.Command("powershell", "-Command",
+		"([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)")
+	output, err := cmd.Output()
+	if err != nil {
+		fmt.Println("  [?] 管理员权限：无法检测")
+		return
+	}
+
+	isAdmin := strings.TrimSpace(string(output)) == "True"
+	if isAdmin {
+		fmt.Println("  [✓] 管理员权限：已获取")
+	} else {
+		fmt.Println("  [i] 管理员权限：普通用户（大部分功能正常）")
+	}
+}
+
+// checkWindowsPowerShellPolicy checks and fixes PowerShell execution policy
+func checkWindowsPowerShellPolicy() {
+	cmd := exec.Command("powershell", "-Command", "Get-ExecutionPolicy -Scope CurrentUser")
+	output, err := cmd.Output()
+	if err != nil {
+		fmt.Println("  [?] PowerShell 执行策略：无法检测")
+		return
+	}
+
+	policy := strings.TrimSpace(string(output))
+	if policy == "Restricted" || policy == "AllSigned" {
+		// Try to fix
+		fixCmd := exec.Command("powershell", "-Command",
+			"Set-ExecutionPolicy RemoteSigned -Scope CurrentUser -Force")
+		if err := fixCmd.Run(); err != nil {
+			fmt.Printf("  [✗] PowerShell 执行策略：%s（自动修复失败，npm 可能无法运行）\n", policy)
+		} else {
+			fmt.Println("  [✓] PowerShell 执行策略：已自动修复为 RemoteSigned")
+		}
+	} else {
+		fmt.Printf("  [✓] PowerShell 执行策略：%s\n", policy)
+	}
+}
+
+// checkWindowsChinesePath checks for Chinese characters in user path
+func checkWindowsChinesePath() {
+	home, _ := os.UserHomeDir()
+	exe, _ := os.Executable()
+
+	// Check for non-ASCII characters
+	hasNonASCII := false
+	for _, r := range home + exe {
+		if r > 127 {
+			hasNonASCII = true
+			break
+		}
+	}
+
+	if hasNonASCII {
+		fmt.Println("  [!] 路径检测：包含中文字符，可能影响部分功能")
+		fmt.Println("      建议将 AI Hub 安装到 C:\\ai-hub\\ 目录")
+	} else {
+		fmt.Println("  [✓] 路径检测：正常")
+	}
+}
+
+// checkWindowsNodeJS checks if Node.js is installed
+func checkWindowsNodeJS() {
+	cmd := exec.Command("node", "--version")
+	output, err := cmd.Output()
+	if err != nil {
+		fmt.Println("  [✗] Node.js：未安装 → 请在 Web 界面完成安装")
+	} else {
+		version := strings.TrimSpace(string(output))
+		fmt.Printf("  [✓] Node.js：%s\n", version)
+	}
 }
