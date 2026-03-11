@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, inject, onMounted } from 'vue'
+import { computed, ref, inject, onMounted, watch } from 'vue'
 import type { Ref } from 'vue'
 import type { Session } from '../types'
 import { useChatStore } from '../stores/chat'
@@ -27,6 +27,24 @@ const route = useRoute()
 
 const deleteTarget = ref<Session | null>(null)
 const version = ref('')
+
+// Highlight animation state
+const highlightSessionId = ref<number | null>(null)
+
+// Watch for input focus trigger to scroll and highlight current session
+watch(() => store.inputFocusTrigger, () => {
+  if (!store.currentSessionId) return
+  highlightSessionId.value = store.currentSessionId
+  // Scroll to the session item
+  const el = document.querySelector(`[data-session-id="${store.currentSessionId}"]`)
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }
+  // Remove highlight after animation
+  setTimeout(() => {
+    highlightSessionId.value = null
+  }, 1000)
+})
 
 // Context menu
 const ctxMenu = ref<{ x: number; y: number; session: Session } | null>(null)
@@ -155,7 +173,29 @@ const namedGroupTabs = computed<string[]>(() => {
 
 // Sessions filtered by the active group tab
 const displayGroupedSessions = computed<SessionGroup[]>(() => {
-  if (!activeGroupTab.value) return groupedSessions.value
+  if (!activeGroupTab.value) {
+    // Add "Recent" group with top 5 most recently updated sessions
+    const allSessions = [...store.sessions].sort((a, b) =>
+      new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+    )
+    const recentSessions = allSessions.slice(0, 5)
+    const recentIds = new Set(recentSessions.map(s => s.id))
+
+    // Build result with Recent group first
+    const result: SessionGroup[] = []
+    if (recentSessions.length > 0) {
+      result.push({ key: '__recent__', label: '常用', sessions: recentSessions })
+    }
+
+    // Add other groups, excluding sessions already in Recent
+    for (const group of groupedSessions.value) {
+      const filteredSessions = group.sessions.filter(s => !recentIds.has(s.id))
+      if (filteredSessions.length > 0) {
+        result.push({ ...group, sessions: filteredSessions })
+      }
+    }
+    return result
+  }
   const tab = activeGroupTab.value
   return groupedSessions.value.filter((g) => g.key === tab)
 })
@@ -330,8 +370,9 @@ onMounted(async () => {
         <div
           v-for="s in group.sessions"
           :key="s.id"
+          :data-session-id="s.id"
           class="session-item"
-          :class="{ active: s.id === store.currentSessionId }"
+          :class="{ active: s.id === store.currentSessionId, highlight: s.id === highlightSessionId }"
           @click="selectSession(s.id)"
           @contextmenu.prevent="openCtxMenu($event, s)"
         >
@@ -615,6 +656,13 @@ onMounted(async () => {
 }
 .session-item:hover { background: var(--bg-hover); }
 .session-item.active { background: var(--bg-active); }
+.session-item.highlight {
+  animation: highlight-pulse 1s ease-out;
+}
+@keyframes highlight-pulse {
+  0% { box-shadow: 0 0 0 2px var(--accent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
 .session-info { flex: 1; min-width: 0; }
 .session-id {
   flex-shrink: 0;

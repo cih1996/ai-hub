@@ -30,6 +30,12 @@ export const useChatStore = defineStore('chat', () => {
   const pendingProviderId = ref('')  // provider selected in new-chat dialog
   const pendingGroupName = ref('')   // group_name selected in new-chat dialog
 
+  // Input focus event trigger for sidebar highlight
+  const inputFocusTrigger = ref(0)
+  function triggerInputFocus() {
+    inputFocusTrigger.value++
+  }
+
   // Upstream quota/rate-limit warning (e.g. "You've hit your limit").
   const usageLimitWarning = ref('')
 
@@ -591,5 +597,7 @@ export const useChatStore = defineStore('chat', () => {
     providerSwitching,
     usageLimitWarning,
     clearUsageLimitWarning,
+    inputFocusTrigger,
+    triggerInputFocus,
   }
 })

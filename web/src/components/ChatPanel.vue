@@ -1249,6 +1249,7 @@ function formatToolInput(raw: string): string {
             :disabled="store.streaming"
             @keydown="onKeydown"
             @input="autoResize"
+            @focus="store.triggerInputFocus()"
             @compositionstart="isComposing = true"
             @compositionend="isComposing = false"
             :placeholder="store.streaming ? 'AI is responding...' : (store.currentSession?.attention_enabled ? '注意力模式：AI 会先规划再执行...' : 'Type a message... (Shift+Enter for new line)')"
