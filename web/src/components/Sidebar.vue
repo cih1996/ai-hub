@@ -134,8 +134,8 @@ interface SessionGroup {
 
 // Active group tab ('' = all sessions)
 const activeGroupTab = ref('')
-// Whether the session list is collapsed
-const sessionListCollapsed = ref(false)
+// Whether the recent sessions group is collapsed
+const recentCollapsed = ref(false)
 
 const groupedSessions = computed<SessionGroup[]>(() => {
   const groups = new Map<string, Session[]>()
@@ -334,48 +334,62 @@ onMounted(async () => {
 
     <!-- Group filter dropdown + collapse toggle -->
     <div class="session-area-header">
-      <select
-        v-if="namedGroupTabs.length > 0"
-        v-model="activeGroupTab"
-        class="group-filter"
-      >
-        <option value="">全部分组</option>
-        <option v-for="tab in namedGroupTabs" :key="tab" :value="tab">{{ tab }}</option>
-      </select>
+      <div class="group-filter-wrapper">
+        <svg class="group-filter-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
+          <circle cx="9" cy="7" r="4"/>
+          <path d="M23 21v-2a4 4 0 00-3-3.87"/>
+          <path d="M16 3.13a4 4 0 010 7.75"/>
+        </svg>
+        <select
+          v-model="activeGroupTab"
+          class="group-filter"
+        >
+          <option value="">全部团队</option>
+          <option v-for="tab in namedGroupTabs" :key="tab" :value="tab">{{ tab }}</option>
+        </select>
+      </div>
       <button
+        v-if="!activeGroupTab"
         class="collapse-btn"
-        :title="sessionListCollapsed ? '展开会话列表' : '折叠会话列表'"
-        @click="sessionListCollapsed = !sessionListCollapsed"
+        :class="{ collapsed: recentCollapsed }"
+        :title="recentCollapsed ? '展开常用' : '折叠常用'"
+        @click="recentCollapsed = !recentCollapsed"
       >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polyline v-if="sessionListCollapsed" points="6 9 12 15 18 9"/>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline v-if="recentCollapsed" points="6 9 12 15 18 9"/>
           <polyline v-else points="18 15 12 9 6 15"/>
         </svg>
       </button>
     </div>
 
-    <div v-show="!sessionListCollapsed" class="session-list">
+    <div class="session-list">
       <template v-for="group in displayGroupedSessions" :key="group.key">
         <div
           v-if="displayGroupedSessions.length > 1 || (activeGroupTab === '' && namedGroupTabs.length > 0)"
           class="group-label"
-          :class="{ 'group-label-clickable': namedGroupTabs.includes(group.key) }"
+          :class="{ 'group-label-clickable': namedGroupTabs.includes(group.key), 'group-label-recent': group.key === '__recent__' }"
           @click="namedGroupTabs.includes(group.key) && (teamDetailGroup = group.key)"
         >
+          <svg v-if="group.key === '__recent__'" class="group-label-star" width="11" height="11" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1">
+            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+          </svg>
           {{ group.label }}
           <svg v-if="namedGroupTabs.includes(group.key)" class="group-label-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
           </svg>
         </div>
-        <div
-          v-for="s in group.sessions"
-          :key="s.id"
-          :data-session-id="s.id"
-          class="session-item"
-          :class="{ active: s.id === store.currentSessionId, highlight: s.id === highlightSessionId }"
-          @click="selectSession(s.id)"
-          @contextmenu.prevent="openCtxMenu($event, s)"
-        >
+        <!-- Hide recent sessions when collapsed -->
+        <template v-if="!(group.key === '__recent__' && recentCollapsed)">
+          <div
+            v-for="s in group.sessions"
+            :key="s.id"
+            :data-session-id="s.id"
+            class="session-item"
+            :class="{ active: s.id === store.currentSessionId, highlight: s.id === highlightSessionId }"
+            @click="selectSession(s.id)"
+            @contextmenu.prevent="openCtxMenu($event, s)"
+          >
           <div class="session-info">
             <div class="session-title-row">
               <span
@@ -408,6 +422,7 @@ onMounted(async () => {
             </svg>
           </button>
         </div>
+        </template>
       </template>
       <div v-if="store.sessions.length === 0" class="no-sessions">
         暂无会话
@@ -580,41 +595,67 @@ onMounted(async () => {
 .session-area-header {
   display: flex;
   align-items: center;
-  padding: 6px 8px 2px;
-  gap: 4px;
+  padding: 8px;
+  gap: 6px;
   flex-shrink: 0;
+}
+.group-filter-wrapper {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.group-filter-icon {
+  position: absolute;
+  left: 8px;
+  color: var(--text-muted);
+  pointer-events: none;
 }
 .group-filter {
   flex: 1;
   min-width: 0;
-  height: 26px;
-  padding: 0 6px;
+  height: 30px;
+  padding: 0 8px 0 26px;
   background: var(--bg-tertiary);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius);
   font-size: 12px;
   color: var(--text-primary);
   cursor: pointer;
-  appearance: auto;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  transition: all var(--transition);
+}
+.group-filter:hover {
+  border-color: var(--text-muted);
 }
 .group-filter:focus {
   outline: none;
   border-color: var(--accent);
 }
 .collapse-btn {
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius);
   color: var(--text-muted);
   flex-shrink: 0;
   transition: all var(--transition);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
 }
 .collapse-btn:hover {
   color: var(--text-primary);
-  background: var(--bg-hover);
+  border-color: var(--text-muted);
+}
+.collapse-btn.collapsed {
+  color: var(--accent);
 }
 .session-list {
   flex: 1;
@@ -639,6 +680,13 @@ onMounted(async () => {
   transition: color var(--transition);
 }
 .group-label-clickable:hover {
+  color: var(--accent);
+}
+.group-label-recent {
+  color: var(--accent);
+}
+.group-label-star {
+  flex-shrink: 0;
   color: var(--accent);
 }
 .group-label-icon {
