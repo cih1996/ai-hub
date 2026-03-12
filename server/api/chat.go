@@ -484,6 +484,9 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 	}
 	fullResponse, metadataJSON, usageInput, usageOutput, usageCacheCreation, usageCacheRead, err = streamClaudeCode(ctx, provider, query, session.ClaudeSessionID, isResume, stream.Send, session.ID, session.WorkDir, session.GroupName, progressMsgID)
 
+	log.Printf("[chat-flow] session=%d streamClaudeCode returned: err=%v, fullResponse_len=%d, metadata_len=%d",
+		session.ID, err, len(fullResponse), len(metadataJSON))
+
 	if err != nil {
 		log.Printf("[chat] session=%d provider=%s error: %v", session.ID, provider.Name, err)
 		// Prefer proxy-captured usage on error path too (Issue #72)
@@ -552,10 +555,12 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 		maybeRunAttentionReview(session, fullResponse, provider)
 	} else {
 		// No content received — remove the empty pre-inserted message
+		log.Printf("[chat-flow] session=%d no content received, deleting empty message %d", session.ID, progressMsgID)
 		store.DeleteMessage(progressMsgID)
 	}
 
 	// Broadcast done so even reconnected/new WS clients receive it (stream.Send is single-client)
+	log.Printf("[chat-flow] session=%d broadcasting done event", session.ID)
 	broadcast(WSMessage{Type: "done", SessionID: session.ID, Content: metadataJSON})
 }
 
@@ -876,6 +881,8 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 			}
 
 		case "result":
+			log.Printf("[claude-flow] session %d: received result event, subtype=%s, is_error=%v, result_len=%d",
+				sessID, wrapper.Subtype, wrapper.IsError, len(wrapper.Result))
 			if wrapper.ConversationName != "" {
 				if err := store.UpdateSessionTitle(sessID, wrapper.ConversationName); err == nil {
 					broadcast(WSMessage{Type: "session_title_update", SessionID: sessID, Content: wrapper.ConversationName})
