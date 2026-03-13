@@ -66,7 +66,13 @@ func (d *DepsStatus) CheckAll() {
 }
 
 func (d *DepsStatus) checkClaude() {
-	if out, err := runCmd("claude", "--version"); err == nil {
+	// Windows npm global installs create .cmd files, not bare executables
+	claudeCmd := "claude"
+	if runtime.GOOS == "windows" {
+		claudeCmd = "claude.cmd"
+	}
+
+	if out, err := runCmd(claudeCmd, "--version"); err == nil {
 		d.ClaudeInstalled = true
 		d.ClaudeVersion = strings.TrimSpace(out)
 	} else {
