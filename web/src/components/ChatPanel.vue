@@ -921,6 +921,15 @@ function formatToolInput(raw: string): string {
           />
           <div v-else class="header-title" @click="startEditTitle" title="点击编辑标题">{{ store.currentSession.title }}</div>
           <div class="header-sub-row">
+            <span v-if="store.currentSession.group_name" class="header-team-badge" :title="'团队: ' + store.currentSession.group_name">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
+                <circle cx="9" cy="7" r="4"/>
+                <path d="M23 21v-2a4 4 0 00-3-3.87"/>
+                <path d="M16 3.13a4 4 0 010 7.75"/>
+              </svg>
+              {{ store.currentSession.group_name }}
+            </span>
             <div class="header-workdir">{{ displayWorkDir }}</div>
             <div class="provider-switcher" v-if="store.currentProvider">
               <button class="provider-badge" @click="providerDropdownOpen = !providerDropdownOpen" :disabled="store.streaming || store.providerSwitching" title="切换模型">
@@ -1773,6 +1782,22 @@ function formatToolInput(raw: string): string {
   margin: -2px -4px;
   outline: none;
   width: 100%;
+}
+.header-team-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--accent);
+  background: var(--accent-soft, rgba(124, 106, 239, 0.1));
+  padding: 2px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.header-team-badge svg {
+  opacity: 0.8;
 }
 .header-workdir {
   font-size: 12px;

@@ -133,11 +133,6 @@ interface SessionGroup {
   sessions: Session[]
 }
 
-// Active group tab ('' = all sessions)
-const activeGroupTab = ref('')
-// Whether the recent sessions group is collapsed
-const recentCollapsed = ref(false)
-
 const groupedSessions = computed<SessionGroup[]>(() => {
   const groups = new Map<string, Session[]>()
   for (const s of store.sessions) {
@@ -163,43 +158,32 @@ const groupedSessions = computed<SessionGroup[]>(() => {
   return result
 })
 
-// Unique named group tabs (only non-empty group_name, not work_dir paths)
-const namedGroupTabs = computed<string[]>(() => {
-  const names = new Set<string>()
-  for (const s of store.sessions) {
-    if (s.group_name) names.add(s.group_name)
-  }
-  return [...names].sort()
-})
+// Collapsed state for each group (persisted in localStorage)
+const COLLAPSED_KEY = 'ai-hub-sidebar-collapsed-groups'
+const collapsedGroups = ref<Set<string>>(new Set())
 
-// Sessions filtered by the active group tab
-const displayGroupedSessions = computed<SessionGroup[]>(() => {
-  if (!activeGroupTab.value) {
-    // Add "Recent" group with top 5 most recently updated sessions
-    const allSessions = [...store.sessions].sort((a, b) =>
-      new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
-    )
-    const recentSessions = allSessions.slice(0, 5)
-    const recentIds = new Set(recentSessions.map(s => s.id))
+// Load collapsed state from localStorage on init
+;(() => {
+  try {
+    const saved = localStorage.getItem(COLLAPSED_KEY)
+    if (saved) collapsedGroups.value = new Set(JSON.parse(saved))
+  } catch { /* ignore */ }
+})()
 
-    // Build result with Recent group first
-    const result: SessionGroup[] = []
-    if (recentSessions.length > 0) {
-      result.push({ key: '__recent__', label: '常用', sessions: recentSessions })
-    }
+function toggleGroupCollapse(groupKey: string) {
+  const s = new Set(collapsedGroups.value)
+  if (s.has(groupKey)) s.delete(groupKey)
+  else s.add(groupKey)
+  collapsedGroups.value = s
+  // Persist to localStorage
+  try {
+    localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...s]))
+  } catch { /* ignore */ }
+}
 
-    // Add other groups, excluding sessions already in Recent
-    for (const group of groupedSessions.value) {
-      const filteredSessions = group.sessions.filter(s => !recentIds.has(s.id))
-      if (filteredSessions.length > 0) {
-        result.push({ ...group, sessions: filteredSessions })
-      }
-    }
-    return result
-  }
-  const tab = activeGroupTab.value
-  return groupedSessions.value.filter((g) => g.key === tab)
-})
+function isGroupCollapsed(groupKey: string): boolean {
+  return collapsedGroups.value.has(groupKey)
+}
 
 function openNewChatDialog() {
   // Pre-select current default provider, reset group
@@ -310,6 +294,7 @@ onMounted(async () => {
           <path d="M16 3.13a4 4 0 010 7.75"/>
         </svg>
         <span>团队</span>
+        <span v-if="store.busySessionCount > 0" class="nav-badge busy-badge">{{ store.busySessionCount }}</span>
       </button>
       <button class="nav-item" :class="{ active: isExtensions }" @click="navTo('/extensions')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -348,55 +333,31 @@ onMounted(async () => {
       </button>
     </div>
 
-    <!-- Group filter dropdown + collapse toggle -->
-    <div class="session-area-header">
-      <div class="group-filter-wrapper">
-        <svg class="group-filter-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
-          <circle cx="9" cy="7" r="4"/>
-          <path d="M23 21v-2a4 4 0 00-3-3.87"/>
-          <path d="M16 3.13a4 4 0 010 7.75"/>
-        </svg>
-        <select
-          v-model="activeGroupTab"
-          class="group-filter"
-        >
-          <option value="">全部团队</option>
-          <option v-for="tab in namedGroupTabs" :key="tab" :value="tab">{{ tab }}</option>
-        </select>
-      </div>
-      <button
-        v-if="!activeGroupTab"
-        class="collapse-btn"
-        :class="{ collapsed: recentCollapsed }"
-        :title="recentCollapsed ? '展开常用' : '折叠常用'"
-        @click="recentCollapsed = !recentCollapsed"
-      >
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polyline v-if="recentCollapsed" points="6 9 12 15 18 9"/>
-          <polyline v-else points="18 15 12 9 6 15"/>
-        </svg>
-      </button>
-    </div>
-
     <div class="session-list">
-      <template v-for="group in displayGroupedSessions" :key="group.key">
+      <template v-for="group in groupedSessions" :key="group.key">
+        <!-- Only show group label for named teams (not default/empty group) -->
         <div
-          v-if="displayGroupedSessions.length > 1 || (activeGroupTab === '' && namedGroupTabs.length > 0)"
-          class="group-label"
-          :class="{ 'group-label-clickable': namedGroupTabs.includes(group.key), 'group-label-recent': group.key === '__recent__' }"
-          @click="namedGroupTabs.includes(group.key) && (teamDetailGroup = group.key)"
+          v-if="group.key !== ''"
+          class="group-label group-label-clickable"
+          @click="teamDetailGroup = group.key"
         >
-          <svg v-if="group.key === '__recent__'" class="group-label-star" width="11" height="11" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1">
-            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
-          </svg>
-          {{ group.label }}
-          <svg v-if="namedGroupTabs.includes(group.key)" class="group-label-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <span class="group-label-text">{{ group.label }}</span>
+          <svg class="group-label-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
           </svg>
+          <button
+            class="group-collapse-btn"
+            :title="isGroupCollapsed(group.key) ? '展开' : '收缩'"
+            @click.stop="toggleGroupCollapse(group.key)"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline v-if="isGroupCollapsed(group.key)" points="6 9 12 15 18 9"/>
+              <polyline v-else points="18 15 12 9 6 15"/>
+            </svg>
+          </button>
         </div>
-        <!-- Hide recent sessions when collapsed -->
-        <template v-if="!(group.key === '__recent__' && recentCollapsed)">
+        <!-- Sessions (hidden if group is collapsed) -->
+        <template v-if="group.key === '' || !isGroupCollapsed(group.key)">
           <div
             v-for="s in group.sessions"
             :key="s.id"
@@ -406,24 +367,24 @@ onMounted(async () => {
             @click="selectSession(s.id)"
             @contextmenu.prevent="openCtxMenu($event, s)"
           >
-          <div class="session-info">
-            <div class="session-title-row">
-              <span
-                v-if="s.process_alive"
-                class="process-dot"
-                :class="s.process_state === 'busy' ? 'busy' : 'idle'"
-                :title="s.process_state === 'busy' ? '运行中' : '空闲'"
-              ></span>
-              <svg v-if="s.streaming" class="streaming-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M21 12a9 9 0 11-6.219-8.56"/>
-              </svg>
-              <svg v-if="s.has_triggers" class="trigger-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
-              </svg>
-              <span class="session-id">#{{ s.id }}</span>
-              <div class="session-title">{{ s.title }}</div>
-            </div>
-            <div class="session-time">
+            <div class="session-info">
+              <div class="session-title-row">
+                <span
+                  v-if="s.process_alive"
+                  class="process-dot"
+                  :class="s.process_state === 'busy' ? 'busy' : 'idle'"
+                  :title="s.process_state === 'busy' ? '运行中' : '空闲'"
+                ></span>
+                <svg v-if="s.streaming" class="streaming-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 12a9 9 0 11-6.219-8.56"/>
+                </svg>
+                <svg v-if="s.has_triggers" class="trigger-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                </svg>
+                <span class="session-id">#{{ s.id }}</span>
+                <div class="session-title">{{ s.title }}</div>
+              </div>
+              <div class="session-time">
               {{ formatTime(s.updated_at) }}
               <span v-if="store.sessionTokenTotals?.[s.id]" class="session-token-tag" :title="(store.sessionTokenTotals![s.id] ?? 0).toLocaleString() + ' tokens'">
                 {{ formatTokens(store.sessionTokenTotals![s.id] ?? 0) }}
@@ -626,71 +587,18 @@ onMounted(async () => {
   background: var(--bg-active);
   color: var(--text-primary);
 }
-/* Session area header: group filter dropdown + collapse btn */
-.session-area-header {
-  display: flex;
-  align-items: center;
-  padding: 8px;
-  gap: 6px;
-  flex-shrink: 0;
+.nav-badge {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 10px;
+  min-width: 18px;
+  text-align: center;
 }
-.group-filter-wrapper {
-  flex: 1;
-  min-width: 0;
-  position: relative;
-  display: flex;
-  align-items: center;
-}
-.group-filter-icon {
-  position: absolute;
-  left: 8px;
-  color: var(--text-muted);
-  pointer-events: none;
-}
-.group-filter {
-  flex: 1;
-  min-width: 0;
-  height: 30px;
-  padding: 0 8px 0 26px;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  font-size: 12px;
-  color: var(--text-primary);
-  cursor: pointer;
-  appearance: none;
-  -webkit-appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 8px center;
-  transition: all var(--transition);
-}
-.group-filter:hover {
-  border-color: var(--text-muted);
-}
-.group-filter:focus {
-  outline: none;
-  border-color: var(--accent);
-}
-.collapse-btn {
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius);
-  color: var(--text-muted);
-  flex-shrink: 0;
-  transition: all var(--transition);
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border);
-}
-.collapse-btn:hover {
-  color: var(--text-primary);
-  border-color: var(--text-muted);
-}
-.collapse-btn.collapsed {
-  color: var(--accent);
+.busy-badge {
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
 }
 .session-list {
   flex: 1;
@@ -717,16 +625,31 @@ onMounted(async () => {
 .group-label-clickable:hover {
   color: var(--accent);
 }
-.group-label-recent {
-  color: var(--accent);
-}
-.group-label-star {
-  flex-shrink: 0;
-  color: var(--accent);
+.group-label-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .group-label-icon {
   flex-shrink: 0;
   opacity: 0.6;
+}
+.group-collapse-btn {
+  margin-left: auto;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: all var(--transition);
+}
+.group-collapse-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
 }
 .session-item {
   display: flex;

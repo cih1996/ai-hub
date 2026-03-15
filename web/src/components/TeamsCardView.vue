@@ -24,9 +24,9 @@ const groupedTeams = computed(() => {
   return groups
 })
 
-// Count active sessions (streaming or process_alive)
-function getActiveCount(sessions: Session[]): number {
-  return sessions.filter(s => s.streaming || s.process_alive).length
+// Count streaming sessions (in conversation)
+function getBusyCount(sessions: Session[]): number {
+  return sessions.filter(s => s.streaming).length
 }
 
 // Get avatar URL for session
@@ -76,8 +76,8 @@ onMounted(() => {
           </div>
           <div class="team-badges">
             <span class="team-badge member-badge">{{ sessions.length }} 成员</span>
-            <span v-if="getActiveCount(sessions) > 0" class="team-badge active-badge">
-              {{ getActiveCount(sessions) }} 活跃
+            <span v-if="getBusyCount(sessions) > 0" class="team-badge active-badge">
+              {{ getBusyCount(sessions) }} 对话中
             </span>
           </div>
         </div>

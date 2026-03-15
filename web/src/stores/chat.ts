@@ -71,6 +71,11 @@ export const useChatStore = defineStore('chat', () => {
     sessions.value.find((s) => s.id === currentSessionId.value)
   )
 
+  // Count of sessions currently streaming (in conversation)
+  const busySessionCount = computed(() =>
+    sessions.value.filter((s) => s.streaming).length
+  )
+
   const defaultProvider = computed(() =>
     providers.value.find((p) => p.is_default) || providers.value[0]
   )
@@ -566,6 +571,7 @@ export const useChatStore = defineStore('chat', () => {
     sessions,
     currentSessionId,
     currentSession,
+    busySessionCount,
     messages,
     providers,
     defaultProvider,
