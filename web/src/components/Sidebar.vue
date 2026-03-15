@@ -237,6 +237,13 @@ function formatTokens(n: number): string {
   return String(n)
 }
 
+function getSessionIcon(s: Session): string {
+  if (s.icon) return `/avatars/${s.icon}`
+  // Default icon based on session ID
+  const index = (s.id % 50) + 1
+  return `/avatars/avatar${index}.svg`
+}
+
 // Load session token totals on mount
 onMounted(async () => {
   if (!store.sessionTokenTotals) store.sessionTokenTotals = {}
@@ -367,6 +374,7 @@ onMounted(async () => {
             @click="selectSession(s.id)"
             @contextmenu.prevent="openCtxMenu($event, s)"
           >
+            <img :src="getSessionIcon(s)" class="session-icon" alt="" />
             <div class="session-info">
               <div class="session-title-row">
                 <span
@@ -659,6 +667,13 @@ onMounted(async () => {
   cursor: pointer;
   transition: background var(--transition);
   margin-bottom: 2px;
+}
+.session-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  margin-right: 10px;
+  flex-shrink: 0;
 }
 .session-item:hover { background: var(--bg-hover); }
 .session-item.active { background: var(--bg-active); }

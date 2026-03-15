@@ -5,6 +5,7 @@ import { marked } from 'marked'
 import { useChatStore } from '../stores/chat'
 import * as api from '../composables/api'
 import type { StepsMetadata, Message } from '../types'
+import IconPicker from './IconPicker.vue'
 
 const isMobile = inject<Ref<boolean>>('isMobile', ref(false))
 const openSidebar = inject<() => void>('openSidebar', () => {})
@@ -734,6 +735,19 @@ async function deleteSessionRules() {
   sessionRulesContent.value = ''
 }
 
+async function updateSessionIcon(icon: string) {
+  const session = store.currentSession
+  if (!session) return
+  try {
+    await api.updateSession(session.id, { icon })
+    // Update local state
+    session.icon = icon
+    showToast('图标已更新')
+  } catch (e: any) {
+    showToast('更新失败: ' + (e.message || '未知错误'), 'error')
+  }
+}
+
 // Memory functions
 const filteredMemoryFiles = computed(() => {
   if (memoryLevelFilter.value === 'all') return memoryFiles.value
@@ -1285,8 +1299,17 @@ function formatToolInput(raw: string): string {
       <div v-if="showSessionRulesModal" class="modal-overlay" @click="showSessionRulesModal = false">
         <div class="rules-modal" @click.stop>
           <div class="rules-modal-header">
-            <span class="rules-modal-title">会话规则</span>
-            <span class="rules-modal-dir">会话 #{{ store.currentSession?.id }}</span>
+            <div class="rules-modal-icon">
+              <IconPicker
+                :model-value="store.currentSession?.icon || ''"
+                :entity-id="store.currentSession?.id"
+                @update:model-value="updateSessionIcon"
+              />
+            </div>
+            <div class="rules-modal-title-group">
+              <span class="rules-modal-title">会话规则</span>
+              <span class="rules-modal-dir">会话 #{{ store.currentSession?.id }}</span>
+            </div>
             <button class="rules-modal-close" @click="showSessionRulesModal = false">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M18 6L6 18M6 6l12 12"/>
@@ -2334,6 +2357,12 @@ function formatToolInput(raw: string): string {
 }
 .rules-modal-dir {
   font-size: 12px; color: var(--text-muted); flex: 1;
+}
+.rules-modal-icon {
+  flex-shrink: 0;
+}
+.rules-modal-title-group {
+  display: flex; flex-direction: column; gap: 2px; flex: 1;
 }
 .rules-modal-close {
   width: 28px; height: 28px;

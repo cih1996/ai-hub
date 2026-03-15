@@ -47,6 +47,7 @@ func isOllamaBaseURL(raw string) bool {
 type Session struct {
 	ID                int64     `json:"id"`
 	Title             string    `json:"title"`
+	Icon              string    `json:"icon"`                 // 图标文件名，如 avatar1.svg
 	ProviderID        string    `json:"provider_id"`
 	ClaudeSessionID   string    `json:"claude_session_id"`    // UUID for Claude Code CLI --session-id
 	WorkDir           string    `json:"work_dir"`             // 工作目录，空 = 系统默认(home)
@@ -168,6 +169,7 @@ type Service struct {
 type Group struct {
 	ID          int64  `json:"id"`
 	Name        string `json:"name"`
+	Icon        string `json:"icon"` // 图标文件名，如 avatar1.svg
 	Description string `json:"description"`
 	CreatedAt   string `json:"created_at"`
 	UpdatedAt   string `json:"updated_at"`

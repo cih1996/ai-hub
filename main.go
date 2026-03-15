@@ -40,6 +40,9 @@ var claudeRulesFS embed.FS
 //go:embed demo.html
 var demoHTML []byte
 
+//go:embed avatars/*
+var avatarsFS embed.FS
+
 var (
 	Version = "dev"
 	BuildAt = ""
@@ -224,6 +227,7 @@ func main() {
 		v1.GET("/groups", api.ListGroups)
 		v1.POST("/groups", api.CreateGroup)
 		v1.GET("/groups/:name", api.GetGroup)
+		v1.PUT("/groups/:name", api.UpdateGroup)
 		v1.DELETE("/groups/:name", api.DeleteGroup)
 
 		// Session rules
@@ -345,6 +349,28 @@ func main() {
 	// Serve new version (demo.html) at /new
 	r.GET("/new", func(c *gin.Context) {
 		c.Data(200, "text/html; charset=utf-8", demoHTML)
+	})
+
+	// Serve avatars
+	r.GET("/avatars/:name", func(c *gin.Context) {
+		name := c.Param("name")
+		data, err := avatarsFS.ReadFile("avatars/" + name)
+		if err != nil {
+			c.Status(404)
+			return
+		}
+		c.Data(200, "image/svg+xml", data)
+	})
+	// List all avatars
+	r.GET("/api/v1/avatars", func(c *gin.Context) {
+		entries, _ := avatarsFS.ReadDir("avatars")
+		var names []string
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".svg") {
+				names = append(names, e.Name())
+			}
+		}
+		c.JSON(200, names)
 	})
 
 	// Serve frontend

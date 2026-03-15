@@ -7,7 +7,7 @@ import (
 
 // ListGroups returns all groups ordered by name
 func ListGroups() ([]model.Group, error) {
-	rows, err := DB.Query(`SELECT id, name, description, created_at, updated_at FROM groups ORDER BY name`)
+	rows, err := DB.Query(`SELECT id, name, icon, description, created_at, updated_at FROM groups ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -16,7 +16,7 @@ func ListGroups() ([]model.Group, error) {
 	var groups []model.Group
 	for rows.Next() {
 		var g model.Group
-		if err := rows.Scan(&g.ID, &g.Name, &g.Description, &g.CreatedAt, &g.UpdatedAt); err != nil {
+		if err := rows.Scan(&g.ID, &g.Name, &g.Icon, &g.Description, &g.CreatedAt, &g.UpdatedAt); err != nil {
 			return nil, err
 		}
 		groups = append(groups, g)
@@ -27,8 +27,8 @@ func ListGroups() ([]model.Group, error) {
 // GetGroupByName returns a group by name
 func GetGroupByName(name string) (*model.Group, error) {
 	var g model.Group
-	err := DB.QueryRow(`SELECT id, name, description, created_at, updated_at FROM groups WHERE name = ?`, name).
-		Scan(&g.ID, &g.Name, &g.Description, &g.CreatedAt, &g.UpdatedAt)
+	err := DB.QueryRow(`SELECT id, name, icon, description, created_at, updated_at FROM groups WHERE name = ?`, name).
+		Scan(&g.ID, &g.Name, &g.Icon, &g.Description, &g.CreatedAt, &g.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -56,6 +56,14 @@ func CreateGroup(name, description string) (*model.Group, error) {
 // DeleteGroup deletes a group by name
 func DeleteGroup(name string) error {
 	_, err := DB.Exec(`DELETE FROM groups WHERE name = ?`, name)
+	return err
+}
+
+// UpdateGroup updates a group's icon and description
+func UpdateGroup(name string, icon string, description string) error {
+	now := time.Now().Format(time.RFC3339)
+	_, err := DB.Exec(`UPDATE groups SET icon = ?, description = ?, updated_at = ? WHERE name = ?`,
+		icon, description, now, name)
 	return err
 }
 

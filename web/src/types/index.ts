@@ -16,6 +16,7 @@ export interface Provider {
 export interface Session {
   id: number
   title: string
+  icon: string
   provider_id: string
   work_dir: string
   group_name: string

@@ -123,6 +123,44 @@ func DeleteGroup(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "group deleted"})
 }
 
+// UpdateGroup updates a group's icon and description
+func UpdateGroup(c *gin.Context) {
+	name := c.Param("name")
+
+	// Check if group exists
+	group, err := store.GetGroupByName(name)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "group not found"})
+		return
+	}
+
+	var req struct {
+		Icon        *string `json:"icon"`
+		Description *string `json:"description"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Merge with existing values
+	icon := group.Icon
+	description := group.Description
+	if req.Icon != nil {
+		icon = *req.Icon
+	}
+	if req.Description != nil {
+		description = *req.Description
+	}
+
+	if err := store.UpdateGroup(name, icon, description); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "group updated"})
+}
+
 // UpdateSessionGroup moves a session to a different group
 func UpdateSessionGroup(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)

@@ -1,27 +1,46 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useChatStore } from '../stores/chat'
 import { useRouter } from 'vue-router'
 import type { Session } from '../types'
+import IconPicker from './IconPicker.vue'
+
+interface Group {
+  id: number
+  name: string
+  icon: string
+  description: string
+  session_count: number
+}
 
 const store = useChatStore()
 const router = useRouter()
 
+// Groups data from API
+const groups = ref<Group[]>([])
+const groupsMap = computed(() => {
+  const map: Record<string, Group> = {}
+  for (const g of groups.value) {
+    map[g.name] = g
+  }
+  return map
+})
+
 // Group sessions by group_name
 const groupedTeams = computed(() => {
-  const groups: Record<string, Session[]> = {}
+  const result: Record<string, Session[]> = {}
   for (const s of store.sessions) {
     const name = s.group_name || '未分组'
-    if (!groups[name]) groups[name] = []
-    groups[name].push(s)
+    if (!result[name]) result[name] = []
+    result[name].push(s)
   }
   // Sort sessions within each group by updated_at desc
-  for (const name in groups) {
-    groups[name]!.sort((a, b) =>
+  for (const name in result) {
+    result[name]!.sort((a, b) =>
       new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
     )
   }
-  return groups
+  return result
 })
 
 // Count streaming sessions (in conversation)
@@ -29,10 +48,11 @@ function getBusyCount(sessions: Session[]): number {
   return sessions.filter(s => s.streaming).length
 }
 
-// Get avatar URL for session
+// Get avatar URL for session (use local icons)
 function getAvatar(session: Session): string {
-  const seed = session.title || session.id
-  return `https://api.dicebear.com/7.x/bottts/svg?seed=${seed}&backgroundColor=transparent`
+  if (session.icon) return `/avatars/${session.icon}`
+  const index = (session.id % 50) + 1
+  return `/avatars/avatar${index}.svg`
 }
 
 // Navigate to team's first session
@@ -43,9 +63,37 @@ function openTeam(teamName: string) {
   }
 }
 
+// Update team icon
+async function updateTeamIcon(teamName: string, icon: string) {
+  try {
+    await fetch(`/api/v1/groups/${encodeURIComponent(teamName)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ icon })
+    })
+    // Refresh groups
+    await loadGroups()
+  } catch (e) {
+    console.error('Failed to update team icon:', e)
+  }
+}
+
+// Load groups from API
+async function loadGroups() {
+  try {
+    const res = await fetch('/api/v1/groups')
+    if (res.ok) {
+      groups.value = await res.json()
+    }
+  } catch (e) {
+    console.error('Failed to load groups:', e)
+  }
+}
+
 // Load sessions on mount
 onMounted(() => {
   store.loadSessions()
+  loadGroups()
 })
 </script>
 
@@ -66,13 +114,12 @@ onMounted(() => {
         @click="openTeam(teamName as string)"
       >
         <div class="team-card-header">
-          <div class="team-icon">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
-              <circle cx="9" cy="7" r="4"/>
-              <path d="M23 21v-2a4 4 0 00-3-3.87"/>
-              <path d="M16 3.13a4 4 0 010 7.75"/>
-            </svg>
+          <div class="team-icon" @click.stop>
+            <IconPicker
+              :model-value="groupsMap[teamName as string]?.icon || ''"
+              :entity-id="teamName"
+              @update:model-value="(icon) => updateTeamIcon(teamName as string, icon)"
+            />
           </div>
           <div class="team-badges">
             <span class="team-badge member-badge">{{ sessions.length }} 成员</span>
@@ -173,17 +220,16 @@ onMounted(() => {
   width: 40px;
   height: 40px;
   border-radius: 10px;
-  background: var(--bg-hover);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--accent);
-  transition: all 0.2s ease;
+  overflow: hidden;
 }
 
-.team-card:hover .team-icon {
-  background: var(--accent);
-  color: white;
+.team-icon :deep(.icon-trigger) {
+  border-radius: 10px;
+}
+
+.team-icon :deep(.current-icon) {
+  width: 40px;
+  height: 40px;
 }
 
 .team-badges {

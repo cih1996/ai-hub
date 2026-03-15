@@ -138,6 +138,9 @@ func migrate() error {
 	// Sessions: add attention_rules column (attention system phase 2)
 	DB.Exec(`ALTER TABLE sessions ADD COLUMN attention_rules TEXT NOT NULL DEFAULT ''`)
 
+	// Sessions: add icon column
+	DB.Exec(`ALTER TABLE sessions ADD COLUMN icon TEXT NOT NULL DEFAULT ''`)
+
 	// AI error tracking
 	DB.Exec(`CREATE TABLE IF NOT EXISTS ai_errors (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -173,6 +176,9 @@ func migrate() error {
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	)`)
+
+	// Groups: add icon column
+	DB.Exec(`ALTER TABLE groups ADD COLUMN icon TEXT NOT NULL DEFAULT ''`)
 
 	return nil
 }
