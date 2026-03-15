@@ -49,6 +49,21 @@ function toolColorClass(name: string): string {
   return 'step-default'
 }
 
+// Get current session for template
+const currentSession = computed(() => store.currentSession)
+
+// Get session avatar URL
+function getSessionAvatar(): string {
+  const session = store.currentSession
+  if (session?.icon) {
+    return `/avatars/${session.icon}`
+  }
+  // Default avatar based on session ID
+  const id = session?.id || 1
+  const index = (id % 50) + 1
+  return `/avatars/avatar${index}.svg`
+}
+
 function localizeToolName(name: string): string {
   return toolNameMap[name] || name
 }
@@ -1077,20 +1092,16 @@ function formatToolInput(raw: string): string {
           v-for="msg in allMessages"
           :key="msg.id"
           class="message"
-          :class="msg.role"
+          :class="[msg.role, msg.role === 'user' ? 'flex-row-reverse' : 'flex-row']"
         >
           <div class="message-avatar">
             <div v-if="msg.role === 'user'" class="avatar user-avatar">U</div>
-            <div v-else class="avatar ai-avatar">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-                <path d="M2 17l10 5 10-5"/>
-                <path d="M2 12l10 5 10-5"/>
-              </svg>
-            </div>
+            <img v-else :src="getSessionAvatar()" class="avatar ai-avatar-img" />
           </div>
           <div class="message-body">
-            <div class="message-role">{{ msg.role === 'user' ? 'You' : 'AI' }}</div>
+            <div class="message-header" :class="msg.role === 'user' ? 'text-right' : 'text-left'">
+              <span class="message-role">{{ msg.role === 'user' ? '你' : currentSession?.title || 'AI' }}</span>
+            </div>
             <!-- Historical steps panel (for assistant messages with metadata) -->
             <div v-if="msg.role === 'assistant' && parseMetadata(msg.metadata)" class="activity-block history-steps">
               <div class="activity-header" @click="historyStepsExpanded[msg.id] = !historyStepsExpanded[msg.id]">
@@ -2137,23 +2148,49 @@ function formatToolInput(raw: string): string {
   gap: 12px;
   margin-bottom: 24px;
 }
+.message.flex-row { flex-direction: row; }
+.message.flex-row-reverse { flex-direction: row-reverse; }
 .message-avatar { flex-shrink: 0; padding-top: 2px; }
 .avatar {
-  width: 28px; height: 28px; border-radius: 50%;
+  width: 32px; height: 32px; border-radius: 8px;
   display: flex; align-items: center; justify-content: center;
   font-size: 12px; font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
 }
-.user-avatar { background: var(--bg-tertiary); color: var(--text-secondary); }
-.ai-avatar { background: var(--accent-soft); color: var(--accent); }
-.message-body { flex: 1; min-width: 0; }
+.user-avatar { background: var(--accent); color: white; }
+.ai-avatar-img {
+  width: 32px; height: 32px; border-radius: 8px;
+  object-fit: cover;
+  background: var(--bg-secondary);
+}
+.message-body { flex: 1; min-width: 0; max-width: 85%; }
+.message-header { margin-bottom: 4px; }
+.message-header.text-right { text-align: right; }
+.message-header.text-left { text-align: left; }
 .message-role {
-  font-size: 12px; font-weight: 600; color: var(--text-secondary);
-  margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;
+  font-size: 11px; font-weight: 600; color: var(--text-muted);
+  text-transform: none; letter-spacing: 0;
 }
 .message-content {
   font-size: 14px; line-height: 1.7; color: var(--text-primary); word-break: break-word;
+  padding: 12px 16px;
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
 }
-.message.user .message-content { white-space: pre-wrap; }
+/* User message: purple bubble, right-aligned */
+.message.user .message-content {
+  background: var(--accent);
+  color: white;
+  border-radius: 12px 4px 12px 12px;
+}
+.message.user .message-content :deep(a) { color: white; text-decoration: underline; }
+.message.user .message-content :deep(code) { background: rgba(255,255,255,0.2); color: white; }
+/* AI message: card style, left-aligned */
+.message.assistant .message-content {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px 12px 12px 12px;
+}
 /* Retry button on last user message */
 .btn-retry {
   display: inline-flex;
