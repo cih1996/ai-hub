@@ -517,6 +517,37 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function stopStreaming() {
+    // Save any already-received content before stopping
+    if (streamingContent.value || toolCalls.value.length > 0 || thinkingContent.value) {
+      let metadata: string | undefined
+      if (toolCalls.value.length > 0 || thinkingContent.value) {
+        const steps: StepsMetadata['steps'] = []
+        if (thinkingContent.value) {
+          steps.push({ type: 'thinking', name: 'Thinking', status: 'interrupted' })
+        }
+        for (const tc of toolCalls.value) {
+          steps.push({ type: 'tool', name: tc.name, input: tc.input?.slice(0, 300), status: 'interrupted' })
+        }
+        metadata = JSON.stringify({ steps, thinking: thinkingContent.value?.slice(0, 200) })
+      }
+      const content = streamingContent.value
+        ? streamingContent.value + '\n\n*[已中断]*'
+        : '[任务已中断，详见执行步骤]'
+      messages.value.push({
+        id: Date.now(),
+        session_id: currentSessionId.value!,
+        role: 'assistant',
+        content,
+        metadata,
+        created_at: new Date().toISOString(),
+      })
+    }
+    // Clear streaming state
+    streamingContent.value = ''
+    thinkingContent.value = ''
+    toolCalls.value = []
+    streaming.value = false
+    // Send stop signal to backend
     if (ws.value && ws.value.readyState === WebSocket.OPEN) {
       ws.value.send(JSON.stringify({ type: 'stop' }))
     }
