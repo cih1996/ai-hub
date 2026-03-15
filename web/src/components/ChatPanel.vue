@@ -1247,38 +1247,23 @@ function formatToolInput(raw: string): string {
           </div>
         </div>
 
-        <!-- Streaming text content (BELOW activity) -->
-        <div v-if="store.streaming && store.streamingContent" class="message assistant">
+        <!-- Streaming message (combines waiting state and content) -->
+        <div v-if="store.streaming" class="message assistant flex-row">
           <div class="message-avatar">
-            <div class="avatar ai-avatar">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-                <path d="M2 17l10 5 10-5"/>
-                <path d="M2 12l10 5 10-5"/>
-              </svg>
-            </div>
+            <img :src="getSessionAvatar()" class="avatar ai-avatar-img" />
           </div>
           <div class="message-body">
-            <div class="message-role">AI</div>
-            <div class="message-content md-content" v-html="renderMd(store.streamingContent)" />
-          </div>
-        </div>
-
-        <!-- Pure waiting state -->
-        <div v-if="store.streaming && !store.streamingContent && !store.thinkingContent && store.toolCalls.length === 0" class="message assistant">
-          <div class="message-avatar">
-            <div class="avatar ai-avatar">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-                <path d="M2 17l10 5 10-5"/>
-                <path d="M2 12l10 5 10-5"/>
-              </svg>
+            <div class="message-header text-left">
+              <span class="message-role">{{ currentSession?.title || 'AI' }}</span>
             </div>
-          </div>
-          <div class="message-body">
-            <div class="typing-indicator">
-              <span></span><span></span><span></span>
+            <!-- Show typing indicator when no content yet -->
+            <div v-if="!store.streamingContent && !store.thinkingContent && store.toolCalls.length === 0" class="message-content">
+              <div class="typing-indicator">
+                <span></span><span></span><span></span>
+              </div>
             </div>
+            <!-- Show streaming content when available -->
+            <div v-else-if="store.streamingContent" class="message-content md-content" v-html="renderMd(store.streamingContent)" />
           </div>
         </div>
 
