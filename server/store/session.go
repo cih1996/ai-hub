@@ -63,8 +63,8 @@ func GetSession(id int64) (*model.Session, error) {
 func UpdateSession(s *model.Session) error {
 	s.UpdatedAt = time.Now()
 	_, err := DB.Exec(
-		`UPDATE sessions SET title=?, icon=?, provider_id=?, group_name=?, updated_at=? WHERE id=?`,
-		s.Title, s.Icon, s.ProviderID, s.GroupName, s.UpdatedAt, s.ID,
+		`UPDATE sessions SET title=?, icon=?, provider_id=?, group_name=?, attention_enabled=?, updated_at=? WHERE id=?`,
+		s.Title, s.Icon, s.ProviderID, s.GroupName, s.AttentionEnabled, s.UpdatedAt, s.ID,
 	)
 	return err
 }

@@ -6,6 +6,7 @@ import (
 	"ai-hub/server/store"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -1257,6 +1258,7 @@ func sendAttentionFeedback(sessionID int64, message string) {
 // using shadow sessions for isolated execution with parent session broadcast
 func runAttentionV2Flow(parentSession *model.Session, userMessage string) {
 	parentID := parentSession.ID
+	fmt.Printf("[attention-v2] session %d: starting flow\n", parentID)
 	log.Printf("[attention-v2] session %d: starting flow", parentID)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1273,21 +1275,31 @@ func runAttentionV2Flow(parentSession *model.Session, userMessage string) {
 		delete(activeStreams, parentID)
 		activeStreamsMu.Unlock()
 		broadcast(WSMessage{Type: "session_update", SessionID: parentID, Content: "idle"})
+		fmt.Printf("[attention-v2] session %d: flow ended\n", parentID)
+		log.Printf("[attention-v2] session %d: flow ended", parentID)
 	}()
 
 	// Get provider
 	provider, err := store.GetProvider(parentSession.ProviderID)
 	if err != nil {
+		fmt.Printf("[attention-v2] session %d: provider %s not found, trying default\n", parentID, parentSession.ProviderID)
+		log.Printf("[attention-v2] session %d: provider %s not found, trying default", parentID, parentSession.ProviderID)
 		provider, err = store.GetDefaultProvider()
 		if err != nil {
 			errMsg := "provider not found"
+			fmt.Printf("[attention-v2] session %d: %s\n", parentID, errMsg)
+			log.Printf("[attention-v2] session %d: %s", parentID, errMsg)
 			broadcast(WSMessage{Type: "error", SessionID: parentID, Content: errMsg})
 			return
 		}
 	}
+	fmt.Printf("[attention-v2] session %d: using provider %s\n", parentID, provider.Name)
+	log.Printf("[attention-v2] session %d: using provider %s", parentID, provider.Name)
 
 	// Broadcast status helper
 	broadcastStatus := func(status string) {
+		fmt.Printf("[attention-v2] session %d: status: %s\n", parentID, status)
+		log.Printf("[attention-v2] session %d: status: %s", parentID, status)
 		broadcast(WSMessage{Type: "attention_status", SessionID: parentID, Content: status})
 	}
 
@@ -1320,25 +1332,32 @@ func runAttentionV2Flow(parentSession *model.Session, userMessage string) {
 
 	// Execute the full flow
 	broadcastStatus("注意力模式：正在处理...")
-	err = executor.ExecuteWithShadow(ctx, userMessage, createShadowFn, deleteShadowFn, copyMessagesFn)
+	fmt.Printf("[attention-v2] session %d: calling ExecuteWithShadow\n", parentID)
+	finalResult, err := executor.ExecuteWithShadow(ctx, userMessage, createShadowFn, deleteShadowFn, copyMessagesFn)
+	fmt.Printf("[attention-v2] session %d: ExecuteWithShadow returned, err=%v, result_len=%d\n", parentID, err, len(finalResult))
 	if err != nil {
+		fmt.Printf("[attention-v2] session %d: flow failed: %v\n", parentID, err)
 		log.Printf("[attention-v2] session %d: flow failed: %v", parentID, err)
 		broadcast(WSMessage{Type: "error", SessionID: parentID, Content: "注意力模式执行失败: " + err.Error()})
 		return
 	}
 
-	// Get final result from state and save to parent session
-	state := core.AttentionMgr.GetState(parentID)
-	if state != nil && state.FinalResult != "" {
-		// Save final result as assistant message in parent session
+	// Save final result to parent session
+	if finalResult != "" {
+		fmt.Printf("[attention-v2] session %d: saving final result (len=%d)\n", parentID, len(finalResult))
 		assistantMsg := &model.Message{
 			SessionID: parentID,
 			Role:      "assistant",
-			Content:   state.FinalResult,
+			Content:   finalResult,
 		}
 		if err := store.AddMessage(assistantMsg); err != nil {
+			fmt.Printf("[attention-v2] session %d: failed to save final result: %v\n", parentID, err)
 			log.Printf("[attention-v2] session %d: failed to save final result: %v", parentID, err)
+		} else {
+			fmt.Printf("[attention-v2] session %d: final result saved\n", parentID)
 		}
+	} else {
+		fmt.Printf("[attention-v2] session %d: no final result to save\n", parentID)
 	}
 
 	broadcast(WSMessage{Type: "done", SessionID: parentID, Content: ""})
