@@ -230,6 +230,10 @@ func main() {
 		v1.PUT("/groups/:name", api.UpdateGroup)
 		v1.DELETE("/groups/:name", api.DeleteGroup)
 
+		// Avatars
+		v1.GET("/avatars", api.ListAvatars)
+		v1.POST("/avatars/upload", api.UploadAvatar)
+
 		// Session rules
 		v1.GET("/session-rules/:id", api.GetSessionRules)
 		v1.PUT("/session-rules/:id", api.PutSessionRules)
@@ -351,7 +355,7 @@ func main() {
 		c.Data(200, "text/html; charset=utf-8", demoHTML)
 	})
 
-	// Serve avatars
+	// Serve avatars (embedded defaults)
 	r.GET("/avatars/:name", func(c *gin.Context) {
 		name := c.Param("name")
 		data, err := avatarsFS.ReadFile("avatars/" + name)
@@ -361,16 +365,33 @@ func main() {
 		}
 		c.Data(200, "image/svg+xml", data)
 	})
-	// List all avatars
-	r.GET("/api/v1/avatars", func(c *gin.Context) {
-		entries, _ := avatarsFS.ReadDir("avatars")
-		var names []string
-		for _, e := range entries {
-			if !e.IsDir() && strings.HasSuffix(e.Name(), ".svg") {
-				names = append(names, e.Name())
-			}
+
+	// Serve custom uploaded avatars from ~/.ai-hub/avatars/
+	r.GET("/avatars/custom/:name", func(c *gin.Context) {
+		name := c.Param("name")
+		homeDir, _ := os.UserHomeDir()
+		filePath := filepath.Join(homeDir, ".ai-hub", "avatars", name)
+		if _, err := os.Stat(filePath); os.IsNotExist(err) {
+			c.Status(404)
+			return
 		}
-		c.JSON(200, names)
+		// Detect content type
+		ext := strings.ToLower(filepath.Ext(name))
+		contentType := "application/octet-stream"
+		switch ext {
+		case ".svg":
+			contentType = "image/svg+xml"
+		case ".png":
+			contentType = "image/png"
+		case ".jpg", ".jpeg":
+			contentType = "image/jpeg"
+		case ".gif":
+			contentType = "image/gif"
+		case ".webp":
+			contentType = "image/webp"
+		}
+		c.File(filePath)
+		c.Header("Content-Type", contentType)
 	})
 
 	// Serve frontend

@@ -26,13 +26,14 @@ const groupsMap = computed(() => {
   return map
 })
 
-// Group sessions by group_name
+// Group sessions by group_name (exclude sessions without group)
 const groupedTeams = computed(() => {
   const result: Record<string, Session[]> = {}
   for (const s of store.sessions) {
-    const name = s.group_name || '未分组'
-    if (!result[name]) result[name] = []
-    result[name].push(s)
+    // Skip sessions without group_name
+    if (!s.group_name) continue
+    if (!result[s.group_name]) result[s.group_name] = []
+    result[s.group_name]!.push(s)
   }
   // Sort sessions within each group by updated_at desc
   for (const name in result) {

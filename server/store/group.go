@@ -80,3 +80,22 @@ func UpdateSessionGroup(sessionID int64, groupName string) error {
 	_, err := DB.Exec(`UPDATE sessions SET group_name = ?, updated_at = ? WHERE id = ?`, groupName, now, sessionID)
 	return err
 }
+
+// ListUniqueGroupNames returns all unique non-empty group_name values from sessions
+func ListUniqueGroupNames() ([]string, error) {
+	rows, err := DB.Query(`SELECT DISTINCT group_name FROM sessions WHERE group_name != '' ORDER BY group_name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		names = append(names, name)
+	}
+	return names, nil
+}
