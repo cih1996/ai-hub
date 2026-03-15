@@ -37,6 +37,9 @@ var builtinSkillsFS embed.FS
 //go:embed claude/*
 var claudeRulesFS embed.FS
 
+//go:embed demo.html
+var demoHTML []byte
+
 var (
 	Version = "dev"
 	BuildAt = ""
@@ -338,6 +341,11 @@ func main() {
 
 	// WebSocket
 	r.GET("/ws/chat", api.HandleChat)
+
+	// Serve new version (demo.html) at /new
+	r.GET("/new", func(c *gin.Context) {
+		c.Data(200, "text/html; charset=utf-8", demoHTML)
+	})
 
 	// Serve frontend
 	distFS, err := fs.Sub(frontendFS, "web/dist")

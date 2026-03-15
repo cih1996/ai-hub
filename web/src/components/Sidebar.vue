@@ -278,6 +278,12 @@ onMounted(async () => {
         </svg>
         <span>AI Hub</span>
       </div>
+      <a href="/new" class="new-version-btn" title="切换到新版">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+        </svg>
+        <span>新版</span>
+      </a>
     </div>
 
     <div class="sidebar-nav">
@@ -574,6 +580,25 @@ onMounted(async () => {
   font-weight: 600;
   font-size: 15px;
   color: var(--text-primary);
+}
+.new-version-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--accent);
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  text-decoration: none;
+  transition: all var(--transition);
+}
+.new-version-btn:hover {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
 }
 .sidebar-nav {
   padding: 8px;
