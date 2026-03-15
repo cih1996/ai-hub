@@ -20,6 +20,8 @@ const moreMenuOpen = ref(false)
 const providerDropdownOpen = ref(false)
 // Track expanded state for historical message steps (by message id)
 const historyStepsExpanded = ref<Record<number, boolean>>({})
+// Attention mode status details expanded
+const attentionDetailsExpanded = ref(false)
 
 // Tool name Chinese mapping
 const toolNameMap: Record<string, string> = {
@@ -1243,6 +1245,28 @@ function formatToolInput(raw: string): string {
                   <div v-if="tc.input" class="tool-input">{{ formatToolInput(tc.input) }}</div>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Attention mode status panel -->
+        <div v-if="store.attentionActive" class="attention-status-panel">
+          <div class="attention-status-header" @click="attentionDetailsExpanded = !attentionDetailsExpanded">
+            <div class="attention-status-indicator">
+              <span class="attention-pulse"></span>
+              <svg class="attention-status-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>
+              </svg>
+            </div>
+            <span class="attention-status-text">{{ store.attentionStatus }}</span>
+            <svg class="attention-expand-icon" :class="{ expanded: attentionDetailsExpanded }" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M6 9l6 6 6-6"/>
+            </svg>
+          </div>
+          <div v-if="attentionDetailsExpanded && store.attentionHistory.length > 1" class="attention-status-history">
+            <div v-for="(status, idx) in store.attentionHistory.slice(0, -1)" :key="idx" class="attention-history-item">
+              <span class="attention-history-check">✓</span>
+              {{ status }}
             </div>
           </div>
         </div>
@@ -2858,5 +2882,90 @@ function formatToolInput(raw: string): string {
   .rules-file-list { width: 100%; border-right: none; border-bottom: 1px solid var(--border); max-height: 120px; overflow-y: auto; display: flex; flex-wrap: wrap; padding: 6px; gap: 4px; }
   .rules-file-item { white-space: nowrap; }
   .message { gap: 8px; margin-bottom: 16px; }
+}
+
+/* Attention mode status panel */
+.attention-status-panel {
+  margin: 12px 0;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, rgba(255, 149, 0, 0.08), rgba(255, 149, 0, 0.04));
+  border: 1px solid rgba(255, 149, 0, 0.2);
+  border-radius: var(--radius);
+  animation: attention-fade-in 0.3s ease;
+}
+
+@keyframes attention-fade-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.attention-status-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.attention-status-indicator {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.attention-pulse {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: rgba(255, 149, 0, 0.3);
+  animation: attention-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes attention-pulse {
+  0%, 100% { transform: scale(0.8); opacity: 0.5; }
+  50% { transform: scale(1.2); opacity: 0; }
+}
+
+.attention-status-icon {
+  color: #ff9500;
+  z-index: 1;
+}
+
+.attention-status-text {
+  flex: 1;
+  font-size: 13px;
+  color: #ff9500;
+  font-weight: 500;
+}
+
+.attention-expand-icon {
+  color: var(--text-secondary);
+  transition: transform 0.2s ease;
+}
+
+.attention-expand-icon.expanded {
+  transform: rotate(180deg);
+}
+
+.attention-status-history {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 149, 0, 0.15);
+}
+
+.attention-history-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 4px 0;
+}
+
+.attention-history-check {
+  color: #34c759;
+  font-size: 11px;
 }
 </style>
