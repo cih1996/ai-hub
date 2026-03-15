@@ -134,18 +134,22 @@
 
             <!-- Bottom Row: Tabs (Scrollable) -->
             <div class="h-10 flex items-center gap-2 px-2 overflow-x-auto no-scrollbar mask-gradient border-t border-gray-100 dark:border-dark-border/50 bg-gray-50/50 dark:bg-dark-bg/50">
-                <div v-for="tab in tabs" :key="tab.id" 
+                <div v-for="tab in tabs" :key="tab.id"
                      @click="activeTabId = tab.id"
                      class="group relative flex items-center gap-2 px-3 py-1.5 rounded-full cursor-pointer transition-all border shrink-0"
-                     :class="activeTabId === tab.id 
-                        ? 'bg-white dark:bg-dark-card border-gray-200 dark:border-dark-border text-primary font-medium shadow-sm' 
+                     :class="activeTabId === tab.id
+                        ? 'bg-white dark:bg-dark-card border-gray-200 dark:border-dark-border text-primary font-medium shadow-sm'
                         : 'border-transparent text-gray-500 dark:text-dark-muted hover:bg-gray-200/50 dark:hover:bg-dark-hover'">
-                    
-                    <i :class="getTabIcon(tab.type)" class="text-xs"></i>
+
+                    <!-- Streaming indicator -->
+                    <span v-if="tab.data?.isStreaming" class="w-2 h-2 bg-primary rounded-full animate-pulse"></span>
+                    <i v-else :class="getTabIcon(tab.type)" class="text-xs"></i>
                     <span class="truncate text-xs max-w-[100px]">{{ tab.title }}</span>
-                    
+                    <!-- Session streaming badge -->
+                    <span v-if="tab.data?.currentSession && isStreaming(tab.data.currentSession.id)" class="text-[9px] text-primary font-medium">处理中</span>
+
                     <!-- Close Button -->
-                    <button v-if="tab.type !== 'dashboard'" 
+                    <button v-if="tab.type !== 'dashboard'"
                             @click.stop="closeTab(tab.id)"
                             class="w-4 h-4 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 flex items-center justify-center transition-opacity text-gray-400 hover:text-red-500">
                         <i class="fa-solid fa-times text-[10px]"></i>
@@ -325,15 +329,34 @@
                                                 
                                                 <div class="markdown-body" v-html="renderMarkdown(msg.content)"></div>
 
-                                                <!-- Metadata/Tools Indicator -->
+                                                <!-- Metadata/Tools Visualization -->
                                                 <div v-if="msg.metadata" class="mt-2 pt-2 border-t border-gray-200/20 text-[10px]">
                                                     <div @click="msg.showMetadata = !msg.showMetadata" class="flex items-center gap-1 cursor-pointer opacity-70 hover:opacity-100 transition-opacity">
-                                                        <i class="fa-solid fa-code"></i>
-                                                        <span>工具调用日志</span>
+                                                        <i class="fa-solid fa-list-check"></i>
+                                                        <span>执行步骤 ({{ getStepsCount(msg.metadata) }})</span>
                                                         <i :class="msg.showMetadata ? 'fa-solid fa-chevron-up' : 'fa-solid fa-chevron-down'" class="ml-1 text-[8px]"></i>
                                                     </div>
-                                                    <div v-if="msg.showMetadata" class="mt-2 p-2 bg-black/10 dark:bg-white/5 rounded text-[10px] font-mono overflow-x-auto max-h-48 overflow-y-auto">
-                                                        <pre class="whitespace-pre-wrap break-all">{{ formatMetadata(msg.metadata) }}</pre>
+                                                    <div v-if="msg.showMetadata" class="mt-2 space-y-2">
+                                                        <!-- Parsed steps view -->
+                                                        <template v-if="parseMetadata(msg.metadata)?.steps">
+                                                            <div v-for="(step, idx) in parseMetadata(msg.metadata).steps" :key="idx"
+                                                                 class="border border-gray-200 dark:border-dark-border rounded overflow-hidden">
+                                                                <div class="flex items-center gap-2 px-2 py-1.5 bg-gray-50 dark:bg-dark-hover text-[10px] font-medium">
+                                                                    <i v-if="step.type === 'thinking'" class="fa-solid fa-brain text-purple-500"></i>
+                                                                    <i v-else class="fa-solid fa-wrench text-blue-500"></i>
+                                                                    <span>{{ step.name }}</span>
+                                                                    <i class="fa-solid fa-check text-green-500 ml-auto"></i>
+                                                                </div>
+                                                                <div v-if="step.input" class="px-2 py-1.5 text-[10px] font-mono bg-gray-100/50 dark:bg-black/20 border-t border-gray-200 dark:border-dark-border">
+                                                                    <pre class="whitespace-pre-wrap break-all max-h-20 overflow-y-auto">{{ step.input }}</pre>
+                                                                </div>
+                                                                <div v-if="step.result" class="px-2 py-1.5 text-[10px] font-mono bg-green-50/50 dark:bg-green-900/10 border-t border-gray-200 dark:border-dark-border">
+                                                                    <pre class="whitespace-pre-wrap break-all max-h-20 overflow-y-auto">{{ step.result }}</pre>
+                                                                </div>
+                                                            </div>
+                                                        </template>
+                                                        <!-- Fallback: raw JSON -->
+                                                        <pre v-else class="p-2 bg-black/10 dark:bg-white/5 rounded font-mono overflow-x-auto max-h-48 overflow-y-auto whitespace-pre-wrap break-all">{{ formatMetadata(msg.metadata) }}</pre>
                                                     </div>
                                                 </div>
                                             </div>
@@ -344,8 +367,67 @@
                                         </div>
                                     </div>
                                     
-                                    <div v-if="tab.data.messages && tab.data.messages.length === 0" class="flex flex-col items-center justify-center h-full text-gray-400">
+                                    <div v-if="tab.data.messages && tab.data.messages.length === 0 && !tab.data.isStreaming" class="flex flex-col items-center justify-center h-full text-gray-400">
                                         <p class="text-xs">暂无消息</p>
+                                    </div>
+
+                                    <!-- Real-time Streaming Output -->
+                                    <div v-if="tab.data.isStreaming || tab.data.toolCalls?.length || tab.data.streamingContent" class="flex gap-2 md:gap-3">
+                                        <!-- Avatar -->
+                                        <div class="w-8 h-8 rounded shrink-0 bg-gray-200 dark:bg-dark-hover overflow-hidden mt-1 shadow-sm">
+                                            <img :src="getAvatar(tab.data.currentSession)" class="w-full h-full object-cover">
+                                        </div>
+
+                                        <!-- Streaming Content -->
+                                        <div class="flex-1 max-w-[85%] md:max-w-[80%]">
+                                            <div class="flex items-center gap-2 mb-1">
+                                                <span class="text-[10px] font-bold text-gray-500 dark:text-dark-muted">{{ tab.data.currentSession?.title }}</span>
+                                                <span class="text-[10px] text-primary font-medium animate-pulse">正在处理...</span>
+                                            </div>
+
+                                            <div class="p-3 rounded-lg shadow-sm text-sm leading-relaxed bg-white dark:bg-dark-card border border-gray-200 dark:border-dark-border text-gray-800 dark:text-dark-text rounded-tl-sm space-y-3">
+
+                                                <!-- Thinking -->
+                                                <div v-if="tab.data.thinkingContent" class="text-xs text-gray-500 dark:text-gray-400 italic border-l-2 border-gray-300 dark:border-gray-600 pl-2">
+                                                    <div class="flex items-center gap-1 mb-1 font-medium">
+                                                        <i class="fa-solid fa-brain text-purple-500"></i> 思考中
+                                                    </div>
+                                                    <div class="line-clamp-3">{{ tab.data.thinkingContent.slice(-200) }}</div>
+                                                </div>
+
+                                                <!-- Tool Calls -->
+                                                <div v-if="tab.data.toolCalls?.length" class="space-y-2">
+                                                    <div v-for="tc in tab.data.toolCalls" :key="tc.id" class="border border-gray-200 dark:border-dark-border rounded-lg overflow-hidden">
+                                                        <!-- Tool Header -->
+                                                        <div class="flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-dark-hover text-xs font-medium"
+                                                             :class="tc.status === 'running' ? 'text-primary' : 'text-gray-600 dark:text-gray-300'">
+                                                            <i v-if="tc.status === 'running'" class="fa-solid fa-spinner fa-spin"></i>
+                                                            <i v-else class="fa-solid fa-check text-green-500"></i>
+                                                            <span>{{ tc.name }}</span>
+                                                        </div>
+                                                        <!-- Tool Input -->
+                                                        <div v-if="tc.input" class="px-3 py-2 text-[11px] font-mono bg-gray-100/50 dark:bg-black/20 border-t border-gray-200 dark:border-dark-border">
+                                                            <div class="text-[10px] text-gray-400 mb-1">输入参数</div>
+                                                            <pre class="whitespace-pre-wrap break-all max-h-24 overflow-y-auto">{{ tc.input.slice(0, 500) }}</pre>
+                                                        </div>
+                                                        <!-- Tool Result -->
+                                                        <div v-if="tc.result" class="px-3 py-2 text-[11px] font-mono bg-green-50/50 dark:bg-green-900/10 border-t border-gray-200 dark:border-dark-border">
+                                                            <div class="text-[10px] text-green-600 dark:text-green-400 mb-1">执行结果</div>
+                                                            <pre class="whitespace-pre-wrap break-all max-h-24 overflow-y-auto">{{ tc.result.slice(0, 500) }}</pre>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <!-- Streaming Text -->
+                                                <div v-if="tab.data.streamingContent" class="markdown-body" v-html="renderMarkdown(tab.data.streamingContent)"></div>
+
+                                                <!-- Loading indicator if no content yet -->
+                                                <div v-if="!tab.data.thinkingContent && !tab.data.toolCalls?.length && !tab.data.streamingContent" class="flex items-center gap-2 text-gray-400">
+                                                    <div class="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+                                                    <span class="text-xs">等待响应...</span>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
                                 </template>
                             </div>
@@ -447,6 +529,18 @@
                     return streamingSessions.value.has(sessionId);
                 };
 
+                // Current subscribed session for streaming
+                let subscribedSessionId = null;
+
+                // Subscribe to a session's stream
+                const subscribeSession = (sessionId) => {
+                    if (ws && ws.readyState === WebSocket.OPEN && sessionId) {
+                        subscribedSessionId = sessionId;
+                        ws.send(JSON.stringify({ type: 'subscribe', session_id: sessionId }));
+                        console.log('[WS] Subscribed to session', sessionId);
+                    }
+                };
+
                 // WebSocket connection for real-time updates
                 let ws = null;
                 const connectWebSocket = () => {
@@ -455,16 +549,21 @@
 
                     ws.onopen = () => {
                         console.log('[WS] Connected');
+                        // Re-subscribe if we had a session selected
+                        if (subscribedSessionId) {
+                            subscribeSession(subscribedSessionId);
+                        }
                     };
 
                     ws.onmessage = (event) => {
                         try {
                             const msg = JSON.parse(event.data);
+
+                            // Handle session_update (streaming status broadcast)
                             if (msg.type === 'session_update') {
                                 const sessionId = msg.session_id;
                                 if (msg.content === 'streaming') {
                                     streamingSessions.value.add(sessionId);
-                                    // Update session object
                                     const s = sessions.value.find(x => x.id === sessionId);
                                     if (s) s.streaming = true;
                                 } else {
@@ -472,8 +571,87 @@
                                     const s = sessions.value.find(x => x.id === sessionId);
                                     if (s) s.streaming = false;
                                 }
-                                // Trigger reactivity
                                 streamingSessions.value = new Set(streamingSessions.value);
+
+                                // Update tab streaming state
+                                tabs.value.forEach(tab => {
+                                    if (tab.type === 'team' && tab.data.currentSession?.id === sessionId) {
+                                        tab.data.isStreaming = msg.content === 'streaming';
+                                        if (msg.content !== 'streaming') {
+                                            // Streaming ended, finalize
+                                            finalizeStreaming(tab);
+                                        }
+                                    }
+                                });
+                                return;
+                            }
+
+                            // Find the tab that has this session selected
+                            const tab = tabs.value.find(t =>
+                                t.type === 'team' && t.data.currentSession?.id === msg.session_id
+                            );
+                            if (!tab) return;
+
+                            switch (msg.type) {
+                                case 'streaming_status':
+                                    tab.data.isStreaming = msg.content === 'streaming';
+                                    if (msg.content !== 'streaming') {
+                                        finalizeStreaming(tab);
+                                    }
+                                    break;
+
+                                case 'thinking':
+                                    if (!tab.data.thinkingContent) tab.data.thinkingContent = '';
+                                    tab.data.thinkingContent += msg.content;
+                                    break;
+
+                                case 'tool_start':
+                                    if (!tab.data.toolCalls) tab.data.toolCalls = [];
+                                    tab.data.toolCalls.push({
+                                        id: msg.tool_id || String(Date.now()),
+                                        name: msg.tool_name || msg.content,
+                                        input: '',
+                                        result: '',
+                                        status: 'running'
+                                    });
+                                    break;
+
+                                case 'tool_input': {
+                                    const tc = tab.data.toolCalls?.find(t => t.id === msg.tool_id);
+                                    if (tc) tc.input += msg.content;
+                                    break;
+                                }
+
+                                case 'tool_result': {
+                                    const tc = tab.data.toolCalls?.find(t => t.id === msg.tool_id);
+                                    if (tc) {
+                                        tc.status = 'done';
+                                        tc.result = msg.content || '';
+                                    }
+                                    break;
+                                }
+
+                                case 'chunk':
+                                    // Mark all running tools as done when chunk arrives
+                                    tab.data.toolCalls?.forEach(tc => {
+                                        if (tc.status === 'running') tc.status = 'done';
+                                    });
+                                    if (!tab.data.streamingContent) tab.data.streamingContent = '';
+                                    tab.data.streamingContent += msg.content;
+                                    // Auto scroll
+                                    nextTick(() => {
+                                        const container = document.getElementById(`messages-container-${tab.id}`);
+                                        if (container) container.scrollTop = container.scrollHeight;
+                                    });
+                                    break;
+
+                                case 'done':
+                                    finalizeStreaming(tab, msg.content);
+                                    break;
+
+                                case 'error':
+                                    finalizeStreaming(tab, null, msg.content);
+                                    break;
                             }
                         } catch (e) {
                             console.error('[WS] Parse error', e);
@@ -488,6 +666,54 @@
                     ws.onerror = (e) => {
                         console.error('[WS] Error', e);
                     };
+                };
+
+                // Finalize streaming: add assistant message to list
+                const finalizeStreaming = (tab, metadata = null, error = null) => {
+                    const content = tab.data.streamingContent || '';
+                    const toolCalls = tab.data.toolCalls || [];
+                    const thinking = tab.data.thinkingContent || '';
+
+                    // Build metadata if not provided
+                    if (!metadata && (thinking || toolCalls.length > 0)) {
+                        const steps = [];
+                        if (thinking) {
+                            steps.push({ type: 'thinking', name: 'Thinking', status: 'done' });
+                        }
+                        toolCalls.forEach(tc => {
+                            steps.push({
+                                type: 'tool',
+                                name: tc.name,
+                                input: tc.input?.slice(0, 500),
+                                result: tc.result?.slice(0, 500),
+                                status: tc.status
+                            });
+                        });
+                        metadata = JSON.stringify({ steps, thinking: thinking?.slice(0, 300) });
+                    }
+
+                    // Add message if we have content
+                    if (content || metadata || error) {
+                        tab.data.messages.push({
+                            id: Date.now(),
+                            role: 'assistant',
+                            content: error ? `❌ 错误: ${error}` : (content || '[任务已执行，详见执行步骤]'),
+                            metadata: metadata || undefined,
+                            created_at: new Date().toISOString()
+                        });
+                    }
+
+                    // Reset streaming state
+                    tab.data.streamingContent = '';
+                    tab.data.thinkingContent = '';
+                    tab.data.toolCalls = [];
+                    tab.data.isStreaming = false;
+
+                    // Scroll to bottom
+                    nextTick(() => {
+                        const container = document.getElementById(`messages-container-${tab.id}`);
+                        if (container) container.scrollTop = container.scrollHeight;
+                    });
                 };
 
                 const fetchSessions = async () => {
@@ -525,7 +751,12 @@
                                 messages: [],
                                 loadingMessages: false,
                                 inputText: '',
-                                sending: false
+                                sending: false,
+                                // Streaming state
+                                isStreaming: false,
+                                streamingContent: '',
+                                thinkingContent: '',
+                                toolCalls: []
                             }
                         });
                         activeTabId.value = tabId;
@@ -555,6 +786,11 @@
                     tab.data.currentSession = session;
                     tab.data.loadingMessages = true;
                     tab.data.messages = [];
+                    // Reset streaming state
+                    tab.data.streamingContent = '';
+                    tab.data.thinkingContent = '';
+                    tab.data.toolCalls = [];
+                    tab.data.isStreaming = false;
 
                     try {
                         const res = await fetch(`http://${location.host}/api/v1/sessions/${session.id}/messages?limit=50`);
@@ -567,6 +803,10 @@
                         console.error(e);
                     } finally {
                         tab.data.loadingMessages = false;
+                        // Subscribe to this session's stream
+                        subscribeSession(session.id);
+                        // Check if session is currently streaming
+                        tab.data.isStreaming = streamingSessions.value.has(session.id);
                         nextTick(() => {
                             const container = document.getElementById(`messages-container-${tab.id}`);
                             if (container) container.scrollTop = container.scrollHeight;
@@ -643,6 +883,20 @@
                     }
                 };
 
+                const parseMetadata = (metadata) => {
+                    if (!metadata) return null;
+                    try {
+                        return typeof metadata === 'string' ? JSON.parse(metadata) : metadata;
+                    } catch {
+                        return null;
+                    }
+                };
+
+                const getStepsCount = (metadata) => {
+                    const parsed = parseMetadata(metadata);
+                    return parsed?.steps?.length || 0;
+                };
+
                 onMounted(() => {
                     checkMobile();
                     window.addEventListener('resize', checkMobile);
@@ -673,6 +927,8 @@
                     formatTime,
                     renderMarkdown,
                     formatMetadata,
+                    parseMetadata,
+                    getStepsCount,
                     getActiveCount,
                     isStreaming
                 };
