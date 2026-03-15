@@ -324,11 +324,16 @@
                                                     : 'bg-white dark:bg-dark-card border border-gray-200 dark:border-dark-border text-gray-800 dark:text-dark-text rounded-tl-sm'">
                                                 
                                                 <div class="markdown-body" v-html="renderMarkdown(msg.content)"></div>
-                                                
+
                                                 <!-- Metadata/Tools Indicator -->
-                                                <div v-if="msg.metadata" class="mt-2 pt-2 border-t border-gray-200/20 text-[10px] opacity-70">
-                                                    <div class="flex items-center gap-1 cursor-help">
-                                                        <i class="fa-solid fa-code"></i> 工具调用日志
+                                                <div v-if="msg.metadata" class="mt-2 pt-2 border-t border-gray-200/20 text-[10px]">
+                                                    <div @click="msg.showMetadata = !msg.showMetadata" class="flex items-center gap-1 cursor-pointer opacity-70 hover:opacity-100 transition-opacity">
+                                                        <i class="fa-solid fa-code"></i>
+                                                        <span>工具调用日志</span>
+                                                        <i :class="msg.showMetadata ? 'fa-solid fa-chevron-up' : 'fa-solid fa-chevron-down'" class="ml-1 text-[8px]"></i>
+                                                    </div>
+                                                    <div v-if="msg.showMetadata" class="mt-2 p-2 bg-black/10 dark:bg-white/5 rounded text-[10px] font-mono overflow-x-auto max-h-48 overflow-y-auto">
+                                                        <pre class="whitespace-pre-wrap break-all">{{ formatMetadata(msg.metadata) }}</pre>
                                                     </div>
                                                 </div>
                                             </div>
@@ -555,7 +560,8 @@
                         const res = await fetch(`http://${location.host}/api/v1/sessions/${session.id}/messages?limit=50`);
                         const data = await res.json();
                         if (data.messages) {
-                            tab.data.messages = data.messages.reverse();
+                            // API returns messages in ASC order (oldest first), no need to reverse
+                            tab.data.messages = data.messages;
                         }
                     } catch (e) {
                         console.error(e);
@@ -627,6 +633,16 @@
                     return marked.parse(text);
                 };
 
+                const formatMetadata = (metadata) => {
+                    if (!metadata) return '';
+                    try {
+                        const obj = typeof metadata === 'string' ? JSON.parse(metadata) : metadata;
+                        return JSON.stringify(obj, null, 2);
+                    } catch {
+                        return String(metadata);
+                    }
+                };
+
                 onMounted(() => {
                     checkMobile();
                     window.addEventListener('resize', checkMobile);
@@ -656,6 +672,7 @@
                     getAvatar,
                     formatTime,
                     renderMarkdown,
+                    formatMetadata,
                     getActiveCount,
                     isStreaming
                 };
