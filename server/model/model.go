@@ -55,8 +55,11 @@ type Session struct {
 	LastCompressMsgID int64     `json:"last_compress_msg_id"` // 上次压缩时最新消息 ID，用于增量统计
 	AttentionEnabled  bool      `json:"attention_enabled"`    // 注意力系统开关
 	AttentionRules    string    `json:"attention_rules"`      // 注意力规则（会话级别）
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	// Shadow session fields (for attention mode)
+	IsShadow       bool  `json:"is_shadow"`        // 是否为影子会话
+	ParentID       int64 `json:"parent_id"`        // 本体会话 ID（影子会话专用）
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 // Message 消息

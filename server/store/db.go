@@ -180,6 +180,10 @@ func migrate() error {
 	// Groups: add icon column
 	DB.Exec(`ALTER TABLE groups ADD COLUMN icon TEXT NOT NULL DEFAULT ''`)
 
+	// Sessions: add shadow session fields (attention mode v2)
+	DB.Exec(`ALTER TABLE sessions ADD COLUMN is_shadow INTEGER NOT NULL DEFAULT 0`)
+	DB.Exec(`ALTER TABLE sessions ADD COLUMN parent_id INTEGER NOT NULL DEFAULT 0`)
+
 	return nil
 }
 
