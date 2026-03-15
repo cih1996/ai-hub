@@ -349,9 +349,10 @@
                             <div class="bg-white dark:bg-dark-card border-t border-gray-200 dark:border-dark-border shrink-0 pb-safe">
                                 <div class="p-3">
                                     <div class="flex gap-3 items-end bg-gray-50 dark:bg-dark-bg rounded-2xl p-2 border border-gray-200 dark:border-dark-border focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/20 transition-all shadow-inner">
-                                        <textarea placeholder="输入消息..." class="flex-1 bg-transparent border-none resize-none focus:ring-0 text-base max-h-32 py-2 px-2 text-gray-800 dark:text-gray-200" rows="1" style="min-height: 40px;"></textarea>
-                                        <button class="w-10 h-10 rounded-xl bg-primary text-white shadow-md hover:bg-secondary transition-colors flex items-center justify-center mb-0.5 active:scale-95 shrink-0">
-                                            <i class="fa-solid fa-paper-plane text-sm"></i>
+                                        <textarea v-model="tab.data.inputText" @keydown.enter.exact.prevent="sendMessage(tab)" placeholder="输入消息..." class="flex-1 bg-transparent border-none resize-none focus:ring-0 text-base max-h-32 py-2 px-2 text-gray-800 dark:text-gray-200" rows="1" style="min-height: 40px;" :disabled="tab.data.sending"></textarea>
+                                        <button @click="sendMessage(tab)" :disabled="tab.data.sending || !tab.data.inputText?.trim()" class="w-10 h-10 rounded-xl bg-primary text-white shadow-md hover:bg-secondary transition-colors flex items-center justify-center mb-0.5 active:scale-95 shrink-0 disabled:opacity-50 disabled:cursor-not-allowed">
+                                            <i v-if="tab.data.sending" class="fa-solid fa-spinner fa-spin text-sm"></i>
+                                            <i v-else class="fa-solid fa-paper-plane text-sm"></i>
                                         </button>
                                     </div>
                                 </div>
@@ -505,7 +506,7 @@
                 const openTeamTab = (teamName) => {
                     const tabId = `team-${teamName}`;
                     const existingTab = tabs.value.find(t => t.id === tabId);
-                    
+
                     if (existingTab) {
                         activeTabId.value = tabId;
                     } else {
@@ -517,7 +518,9 @@
                                 teamName: teamName,
                                 currentSession: null,
                                 messages: [],
-                                loadingMessages: false
+                                loadingMessages: false,
+                                inputText: '',
+                                sending: false
                             }
                         });
                         activeTabId.value = tabId;
@@ -565,6 +568,46 @@
                     }
                 };
 
+                // Send message to current session
+                const sendMessage = async (tab) => {
+                    const text = tab.data.inputText?.trim();
+                    if (!text || !tab.data.currentSession || tab.data.sending) return;
+
+                    const sessionId = tab.data.currentSession.id;
+                    tab.data.sending = true;
+
+                    // Optimistically add user message to UI
+                    const userMsg = {
+                        id: Date.now(),
+                        role: 'user',
+                        content: text,
+                        created_at: new Date().toISOString()
+                    };
+                    tab.data.messages.push(userMsg);
+                    tab.data.inputText = '';
+
+                    // Scroll to bottom
+                    nextTick(() => {
+                        const container = document.getElementById(`messages-container-${tab.id}`);
+                        if (container) container.scrollTop = container.scrollHeight;
+                    });
+
+                    try {
+                        const res = await fetch(`http://${location.host}/api/v1/chat/send`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ session_id: sessionId, content: text })
+                        });
+                        if (!res.ok) throw new Error('Send failed');
+                        // Message sent, AI response will come via WebSocket or we can poll
+                    } catch (e) {
+                        console.error('[Send] Error', e);
+                        alert('发送失败：' + e.message);
+                    } finally {
+                        tab.data.sending = false;
+                    }
+                };
+
                 const getAvatar = (session) => {
                     const seed = session.title || session.id;
                     return `https://api.dicebear.com/7.x/bottts/svg?seed=${seed}&backgroundColor=transparent`;
@@ -609,6 +652,7 @@
                     closeTab,
                     getTabIcon,
                     selectSessionInTab,
+                    sendMessage,
                     getAvatar,
                     formatTime,
                     renderMarkdown,
