@@ -12,6 +12,14 @@ import (
 	"time"
 )
 
+// truncateForLog truncates a string for logging purposes
+func truncateForLog(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
+}
+
 // AttentionV2State tracks the state of an attention mode execution
 type AttentionV2State struct {
 	ParentSessionID  int64
@@ -171,58 +179,130 @@ type AttentionReviewer struct {
 	Provider *model.Provider
 }
 
-// ReviewerSystemPrompt is the system prompt for the review AI
-const ReviewerSystemPrompt = `你是注意力审核 AI，负责审核目标会话 AI 的执行计划。
+// buildReviewerSystemPrompt builds the system prompt for the review AI with session context
+func buildReviewerSystemPrompt(sessionID int64, groupName string) string {
+	return fmt.Sprintf(`你是注意力审核 AI，负责审核会话 #%d 的执行计划。
 
-审核标准：
-1. 计划是否遵循会话规则
-2. 计划是否遵循团队规则
-3. 计划是否遵循全局规则
-4. 是否遗漏相关记忆库信息
-5. 计划是否合理、安全
+你的职责：
+1. 审核计划是否遵循会话规则、团队规则、全局规则
+2. 检查是否遗漏相关记忆库信息
+3. 评估计划是否合理、安全
 
-审核结果格式：
-- 通过：输出 [PASS]
+你可以使用 ai-hub CLI 查询更多信息：
+- 查看会话规则：ai-hub rules get %d
+- 搜索记忆库：ai-hub search "关键词" --level session
+- 团队记忆：ai-hub search "关键词" --level team
+- 全局记忆：ai-hub search "关键词" --level global
+
+当前会话信息：
+- 会话 ID：%d
+- 团队：%s
+
+审核结果格式（必须严格遵守）：
+- 通过：输出 [PASS] 或 [PASS:简要说明]
 - 拒绝：输出 [REJECT:具体原因]
 
 注意：
 - 只输出审核结果，不要执行任何操作
-- 拒绝时必须说明具体违反了哪条规则或遗漏了什么信息`
+- 拒绝时必须说明具体违反了哪条规则或遗漏了什么信息
+- 如果计划合理且没有明显问题，应该通过`, sessionID, sessionID, sessionID, groupName)
+}
 
-// ReviewPlan reviews an execution plan and returns (passed, reason, error)
-func (r *AttentionReviewer) ReviewPlan(ctx context.Context, plan string, extractedContext string) (bool, string, error) {
-	log.Printf("[attention-v2] session %d: reviewing plan", r.Session.ID)
+// ReviewPlanResult contains the full review result for broadcasting
+type ReviewPlanResult struct {
+	Passed       bool
+	Reason       string
+	ReviewInput  string // Summary of what was sent to review AI
+	ReviewOutput string // Full response from review AI
+}
 
-	// Build review context
+// ReviewPlan reviews an execution plan and returns detailed result
+func (r *AttentionReviewer) ReviewPlan(ctx context.Context, plan string, extractedContext string) (*ReviewPlanResult, error) {
+	log.Printf("[attention-v2] session %d: reviewing plan (len=%d)", r.Session.ID, len(plan))
+
+	// Build review context with full rules
 	rulesData := ParseAttentionRules(r.Session.AttentionRules)
 
 	var reviewParts []string
+	var inputSummaryParts []string
+
+	// Add session info
+	sessionInfo := fmt.Sprintf("【目标会话信息】\n会话 ID: %d\n团队: %s", r.Session.ID, r.Session.GroupName)
+	reviewParts = append(reviewParts, sessionInfo)
+	inputSummaryParts = append(inputSummaryParts, fmt.Sprintf("- 会话 ID: %d, 团队: %s", r.Session.ID, r.Session.GroupName))
 
 	// Add custom review rules if any
 	if rulesData.ReviewCustom != "" {
 		reviewParts = append(reviewParts, "【用户自定义审核规则】\n"+rulesData.ReviewCustom)
+		inputSummaryParts = append(inputSummaryParts, fmt.Sprintf("- 自定义审核规则: %d 字符", len(rulesData.ReviewCustom)))
+	}
+
+	// Add session rules
+	sessionRulesPath := fmt.Sprintf("%s/.ai-hub/rules/sessions/%d.md", os.Getenv("HOME"), r.Session.ID)
+	if content, err := os.ReadFile(sessionRulesPath); err == nil && len(content) > 0 {
+		sessionRules := string(content)
+		inputSummaryParts = append(inputSummaryParts, fmt.Sprintf("- 会话规则: %d 字符", len(sessionRules)))
+		if len(sessionRules) > 3000 {
+			sessionRules = sessionRules[:3000] + "...(已截断)"
+		}
+		reviewParts = append(reviewParts, "【会话规则】\n"+sessionRules)
+	}
+
+	// Add team rules
+	if r.Session.GroupName != "" {
+		if teamRules := BuildTeamRulesWithVars(r.Session.GroupName, nil); teamRules != "" {
+			inputSummaryParts = append(inputSummaryParts, fmt.Sprintf("- 团队规则: %d 字符", len(teamRules)))
+			if len(teamRules) > 3000 {
+				teamRules = teamRules[:3000] + "...(已截断)"
+			}
+			reviewParts = append(reviewParts, "【团队规则】\n"+teamRules)
+		}
+	}
+
+	// Add global rules (truncated to avoid token overflow)
+	if globalRules := BuildSystemPromptWithVars(nil); globalRules != "" {
+		inputSummaryParts = append(inputSummaryParts, fmt.Sprintf("- 全局规则: %d 字符", len(globalRules)))
+		if len(globalRules) > 2000 {
+			globalRules = globalRules[:2000] + "...(已截断)"
+		}
+		reviewParts = append(reviewParts, "【全局规则摘要】\n"+globalRules)
 	}
 
 	// Add extracted context if available
 	if extractedContext != "" && extractedContext != "无特别注意事项" {
 		reviewParts = append(reviewParts, "【预处理提取的相关上下文】\n"+extractedContext)
+		inputSummaryParts = append(inputSummaryParts, fmt.Sprintf("- 预处理上下文: %d 字符", len(extractedContext)))
 	}
+
+	// Add plan info
+	inputSummaryParts = append(inputSummaryParts, fmt.Sprintf("- 待审核计划: %d 字符", len(plan)))
 
 	// Build review query
-	reviewQuery := "请审核以下执行计划：\n\n" + plan
-	if len(reviewParts) > 0 {
-		reviewQuery = strings.Join(reviewParts, "\n\n---\n\n") + "\n\n---\n\n" + reviewQuery
-	}
+	reviewQuery := strings.Join(reviewParts, "\n\n---\n\n") + "\n\n---\n\n请审核以下执行计划：\n\n" + plan
+
+	log.Printf("[attention-v2] session %d: calling Anthropic API for review (query len=%d)", r.Session.ID, len(reviewQuery))
+
+	// Build system prompt with session context
+	systemPrompt := buildReviewerSystemPrompt(r.Session.ID, r.Session.GroupName)
 
 	// Call AI to review
-	result, err := CallAnthropicMessagesAPI(ctx, r.Provider, reviewQuery, ReviewerSystemPrompt, 1024)
+	result, err := CallAnthropicMessagesAPI(ctx, r.Provider, reviewQuery, systemPrompt, 2048)
 	if err != nil {
-		return false, "", fmt.Errorf("review failed: %w", err)
+		log.Printf("[attention-v2] session %d: Anthropic API error: %v", r.Session.ID, err)
+		return nil, fmt.Errorf("review API call failed: %w", err)
 	}
+
+	log.Printf("[attention-v2] session %d: Anthropic API returned (len=%d): %s", r.Session.ID, len(result), truncateForLog(result, 200))
 
 	passed, reason := ParseReviewResult(result)
 	log.Printf("[attention-v2] session %d: review result passed=%v reason=%s", r.Session.ID, passed, reason)
-	return passed, reason, nil
+
+	return &ReviewPlanResult{
+		Passed:       passed,
+		Reason:       reason,
+		ReviewInput:  "审核输入摘要:\n" + strings.Join(inputSummaryParts, "\n"),
+		ReviewOutput: result,
+	}, nil
 }
 
 // AttentionV2Executor orchestrates the full attention mode v2 flow
@@ -230,7 +310,7 @@ type AttentionV2Executor struct {
 	ParentSession *model.Session
 	Provider      *model.Provider
 	// Callbacks for integration with chat.go
-	BroadcastFn       func(sessionID int64, msgType, content string)
+	BroadcastFn       func(sessionID int64, msgType, content, detail string)
 	RunShadowStreamFn func(shadowSession *model.Session, query string, broadcastAsID int64) (string, string, error)
 }
 
@@ -317,6 +397,13 @@ func (e *AttentionV2Executor) ExecuteWithShadow(ctx context.Context, userMessage
 	state.ExtractedContext = extractedContext
 	fmt.Printf("[attention-v2] session %d: extracted context length=%d\n", parentID, len(extractedContext))
 
+	// Broadcast preprocessing result with detail
+	if extractedContext != "" {
+		e.broadcastStatusWithDetail("注意力模式：预处理完成，已提取相关上下文", extractedContext)
+	} else {
+		e.broadcastStatus("注意力模式：预处理完成，无特别上下文")
+	}
+
 	// ========== Phase 2: Create shadow session ==========
 	state.Phase = "planning"
 	e.broadcastStatus("注意力模式：正在创建影子会话...")
@@ -367,6 +454,9 @@ func (e *AttentionV2Executor) ExecuteWithShadow(ctx context.Context, userMessage
 	state.Plan = planResponse
 	fmt.Printf("[attention-v2] session %d: plan generated, length=%d\n", parentID, len(planResponse))
 
+	// Broadcast plan with detail
+	e.broadcastStatusWithDetail("注意力模式：执行计划已生成", planResponse)
+
 	// ========== Phase 4: Review loop ==========
 	state.Phase = "reviewing"
 	fmt.Printf("[attention-v2] session %d: Phase 4 - Reviewing\n", parentID)
@@ -376,35 +466,48 @@ func (e *AttentionV2Executor) ExecuteWithShadow(ctx context.Context, userMessage
 		Provider: e.Provider,
 	}
 
+	reviewPassed := false
+	var lastReviewError error
+	var lastRejectReason string
+
 	for attempt := 1; attempt <= MaxReviewAttempts; attempt++ {
 		state.ReviewAttempts = attempt
 		e.broadcastStatus(fmt.Sprintf("注意力模式：正在审核计划（第 %d/%d 次）...", attempt, MaxReviewAttempts))
 		fmt.Printf("[attention-v2] session %d: review attempt %d/%d\n", parentID, attempt, MaxReviewAttempts)
 
-		passed, reason, err := reviewer.ReviewPlan(ctx, state.Plan, extractedContext)
+		reviewResult, err := reviewer.ReviewPlan(ctx, state.Plan, extractedContext)
 		if err != nil {
 			fmt.Printf("[attention-v2] session %d: review error: %v\n", parentID, err)
+			lastReviewError = err
+			e.broadcastStatusWithDetail(fmt.Sprintf("注意力模式：审核出错（第 %d 次）", attempt), err.Error())
 			// On error, continue to next attempt
 			continue
 		}
 
-		if passed {
+		// Build detailed review info for user
+		reviewDetail := fmt.Sprintf("%s\n\n---\n\n审核 AI 输出:\n%s", reviewResult.ReviewInput, reviewResult.ReviewOutput)
+
+		if reviewResult.Passed {
 			fmt.Printf("[attention-v2] session %d: review PASSED\n", parentID)
+			reviewPassed = true
+			e.broadcastStatusWithDetail("注意力模式：审核通过 ✓", reviewDetail)
 			break
 		}
 
-		fmt.Printf("[attention-v2] session %d: review REJECTED: %s\n", parentID, reason)
+		fmt.Printf("[attention-v2] session %d: review REJECTED: %s\n", parentID, reviewResult.Reason)
+		lastRejectReason = reviewResult.Reason
+		e.broadcastStatusWithDetail(fmt.Sprintf("注意力模式：审核未通过（第 %d 次）", attempt), reviewDetail)
 
 		if attempt >= MaxReviewAttempts {
 			state.Phase = "failed"
-			state.Error = "审核多次未通过: " + reason
-			e.broadcastStatus("注意力模式：审核未通过，请人工介入")
-			return "", fmt.Errorf("review failed after %d attempts: %s", MaxReviewAttempts, reason)
+			state.Error = "审核多次未通过: " + reviewResult.Reason
+			e.broadcastStatusWithDetail("注意力模式：审核未通过，请人工介入", reviewDetail)
+			return "", fmt.Errorf("review failed after %d attempts: %s", MaxReviewAttempts, reviewResult.Reason)
 		}
 
 		// Send rejection feedback to shadow session for revision
 		e.broadcastStatus("注意力模式：审核未通过，正在修正...")
-		revisionPrompt := fmt.Sprintf("你的计划审核未通过，原因：%s\n\n请根据反馈修正你的计划并重新输出。", reason)
+		revisionPrompt := fmt.Sprintf("你的计划审核未通过，原因：%s\n\n请根据反馈修正你的计划并重新输出。", reviewResult.Reason)
 
 		revisedResponse, _, err := e.RunShadowStreamFn(shadowSession, revisionPrompt, parentID)
 		if err != nil {
@@ -413,6 +516,20 @@ func (e *AttentionV2Executor) ExecuteWithShadow(ctx context.Context, userMessage
 		}
 		state.Plan = revisedResponse
 		fmt.Printf("[attention-v2] session %d: plan revised, length=%d\n", parentID, len(revisedResponse))
+		e.broadcastStatusWithDetail("注意力模式：计划已修正", revisedResponse)
+	}
+
+	// Check if review passed - if all attempts failed with errors, don't proceed
+	if !reviewPassed {
+		state.Phase = "failed"
+		if lastReviewError != nil {
+			state.Error = fmt.Sprintf("审核失败: %v", lastReviewError)
+			e.broadcastStatus("注意力模式：审核失败，请检查 API 配置")
+			return "", fmt.Errorf("review failed after %d attempts with errors: %w", MaxReviewAttempts, lastReviewError)
+		}
+		state.Error = "审核多次未通过: " + lastRejectReason
+		e.broadcastStatus("注意力模式：审核未通过，请人工介入")
+		return "", fmt.Errorf("review failed after %d attempts: %s", MaxReviewAttempts, lastRejectReason)
 	}
 
 	// ========== Phase 5: Execute the approved plan ==========
@@ -462,8 +579,17 @@ func (e *AttentionV2Executor) buildPlanningPromptV2(userMessage, extractedContex
 
 // broadcastStatus sends a status message to the parent session
 func (e *AttentionV2Executor) broadcastStatus(message string) {
+	e.broadcastStatusWithDetail(message, "")
+}
+
+// broadcastStatusWithDetail sends a status message with optional detail content
+func (e *AttentionV2Executor) broadcastStatusWithDetail(message, detail string) {
 	if e.BroadcastFn != nil {
-		e.BroadcastFn(e.ParentSession.ID, "attention_status", message)
+		e.BroadcastFn(e.ParentSession.ID, "attention_status", message, detail)
 	}
-	log.Printf("[attention-v2] session %d: %s", e.ParentSession.ID, message)
+	if detail != "" {
+		log.Printf("[attention-v2] session %d: %s (detail: %s)", e.ParentSession.ID, message, truncateForLog(detail, 100))
+	} else {
+		log.Printf("[attention-v2] session %d: %s", e.ParentSession.ID, message)
+	}
 }

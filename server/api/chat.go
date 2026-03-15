@@ -39,6 +39,7 @@ type WSMessage struct {
 	Type      string `json:"type"` // "chat" | "stop" | "subscribe" | "error" | "chunk" | "thinking" | "tool_start" | "tool_input" | "tool_result" | "done" | "session_created" | "streaming_status" | "session_update"
 	SessionID int64  `json:"session_id"`
 	Content   string `json:"content"`
+	Detail    string `json:"detail,omitempty"` // Optional detail content for attention_status
 	ToolID    string `json:"tool_id,omitempty"`
 	ToolName  string `json:"tool_name,omitempty"`
 }
@@ -1312,8 +1313,8 @@ func runAttentionV2Flow(parentSession *model.Session, userMessage string) {
 	executor := &core.AttentionV2Executor{
 		ParentSession: parentSession,
 		Provider:      provider,
-		BroadcastFn: func(sessionID int64, msgType, content string) {
-			broadcast(WSMessage{Type: msgType, SessionID: sessionID, Content: content})
+		BroadcastFn: func(sessionID int64, msgType, content, detail string) {
+			broadcast(WSMessage{Type: msgType, SessionID: sessionID, Content: content, Detail: detail})
 		},
 		RunShadowStreamFn: func(shadowSession *model.Session, query string, broadcastAsID int64) (string, string, error) {
 			return runShadowStream(ctx, shadowSession, query, broadcastAsID, provider)

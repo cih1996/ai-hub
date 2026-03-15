@@ -22,6 +22,12 @@ const providerDropdownOpen = ref(false)
 const historyStepsExpanded = ref<Record<number, boolean>>({})
 // Attention mode status details expanded
 const attentionDetailsExpanded = ref(false)
+// Track expanded state for attention history items
+const expandedHistoryItems = ref<Record<number, boolean>>({})
+
+function toggleHistoryDetail(idx: number) {
+  expandedHistoryItems.value[idx] = !expandedHistoryItems.value[idx]
+}
 
 // Tool name Chinese mapping
 const toolNameMap: Record<string, string> = {
@@ -1263,10 +1269,23 @@ function formatToolInput(raw: string): string {
               <path d="M6 9l6 6 6-6"/>
             </svg>
           </div>
+          <!-- Current detail content -->
+          <div v-if="attentionDetailsExpanded && store.attentionDetail" class="attention-current-detail">
+            <div class="attention-detail-content md-content" v-html="renderMd(store.attentionDetail)" />
+          </div>
+          <!-- History with details -->
           <div v-if="attentionDetailsExpanded && store.attentionHistory.length > 1" class="attention-status-history">
-            <div v-for="(status, idx) in store.attentionHistory.slice(0, -1)" :key="idx" class="attention-history-item">
-              <span class="attention-history-check">✓</span>
-              {{ status }}
+            <div v-for="(item, idx) in store.attentionHistory.slice(0, -1)" :key="idx" class="attention-history-item">
+              <div class="attention-history-header" @click.stop="toggleHistoryDetail(idx)">
+                <span class="attention-history-check">✓</span>
+                <span class="attention-history-status">{{ item.status }}</span>
+                <svg v-if="item.detail" class="attention-history-expand" :class="{ expanded: expandedHistoryItems[idx] }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M6 9l6 6 6-6"/>
+                </svg>
+              </div>
+              <div v-if="item.detail && expandedHistoryItems[idx]" class="attention-history-detail">
+                <div class="attention-detail-content md-content" v-html="renderMd(item.detail)" />
+              </div>
             </div>
           </div>
         </div>
@@ -2956,16 +2975,78 @@ function formatToolInput(raw: string): string {
 }
 
 .attention-history-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
   font-size: 12px;
   color: var(--text-secondary);
   padding: 4px 0;
+  border-bottom: 1px solid rgba(255, 149, 0, 0.08);
+}
+
+.attention-history-item:last-child {
+  border-bottom: none;
+}
+
+.attention-history-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.attention-history-status {
+  flex: 1;
+}
+
+.attention-history-expand {
+  color: var(--text-secondary);
+  transition: transform 0.2s ease;
+}
+
+.attention-history-expand.expanded {
+  transform: rotate(180deg);
 }
 
 .attention-history-check {
   color: #34c759;
+  font-size: 11px;
+}
+
+.attention-current-detail {
+  margin-top: 10px;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 6px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.attention-history-detail {
+  margin-top: 6px;
+  margin-left: 20px;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.attention-detail-content {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.attention-detail-content pre {
+  background: rgba(0, 0, 0, 0.1);
+  padding: 8px;
+  border-radius: 4px;
+  overflow-x: auto;
+  font-size: 11px;
+}
+
+.attention-detail-content code {
+  font-family: 'SF Mono', Monaco, monospace;
   font-size: 11px;
 }
 </style>

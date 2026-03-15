@@ -49,7 +49,9 @@ func CallAnthropicMessagesAPI(ctx context.Context, provider *model.Provider, use
 	reqBody := map[string]interface{}{
 		"model":      modelID,
 		"max_tokens": maxTokens,
-		"system":     systemPrompt,
+		"system": []map[string]string{
+			{"type": "text", "text": systemPrompt},
+		},
 		"messages": []map[string]string{
 			{"role": "user", "content": userMessage},
 		},

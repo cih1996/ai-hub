@@ -27,8 +27,13 @@ export const useChatStore = defineStore('chat', () => {
   let _suppressChunksFor = 0
 
   // Attention mode v2 status tracking
+  interface AttentionHistoryItem {
+    status: string
+    detail?: string
+  }
   const attentionStatus = ref('')  // Current status message
-  const attentionHistory = ref<string[]>([])  // History of status messages
+  const attentionDetail = ref('')  // Current detail content
+  const attentionHistory = ref<AttentionHistoryItem[]>([])  // History of status messages with details
   const attentionActive = ref(false)  // Whether attention mode is currently running
 
   const workDir = ref('')
@@ -156,6 +161,7 @@ export const useChatStore = defineStore('chat', () => {
             // Clear attention status when session becomes idle
             attentionActive.value = false
             attentionStatus.value = ''
+            attentionDetail.value = ''
             attentionHistory.value = []
             api.getMessagesPaginated(msg.session_id, 50).then((resp) => {
               messages.value = resp.messages
@@ -171,9 +177,17 @@ export const useChatStore = defineStore('chat', () => {
         if (msg.session_id === currentSessionId.value) {
           attentionActive.value = true
           attentionStatus.value = msg.content
-          // Add to history if not duplicate
-          if (attentionHistory.value[attentionHistory.value.length - 1] !== msg.content) {
-            attentionHistory.value.push(msg.content)
+          attentionDetail.value = msg.detail || ''
+          // Add to history if not duplicate status
+          const lastItem = attentionHistory.value[attentionHistory.value.length - 1]
+          if (!lastItem || lastItem.status !== msg.content) {
+            attentionHistory.value.push({
+              status: msg.content,
+              detail: msg.detail
+            })
+          } else if (msg.detail && lastItem.detail !== msg.detail) {
+            // Update detail if status is same but detail changed
+            lastItem.detail = msg.detail
           }
         }
         return
@@ -661,6 +675,7 @@ export const useChatStore = defineStore('chat', () => {
     // Attention mode v2
     attentionActive,
     attentionStatus,
+    attentionDetail,
     attentionHistory,
   }
 })
