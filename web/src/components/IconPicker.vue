@@ -289,7 +289,7 @@ watch(showPicker, (val) => {
   background: var(--bg-primary, #1a1a2e);
   border-radius: 12px;
   padding: 16px;
-  max-width: 600px;
+  max-width: 640px;
   width: 95%;
   max-height: 80vh;
   overflow: hidden;
