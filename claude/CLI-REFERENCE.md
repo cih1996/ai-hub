@@ -20,6 +20,7 @@ ai-hub sessions                          # 列出所有会话（含错误统计 
 ai-hub sessions --with-errors            # 只显示有错误/警告的会话
 ai-hub sessions <id>                     # 会话详情+状态
 ai-hub sessions <id> messages            # 最近消息
+ai-hub sessions <id> move --group <name> # 将会话移动到指定团队
 ai-hub send <session_id> "消息内容"       # 发消息（0=新建会话）
 
 ## 错误统计
