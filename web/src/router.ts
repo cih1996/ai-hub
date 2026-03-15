@@ -10,6 +10,7 @@ const router = createRouter({
       component: () => import('./views/MainLayout.vue'),
       children: [
         { path: 'chat/:id?', name: 'chat', component: () => import('./views/ChatView.vue') },
+        { path: 'teams', name: 'teams', component: () => import('./views/TeamsView.vue') },
         { path: 'manage', name: 'manage', component: () => import('./views/ManageView.vue') },
         { path: 'extensions', name: 'extensions', component: () => import('./views/ExtensionsView.vue') },
         { path: 'services', name: 'services', component: () => import('./views/ServicesView.vue') },
