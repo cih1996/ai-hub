@@ -1089,15 +1089,15 @@ func extractAndSaveErrors(sessionID, messageID int64, content string) {
 }
 
 // buildAttentionPrompt wraps user content with attention system activation rules.
-// When attention mode is enabled, the AI is asked to output a structured plan JSON.
+// Note: This is legacy v1 code, kept for backward compatibility.
+// Attention mode v2 uses a different flow via runAttentionV2Flow.
 func buildAttentionPrompt(userContent string, customActivationRules string) string {
-	activationPrompt := core.BuildActivationPrompt(customActivationRules)
-	return `【注意力模式】` + activationPrompt + `
-
----
-
-用户原始请求：
-` + userContent
+	var parts []string
+	if customActivationRules != "" {
+		parts = append(parts, customActivationRules)
+	}
+	parts = append(parts, "用户请求：\n"+userContent)
+	return strings.Join(parts, "\n\n")
 }
 
 // attentionReviewState tracks the review retry count per session
@@ -1151,15 +1151,20 @@ func maybeRunAttentionReview(session *model.Session, fullResponse string, provid
 }
 
 // runAttentionReview executes the review process in an independent context
+// Note: This is legacy v1 code, kept for backward compatibility.
 func runAttentionReview(session *model.Session, trigger *core.AttentionTrigger, provider *model.Provider, retryCount int) {
 	log.Printf("[attention] session %d: starting review (retry %d/%d)", session.ID, retryCount, core.MaxReviewRetries)
 
 	// Build review context
 	rulesData := core.ParseAttentionRules(session.AttentionRules)
-	reviewPrompt := core.BuildReviewPrompt(rulesData.ReviewCustom)
 
 	// Gather context for review: session rules, team rules, global rules, memory
 	var contextParts []string
+
+	// Add custom review rules if any
+	if rulesData.ReviewCustom != "" {
+		contextParts = append(contextParts, "【用户自定义审核规则】\n"+rulesData.ReviewCustom)
+	}
 
 	// Session rules
 	if sessionRules, err := ReadSessionRules(session.ID); err == nil && sessionRules != "" {
@@ -1183,9 +1188,9 @@ func runAttentionReview(session *model.Session, trigger *core.AttentionTrigger, 
 	}
 
 	// Build the review query
-	reviewQuery := reviewPrompt + "\n\n---\n\n"
+	var reviewQuery string
 	if len(contextParts) > 0 {
-		reviewQuery += "审核依据：\n\n" + strings.Join(contextParts, "\n\n---\n\n") + "\n\n---\n\n"
+		reviewQuery = "审核依据：\n\n" + strings.Join(contextParts, "\n\n---\n\n") + "\n\n---\n\n"
 	}
 	reviewQuery += "待审核的执行计划：\n" + trigger.Plan
 

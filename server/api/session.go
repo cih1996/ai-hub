@@ -625,7 +625,7 @@ func ToggleAttention(c *gin.Context) {
 }
 
 // GetAttentionRules returns the attention rules for a session.
-// Returns both system built-in rules (read-only) and user custom rules (editable).
+// Returns user custom rules (editable). System rules have been removed.
 func GetAttentionRules(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
@@ -644,9 +644,9 @@ func GetAttentionRules(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"session_id": session.ID,
-		// System built-in rules (read-only)
-		"system_activation_rule": core.SystemActivationRule,
-		"system_review_rule":     core.SystemReviewRule,
+		// System built-in rules removed per user request
+		"system_activation_rule": "",
+		"system_review_rule":     "",
 		// User custom rules (editable)
 		"activation_custom": rulesData.ActivationCustom,
 		"review_custom":     rulesData.ReviewCustom,
