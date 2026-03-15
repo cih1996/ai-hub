@@ -370,11 +370,11 @@ onMounted(async () => {
             :key="s.id"
             :data-session-id="s.id"
             class="session-item"
-            :class="{ active: s.id === store.currentSessionId, highlight: s.id === highlightSessionId }"
+            :class="{ active: s.id === store.currentSessionId, highlight: s.id === highlightSessionId, streaming: s.streaming }"
             @click="selectSession(s.id)"
             @contextmenu.prevent="openCtxMenu($event, s)"
           >
-            <img :src="getSessionIcon(s)" class="session-icon" alt="" />
+            <img :src="getSessionIcon(s)" class="session-icon" :class="{ 'icon-pulse': s.streaming }" alt="" />
             <div class="session-info">
               <div class="session-title-row">
                 <span
@@ -383,9 +383,6 @@ onMounted(async () => {
                   :class="s.process_state === 'busy' ? 'busy' : 'idle'"
                   :title="s.process_state === 'busy' ? '运行中' : '空闲'"
                 ></span>
-                <svg v-if="s.streaming" class="streaming-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M21 12a9 9 0 11-6.219-8.56"/>
-                </svg>
                 <svg v-if="s.has_triggers" class="trigger-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
                 </svg>
@@ -674,9 +671,39 @@ onMounted(async () => {
   border-radius: 6px;
   margin-right: 10px;
   flex-shrink: 0;
+  transition: box-shadow 0.3s ease;
+}
+.session-icon.icon-pulse {
+  animation: icon-pulse 1.5s ease-in-out infinite;
+  box-shadow: 0 0 0 0 var(--accent);
+}
+@keyframes icon-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.6);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(99, 102, 241, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0);
+  }
 }
 .session-item:hover { background: var(--bg-hover); }
 .session-item.active { background: var(--bg-active); }
+.session-item.streaming {
+  background: linear-gradient(90deg, var(--bg-secondary) 0%, rgba(99, 102, 241, 0.08) 50%, var(--bg-secondary) 100%);
+  background-size: 200% 100%;
+  animation: streaming-bg 2s ease-in-out infinite;
+}
+.session-item.streaming.active {
+  background: linear-gradient(90deg, var(--bg-active) 0%, rgba(99, 102, 241, 0.15) 50%, var(--bg-active) 100%);
+  background-size: 200% 100%;
+  animation: streaming-bg 2s ease-in-out infinite;
+}
+@keyframes streaming-bg {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
 .session-item.highlight {
   animation: highlight-pulse 1s ease-out;
 }
@@ -707,11 +734,6 @@ onMounted(async () => {
   align-items: center;
   gap: 6px;
   min-width: 0;
-}
-.streaming-icon {
-  flex-shrink: 0;
-  color: var(--accent);
-  animation: spin 1s linear infinite;
 }
 .trigger-icon {
   flex-shrink: 0;
