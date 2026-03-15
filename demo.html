@@ -558,6 +558,7 @@
                     ws.onmessage = (event) => {
                         try {
                             const msg = JSON.parse(event.data);
+                            console.log('[WS] Received:', msg.type, 'session:', msg.session_id);
 
                             // Handle session_update (streaming status broadcast)
                             if (msg.type === 'session_update') {
@@ -576,8 +577,9 @@
                                 // Update tab streaming state
                                 tabs.value.forEach(tab => {
                                     if (tab.type === 'team' && tab.data.currentSession?.id === sessionId) {
-                                        tab.data.isStreaming = msg.content === 'streaming';
-                                        if (msg.content !== 'streaming') {
+                                        if (msg.content === 'streaming') {
+                                            tab.data.isStreaming = true;
+                                        } else {
                                             // Streaming ended, finalize
                                             finalizeStreaming(tab);
                                         }
@@ -590,22 +592,31 @@
                             const tab = tabs.value.find(t =>
                                 t.type === 'team' && t.data.currentSession?.id === msg.session_id
                             );
-                            if (!tab) return;
+
+                            if (!tab) {
+                                console.log('[WS] No tab found for session', msg.session_id);
+                                return;
+                            }
+
+                            console.log('[WS] Processing', msg.type, 'for tab', tab.id);
 
                             switch (msg.type) {
                                 case 'streaming_status':
-                                    tab.data.isStreaming = msg.content === 'streaming';
-                                    if (msg.content !== 'streaming') {
+                                    if (msg.content === 'streaming') {
+                                        tab.data.isStreaming = true;
+                                    } else {
                                         finalizeStreaming(tab);
                                     }
                                     break;
 
                                 case 'thinking':
+                                    tab.data.isStreaming = true;
                                     if (!tab.data.thinkingContent) tab.data.thinkingContent = '';
                                     tab.data.thinkingContent += msg.content;
                                     break;
 
                                 case 'tool_start':
+                                    tab.data.isStreaming = true;
                                     if (!tab.data.toolCalls) tab.data.toolCalls = [];
                                     tab.data.toolCalls.push({
                                         id: msg.tool_id || String(Date.now()),
@@ -632,12 +643,14 @@
                                 }
 
                                 case 'chunk':
+                                    tab.data.isStreaming = true;
                                     // Mark all running tools as done when chunk arrives
                                     tab.data.toolCalls?.forEach(tc => {
                                         if (tc.status === 'running') tc.status = 'done';
                                     });
                                     if (!tab.data.streamingContent) tab.data.streamingContent = '';
                                     tab.data.streamingContent += msg.content;
+                                    console.log('[WS] Chunk received, content length:', tab.data.streamingContent.length);
                                     // Auto scroll
                                     nextTick(() => {
                                         const container = document.getElementById(`messages-container-${tab.id}`);
@@ -646,10 +659,12 @@
                                     break;
 
                                 case 'done':
+                                    console.log('[WS] Done received, finalizing');
                                     finalizeStreaming(tab, msg.content);
                                     break;
 
                                 case 'error':
+                                    console.log('[WS] Error received:', msg.content);
                                     finalizeStreaming(tab, null, msg.content);
                                     break;
                             }
@@ -670,6 +685,8 @@
 
                 // Finalize streaming: add assistant message to list
                 const finalizeStreaming = (tab, metadata = null, error = null) => {
+                    console.log('[Finalize] Starting, content length:', tab.data.streamingContent?.length || 0);
+
                     const content = tab.data.streamingContent || '';
                     const toolCalls = tab.data.toolCalls || [];
                     const thinking = tab.data.thinkingContent || '';
@@ -694,13 +711,15 @@
 
                     // Add message if we have content
                     if (content || metadata || error) {
-                        tab.data.messages.push({
+                        const newMsg = {
                             id: Date.now(),
                             role: 'assistant',
                             content: error ? `❌ 错误: ${error}` : (content || '[任务已执行，详见执行步骤]'),
                             metadata: metadata || undefined,
                             created_at: new Date().toISOString()
-                        });
+                        };
+                        tab.data.messages.push(newMsg);
+                        console.log('[Finalize] Added message, total messages:', tab.data.messages.length);
                     }
 
                     // Reset streaming state
@@ -832,6 +851,15 @@
                     tab.data.messages.push(userMsg);
                     tab.data.inputText = '';
 
+                    // Set streaming state immediately to show "waiting" UI
+                    tab.data.isStreaming = true;
+                    tab.data.streamingContent = '';
+                    tab.data.thinkingContent = '';
+                    tab.data.toolCalls = [];
+
+                    // Ensure we're subscribed to this session
+                    subscribeSession(sessionId);
+
                     // Scroll to bottom
                     nextTick(() => {
                         const container = document.getElementById(`messages-container-${tab.id}`);
@@ -844,10 +872,14 @@
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ session_id: sessionId, content: text })
                         });
-                        if (!res.ok) throw new Error('Send failed');
-                        // Message sent, AI response will come via WebSocket or we can poll
+                        if (!res.ok) {
+                            throw new Error('Send failed');
+                        }
+                        console.log('[Send] Message sent successfully');
+                        // AI response will come via WebSocket
                     } catch (e) {
                         console.error('[Send] Error', e);
+                        tab.data.isStreaming = false;
                         alert('发送失败：' + e.message);
                     } finally {
                         tab.data.sending = false;
