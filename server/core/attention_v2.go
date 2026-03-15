@@ -229,8 +229,13 @@ func (r *AttentionReviewer) ReviewPlan(ctx context.Context, plan string, extract
 type AttentionV2Executor struct {
 	ParentSession *model.Session
 	Provider      *model.Provider
-	BroadcastFn   func(sessionID int64, msgType, content string) // Function to broadcast messages
+	// Callbacks for integration with chat.go
+	BroadcastFn       func(sessionID int64, msgType, content string)
+	RunShadowStreamFn func(shadowSession *model.Session, query string, broadcastAsID int64) (string, string, error)
 }
+
+// MaxReviewAttempts is the maximum number of review attempts before failing
+const MaxReviewAttempts = 3
 
 // Execute runs the full attention mode v2 flow
 // This is the main entry point for attention mode v2
@@ -246,12 +251,9 @@ func (e *AttentionV2Executor) Execute(ctx context.Context, userMessage string) e
 		CreatedAt:       time.Now(),
 	}
 	AttentionMgr.SetState(parentID, state)
-	defer AttentionMgr.ClearState(parentID)
-
-	// Broadcast status
-	e.broadcastStatus("注意力模式：正在分析请求...")
 
 	// Phase 1: Preprocessing - Extract relevant context
+	e.broadcastStatus("注意力模式：正在分析请求...")
 	preprocessor := &AttentionPreprocessor{
 		Session:  e.ParentSession,
 		Provider: e.Provider,
@@ -261,19 +263,193 @@ func (e *AttentionV2Executor) Execute(ctx context.Context, userMessage string) e
 		state.Phase = "failed"
 		state.Error = err.Error()
 		e.broadcastStatus("注意力模式：预处理失败 - " + err.Error())
+		AttentionMgr.ClearState(parentID)
 		return err
 	}
 	state.ExtractedContext = extractedContext
+	log.Printf("[attention-v2] session %d: preprocessing complete", parentID)
+
+	// Phase 2: Create shadow session
 	state.Phase = "planning"
+	e.broadcastStatus("注意力模式：正在创建执行环境...")
 
-	// The rest of the flow (shadow session, planning, reviewing, executing)
-	// will be implemented in subsequent phases
-	// For now, return the extracted context as a placeholder
+	// Note: Shadow session creation and execution will be handled by chat.go
+	// through the RunShadowStreamFn callback, which has access to store functions
 
-	log.Printf("[attention-v2] session %d: preprocessing complete, context=%s", parentID, extractedContext)
-	e.broadcastStatus("注意力模式：预处理完成，提取到相关上下文")
+	// For now, store the extracted context in state for later use
+	state.Phase = "ready"
+	log.Printf("[attention-v2] session %d: ready for shadow execution", parentID)
 
 	return nil
+}
+
+// ExecuteWithShadow runs the full flow including shadow session execution
+// This should be called from chat.go after setting up the callbacks
+func (e *AttentionV2Executor) ExecuteWithShadow(ctx context.Context, userMessage string, createShadowFn func() (*model.Session, error), deleteShadowFn func(int64) error, copyMessagesFn func(parentID, shadowID int64, limit int) error) error {
+	parentID := e.ParentSession.ID
+	log.Printf("[attention-v2] session %d: starting full execution with shadow", parentID)
+
+	// Initialize state
+	state := &AttentionV2State{
+		ParentSessionID: parentID,
+		Phase:           "preprocessing",
+		UserMessage:     userMessage,
+		CreatedAt:       time.Now(),
+	}
+	AttentionMgr.SetState(parentID, state)
+	defer AttentionMgr.ClearState(parentID)
+
+	// Phase 1: Preprocessing
+	e.broadcastStatus("注意力模式：正在分析请求...")
+	preprocessor := &AttentionPreprocessor{
+		Session:  e.ParentSession,
+		Provider: e.Provider,
+	}
+	extractedContext, err := preprocessor.ExtractRelevantContext(ctx, userMessage)
+	if err != nil {
+		state.Phase = "failed"
+		state.Error = err.Error()
+		e.broadcastStatus("注意力模式：预处理失败 - " + err.Error())
+		return fmt.Errorf("preprocessing failed: %w", err)
+	}
+	state.ExtractedContext = extractedContext
+
+	// Phase 2: Create shadow session
+	state.Phase = "planning"
+	e.broadcastStatus("注意力模式：正在创建影子会话...")
+
+	shadowSession, err := createShadowFn()
+	if err != nil {
+		state.Phase = "failed"
+		state.Error = err.Error()
+		e.broadcastStatus("注意力模式：创建影子会话失败 - " + err.Error())
+		return fmt.Errorf("create shadow session failed: %w", err)
+	}
+	state.ShadowSessionID = shadowSession.ID
+	defer func() {
+		// Cleanup shadow session
+		if err := deleteShadowFn(shadowSession.ID); err != nil {
+			log.Printf("[attention-v2] session %d: failed to delete shadow session %d: %v", parentID, shadowSession.ID, err)
+		}
+	}()
+
+	// Copy recent messages to shadow session for context
+	if err := copyMessagesFn(parentID, shadowSession.ID, 20); err != nil {
+		log.Printf("[attention-v2] session %d: failed to copy messages to shadow: %v", parentID, err)
+		// Continue anyway, shadow session will work without history
+	}
+
+	// Phase 3: Planning - Send to shadow session with extracted context
+	e.broadcastStatus("注意力模式：正在生成执行计划...")
+
+	// Build the planning prompt
+	planningPrompt := e.buildPlanningPrompt(userMessage, extractedContext)
+
+	// Run shadow session and get the plan
+	// The RunShadowStreamFn broadcasts to parent session ID
+	if e.RunShadowStreamFn == nil {
+		return fmt.Errorf("RunShadowStreamFn not configured")
+	}
+
+	planResponse, _, err := e.RunShadowStreamFn(shadowSession, planningPrompt, parentID)
+	if err != nil {
+		state.Phase = "failed"
+		state.Error = err.Error()
+		e.broadcastStatus("注意力模式：生成计划失败 - " + err.Error())
+		return fmt.Errorf("planning failed: %w", err)
+	}
+
+	// Extract plan from response
+	trigger := DetectAttentionTrigger(planResponse)
+	if trigger == nil {
+		// No structured plan found, treat the whole response as the plan
+		state.Plan = planResponse
+	} else {
+		state.Plan = trigger.Plan
+	}
+
+	// Phase 4: Review loop
+	state.Phase = "reviewing"
+	reviewer := &AttentionReviewer{
+		Session:  e.ParentSession,
+		Provider: e.Provider,
+	}
+
+	for attempt := 1; attempt <= MaxReviewAttempts; attempt++ {
+		state.ReviewAttempts = attempt
+		e.broadcastStatus(fmt.Sprintf("注意力模式：正在审核计划（第 %d 次）...", attempt))
+
+		passed, reason, err := reviewer.ReviewPlan(ctx, state.Plan, extractedContext)
+		if err != nil {
+			log.Printf("[attention-v2] session %d: review error: %v", parentID, err)
+			continue // Retry on error
+		}
+
+		if passed {
+			log.Printf("[attention-v2] session %d: review passed", parentID)
+			break
+		}
+
+		if attempt >= MaxReviewAttempts {
+			state.Phase = "failed"
+			state.Error = "审核多次未通过: " + reason
+			e.broadcastStatus("注意力模式：审核未通过，请人工介入 - " + reason)
+			return fmt.Errorf("review failed after %d attempts: %s", MaxReviewAttempts, reason)
+		}
+
+		// Send rejection feedback to shadow session for revision
+		e.broadcastStatus("注意力模式：审核未通过，正在修正计划...")
+		revisionPrompt := fmt.Sprintf("审核未通过，原因：%s\n\n请根据反馈修正你的执行计划。", reason)
+
+		revisedResponse, _, err := e.RunShadowStreamFn(shadowSession, revisionPrompt, parentID)
+		if err != nil {
+			log.Printf("[attention-v2] session %d: revision failed: %v", parentID, err)
+			continue
+		}
+
+		// Update plan
+		if newTrigger := DetectAttentionTrigger(revisedResponse); newTrigger != nil {
+			state.Plan = newTrigger.Plan
+		} else {
+			state.Plan = revisedResponse
+		}
+	}
+
+	// Phase 5: Execute the approved plan
+	state.Phase = "executing"
+	e.broadcastStatus("注意力模式：审核通过，正在执行...")
+
+	executePrompt := "审核已通过，请执行你的计划。"
+	finalResponse, metadata, err := e.RunShadowStreamFn(shadowSession, executePrompt, parentID)
+	if err != nil {
+		state.Phase = "failed"
+		state.Error = err.Error()
+		e.broadcastStatus("注意力模式：执行失败 - " + err.Error())
+		return fmt.Errorf("execution failed: %w", err)
+	}
+
+	state.FinalResult = finalResponse
+	state.Phase = "done"
+	log.Printf("[attention-v2] session %d: execution complete, result_len=%d, metadata_len=%d", parentID, len(finalResponse), len(metadata))
+
+	return nil
+}
+
+// buildPlanningPrompt builds the prompt for the planning phase
+func (e *AttentionV2Executor) buildPlanningPrompt(userMessage, extractedContext string) string {
+	rulesData := ParseAttentionRules(e.ParentSession.AttentionRules)
+	activationPrompt := BuildActivationPrompt(rulesData.ActivationCustom)
+
+	var parts []string
+	parts = append(parts, activationPrompt)
+
+	if extractedContext != "" && extractedContext != "无特别注意事项" {
+		parts = append(parts, "【注意力预处理提取的相关上下文】\n"+extractedContext)
+	}
+
+	parts = append(parts, "【用户请求】\n"+userMessage)
+
+	return strings.Join(parts, "\n\n---\n\n")
 }
 
 // broadcastStatus sends a status message to the parent session
@@ -281,4 +457,5 @@ func (e *AttentionV2Executor) broadcastStatus(message string) {
 	if e.BroadcastFn != nil {
 		e.BroadcastFn(e.ParentSession.ID, "attention_status", message)
 	}
+	log.Printf("[attention-v2] session %d: %s", e.ParentSession.ID, message)
 }
