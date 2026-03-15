@@ -4,11 +4,8 @@ import (
 	"ai-hub/server/core"
 	"ai-hub/server/model"
 	"ai-hub/server/store"
-	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -1175,7 +1172,8 @@ func runAttentionReview(session *model.Session, trigger *core.AttentionTrigger, 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	reviewResponse, err := callAnthropicMessagesAPI(ctx, provider, reviewQuery)
+	systemPrompt := "你是注意力审核 AI。只输出审核结果，格式为 [PASS] 或 [REJECT:原因]。不要调用任何工具，不要执行任何操作。"
+	reviewResponse, err := core.CallAnthropicMessagesAPI(ctx, provider, reviewQuery, systemPrompt, 1024)
 	if err != nil {
 		log.Printf("[attention] session %d: review failed: %v", session.ID, err)
 		sendAttentionFeedback(session.ID, "【注意力系统】审核失败: "+err.Error())
@@ -1229,107 +1227,4 @@ func sendAttentionFeedback(sessionID int64, message string) {
 	// Trigger AI response
 	triggerMsgID := userMsg.ID
 	go runStream(session, message, false, triggerMsgID)
-}
-
-// callAnthropicMessagesAPI calls the Anthropic Messages API directly via HTTP
-// This avoids the nested Claude Code session error when running inside Claude Code
-func callAnthropicMessagesAPI(ctx context.Context, provider *model.Provider, userMessage string) (string, error) {
-	// Determine base URL
-	baseURL := provider.BaseURL
-	if baseURL == "" {
-		baseURL = "https://api.anthropic.com"
-	}
-	baseURL = strings.TrimRight(baseURL, "/")
-
-	// Determine model
-	modelID := provider.ModelID
-	if modelID == "" {
-		modelID = "claude-sonnet-4-20250514"
-	}
-
-	// Build request body
-	reqBody := map[string]interface{}{
-		"model":      modelID,
-		"max_tokens": 1024,
-		"system":     "你是注意力审核 AI。只输出审核结果，格式为 [PASS] 或 [REJECT:原因]。不要调用任何工具，不要执行任何操作。",
-		"messages": []map[string]string{
-			{"role": "user", "content": userMessage},
-		},
-	}
-
-	bodyBytes, err := json.Marshal(reqBody)
-	if err != nil {
-		return "", err
-	}
-
-	// Create request
-	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/v1/messages", bytes.NewReader(bodyBytes))
-	if err != nil {
-		return "", err
-	}
-
-	// Set headers
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("anthropic-version", "2023-06-01")
-
-	// Set API key based on auth mode
-	apiKey := provider.APIKey
-	if apiKey != "" {
-		req.Header.Set("x-api-key", apiKey)
-	}
-
-	// Use proxy if configured
-	client := &http.Client{Timeout: 60 * time.Second}
-	if provider.ProxyURL != "" {
-		// Note: For simplicity, we're not implementing proxy here
-		// The provider's proxy is typically for CLI, not direct API calls
-		log.Printf("[attention] proxy configured but not used for direct API call: %s", provider.ProxyURL)
-	}
-
-	// Send request
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	// Read response
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	// Check for error response
-	if resp.StatusCode != http.StatusOK {
-		var errResp struct {
-			Error struct {
-				Message string `json:"message"`
-			} `json:"error"`
-		}
-		if json.Unmarshal(respBody, &errResp) == nil && errResp.Error.Message != "" {
-			return "", fmt.Errorf("API error: %s", errResp.Error.Message)
-		}
-		return "", fmt.Errorf("API error: status %d", resp.StatusCode)
-	}
-
-	// Parse response
-	var apiResp struct {
-		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		} `json:"content"`
-	}
-	if err := json.Unmarshal(respBody, &apiResp); err != nil {
-		return "", err
-	}
-
-	// Extract text content
-	var result strings.Builder
-	for _, block := range apiResp.Content {
-		if block.Type == "text" {
-			result.WriteString(block.Text)
-		}
-	}
-
-	return result.String(), nil
 }
