@@ -201,6 +201,10 @@ const showSessionRulesModal = ref(false)
 const sessionRulesContent = ref('')
 const sessionRulesSaving = ref(false)
 const sessionRulesLoading = ref(false)
+// Team selection state
+const groupsList = ref<api.Group[]>([])
+const selectedGroupName = ref('')
+const groupSaving = ref(false)
 
 // Attention rules modal state
 const showAttentionRulesModal = ref(false)
@@ -719,13 +723,40 @@ async function openSessionRulesModal() {
   if (!sid) return
   showSessionRulesModal.value = true
   sessionRulesLoading.value = true
+  // Load current group name
+  selectedGroupName.value = store.currentSession?.group_name || ''
   try {
-    const res = await api.getSessionRules(sid)
-    sessionRulesContent.value = res.content || ''
+    // Load session rules and groups list in parallel
+    const [rulesRes, groupsRes] = await Promise.all([
+      api.getSessionRules(sid).catch(() => ({ content: '' })),
+      api.listGroups().catch(() => [])
+    ])
+    sessionRulesContent.value = rulesRes.content || ''
+    groupsList.value = groupsRes
   } catch {
     sessionRulesContent.value = ''
+    groupsList.value = []
   } finally {
     sessionRulesLoading.value = false
+  }
+}
+
+// Update session group
+async function updateSessionGroup() {
+  const sid = store.currentSession?.id
+  if (!sid) return
+  groupSaving.value = true
+  try {
+    await api.updateSession(sid, { group_name: selectedGroupName.value })
+    // Update store
+    if (store.currentSession) {
+      store.currentSession.group_name = selectedGroupName.value
+    }
+    showToast('团队已更新')
+  } catch (e: any) {
+    showToast('更新失败: ' + (e.message || '未知错误'), 'error')
+  } finally {
+    groupSaving.value = false
   }
 }
 
@@ -1330,6 +1361,28 @@ function formatToolInput(raw: string): string {
           <div class="session-rules-body">
             <div v-if="sessionRulesLoading" class="rules-empty">加载中...</div>
             <template v-else>
+              <!-- Team selector -->
+              <div class="session-group-selector">
+                <label class="group-label">所属团队</label>
+                <div class="group-select-row">
+                  <select v-model="selectedGroupName" class="group-select" :disabled="groupSaving">
+                    <option value="">无团队</option>
+                    <option v-for="g in groupsList" :key="g.name" :value="g.name">
+                      {{ g.name }}
+                    </option>
+                  </select>
+                  <button
+                    class="btn-save-group"
+                    @click="updateSessionGroup"
+                    :disabled="groupSaving || selectedGroupName === (store.currentSession?.group_name || '')"
+                  >
+                    {{ groupSaving ? '...' : '保存' }}
+                  </button>
+                </div>
+              </div>
+
+              <!-- Session rules textarea -->
+              <label class="group-label">角色规则</label>
               <textarea
                 v-model="sessionRulesContent"
                 class="rules-textarea session-rules-textarea"
@@ -2458,6 +2511,51 @@ function formatToolInput(raw: string): string {
 /* Session rules */
 .session-rules-body {
   display: flex; flex-direction: column; flex: 1; min-height: 0;
+}
+.session-group-selector {
+  margin-bottom: 12px;
+}
+.group-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+.group-select-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.group-select {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+}
+.group-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.btn-save-group {
+  padding: 8px 16px;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: white;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.btn-save-group:hover:not(:disabled) {
+  opacity: 0.9;
+}
+.btn-save-group:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .session-rules-textarea {
   min-height: 300px;

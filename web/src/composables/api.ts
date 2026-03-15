@@ -56,6 +56,18 @@ export const getMessagesPaginated = (sessionId: number, limit = 50, beforeId?: n
 export const compressSession = (id: number) =>
   request<{ ok: boolean }>(`/sessions/${id}/compress`, { method: 'POST' })
 
+// Groups
+export interface Group {
+  id: number
+  name: string
+  icon: string
+  description: string
+  session_count: number
+  created_at: string
+  updated_at: string
+}
+export const listGroups = () => request<Group[]>('/groups')
+
 // Anthropic API request structure (as sent by Claude Code CLI through the proxy)
 export interface AnthropicMessage {
   role: 'user' | 'assistant'
