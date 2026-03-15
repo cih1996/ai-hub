@@ -401,7 +401,8 @@ watch(showPicker, (val) => {
   display: grid;
   grid-template-columns: repeat(8, 1fr);
   gap: 6px;
-  padding: 4px;
+  padding-left: 30px;
+  padding-right: 30px;
 }
 
 .icons-grid.custom-grid {
