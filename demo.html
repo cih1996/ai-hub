@@ -876,7 +876,11 @@
                             throw new Error('Send failed');
                         }
                         console.log('[Send] Message sent successfully');
-                        // AI response will come via WebSocket
+                        // Re-subscribe after backend creates activeStream (fix timing issue)
+                        setTimeout(() => {
+                            console.log('[Send] Re-subscribing after delay...');
+                            subscribeSession(sessionId);
+                        }, 100);
                     } catch (e) {
                         console.error('[Send] Error', e);
                         tab.data.isStreaming = false;
