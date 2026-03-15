@@ -358,12 +358,32 @@ func SendChat(c *gin.Context) {
 			return
 		}
 
-		// Attention system: intercept message when enabled
+		// Attention system V2: use shadow session flow when enabled
 		originalContent := req.Content
 		if session.AttentionEnabled {
-			// Parse custom activation rules from session
-			rulesData := core.ParseAttentionRules(session.AttentionRules)
-			req.Content = buildAttentionPrompt(originalContent, rulesData.ActivationCustom)
+			// Check if session is already streaming
+			if IsSessionStreaming(session.ID) {
+				c.JSON(http.StatusConflict, gin.H{"error": "session is busy (attention mode)"})
+				return
+			}
+			// Save user message first
+			userMsg := &model.Message{
+				SessionID: session.ID,
+				Role:      "user",
+				Content:   originalContent,
+			}
+			if err := store.AddMessage(userMsg); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "save message failed: " + err.Error()})
+				return
+			}
+			// Kick off attention mode v2 flow in background
+			go runAttentionV2Flow(session, originalContent)
+			c.JSON(http.StatusOK, gin.H{
+				"session_id": session.ID,
+				"status":     "started",
+				"mode":       "attention_v2",
+			})
+			return
 		}
 
 		// Check if session is already streaming — queue message instead of rejecting
@@ -1227,4 +1247,307 @@ func sendAttentionFeedback(sessionID int64, message string) {
 	// Trigger AI response
 	triggerMsgID := userMsg.ID
 	go runStream(session, message, false, triggerMsgID)
+}
+
+// ============================================================================
+// Attention Mode V2: Shadow Session Flow
+// ============================================================================
+
+// runAttentionV2Flow orchestrates the full attention mode v2 execution
+// using shadow sessions for isolated execution with parent session broadcast
+func runAttentionV2Flow(parentSession *model.Session, userMessage string) {
+	parentID := parentSession.ID
+	log.Printf("[attention-v2] session %d: starting flow", parentID)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Register as active stream so UI shows streaming status
+	stream := &ActiveStream{sendFn: func(WSMessage) {}, cancelFn: cancel}
+	activeStreamsMu.Lock()
+	activeStreams[parentID] = stream
+	activeStreamsMu.Unlock()
+	broadcast(WSMessage{Type: "session_update", SessionID: parentID, Content: "streaming"})
+	defer func() {
+		activeStreamsMu.Lock()
+		delete(activeStreams, parentID)
+		activeStreamsMu.Unlock()
+		broadcast(WSMessage{Type: "session_update", SessionID: parentID, Content: "idle"})
+	}()
+
+	// Get provider
+	provider, err := store.GetProvider(parentSession.ProviderID)
+	if err != nil {
+		provider, err = store.GetDefaultProvider()
+		if err != nil {
+			errMsg := "provider not found"
+			broadcast(WSMessage{Type: "error", SessionID: parentID, Content: errMsg})
+			return
+		}
+	}
+
+	// Broadcast status helper
+	broadcastStatus := func(status string) {
+		broadcast(WSMessage{Type: "attention_status", SessionID: parentID, Content: status})
+	}
+
+	// Create executor with callbacks
+	executor := &core.AttentionV2Executor{
+		ParentSession: parentSession,
+		Provider:      provider,
+		BroadcastFn: func(sessionID int64, msgType, content string) {
+			broadcast(WSMessage{Type: msgType, SessionID: sessionID, Content: content})
+		},
+		RunShadowStreamFn: func(shadowSession *model.Session, query string, broadcastAsID int64) (string, string, error) {
+			return runShadowStream(ctx, shadowSession, query, broadcastAsID, provider)
+		},
+	}
+
+	// Create shadow session callback
+	createShadowFn := func() (*model.Session, error) {
+		return store.CreateShadowSession(parentID)
+	}
+
+	// Delete shadow session callback
+	deleteShadowFn := func(shadowID int64) error {
+		return store.DeleteShadowSession(shadowID)
+	}
+
+	// Copy messages callback
+	copyMessagesFn := func(parentID, shadowID int64, limit int) error {
+		return store.CopyRecentMessagesToShadow(parentID, shadowID, limit)
+	}
+
+	// Execute the full flow
+	broadcastStatus("注意力模式：正在处理...")
+	err = executor.ExecuteWithShadow(ctx, userMessage, createShadowFn, deleteShadowFn, copyMessagesFn)
+	if err != nil {
+		log.Printf("[attention-v2] session %d: flow failed: %v", parentID, err)
+		broadcast(WSMessage{Type: "error", SessionID: parentID, Content: "注意力模式执行失败: " + err.Error()})
+		return
+	}
+
+	// Get final result from state and save to parent session
+	state := core.AttentionMgr.GetState(parentID)
+	if state != nil && state.FinalResult != "" {
+		// Save final result as assistant message in parent session
+		assistantMsg := &model.Message{
+			SessionID: parentID,
+			Role:      "assistant",
+			Content:   state.FinalResult,
+		}
+		if err := store.AddMessage(assistantMsg); err != nil {
+			log.Printf("[attention-v2] session %d: failed to save final result: %v", parentID, err)
+		}
+	}
+
+	broadcast(WSMessage{Type: "done", SessionID: parentID, Content: ""})
+	log.Printf("[attention-v2] session %d: flow completed", parentID)
+}
+
+// runShadowStream executes streaming in shadow session but broadcasts to parent session ID
+// This allows the frontend to receive updates as if they came from the parent session
+func runShadowStream(ctx context.Context, shadowSession *model.Session, query string, broadcastAsID int64, provider *model.Provider) (string, string, error) {
+	log.Printf("[shadow-stream] shadow=%d broadcast_as=%d: starting", shadowSession.ID, broadcastAsID)
+
+	// Build system prompt for shadow session (inherit from parent)
+	tplVars := runtimeTemplateVars(broadcastAsID, shadowSession.GroupName)
+	var promptParts []string
+	if globalPrompt := core.BuildSystemPromptWithVars(tplVars); globalPrompt != "" {
+		promptParts = append(promptParts, globalPrompt)
+	}
+	if teamRules := core.BuildTeamRulesWithVars(shadowSession.GroupName, tplVars); teamRules != "" {
+		promptParts = append(promptParts, teamRules)
+	}
+	if rules, err := ReadSessionRules(broadcastAsID); err == nil && rules != "" {
+		promptParts = append(promptParts, core.RenderTemplateWithVars(rules, tplVars))
+	}
+
+	req := core.ClaudeCodeRequest{
+		Query:        query,
+		SessionID:    shadowSession.ClaudeSessionID,
+		Resume:       false, // Shadow sessions always start fresh
+		BaseURL:      provider.BaseURL,
+		APIKey:       provider.APIKey,
+		AuthMode:     provider.AuthMode,
+		ProxyURL:     provider.ProxyURL,
+		ModelID:      strings.TrimSpace(provider.ModelID),
+		WorkDir:      shadowSession.WorkDir,
+		HubSessionID: shadowSession.ID,
+		GroupName:    shadowSession.GroupName,
+	}
+	if provider.AuthMode == "oauth" {
+		req.ModelID = ""
+	}
+	if len(promptParts) > 0 {
+		req.SystemPrompt = strings.Join(promptParts, "\n\n---\n\n")
+	}
+
+	var fullResponse string
+	var metadataJSON string
+
+	// Send function that broadcasts to parent session ID
+	sendFn := func(msg WSMessage) {
+		// Override session ID to broadcast as parent
+		msg.SessionID = broadcastAsID
+		broadcast(msg)
+	}
+
+	// Steps accumulator for metadata
+	var steps []StepInfo
+	var thinkingSummary string
+	toolIDs := make(map[int]string)
+	toolNames := make(map[int]string)
+	toolInputs := make(map[int]string)
+	var assistantFullText string
+
+	err := claudeClient.StreamPersistent(ctx, req, func(line string) {
+		// Parse the streaming event
+		var wrapper struct {
+			Type    string          `json:"type"`
+			Subtype string          `json:"subtype"`
+			Result  string          `json:"result"`
+			Event   json.RawMessage `json:"event"`
+		}
+		if err := json.Unmarshal([]byte(line), &wrapper); err != nil {
+			return
+		}
+
+		switch wrapper.Type {
+		case "error":
+			var errObj struct {
+				Error struct {
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			if json.Unmarshal([]byte(line), &errObj) == nil && errObj.Error.Message != "" {
+				sendFn(WSMessage{Type: "error", Content: errObj.Error.Message})
+			}
+
+		case "stream_event":
+			var inner struct {
+				Type         string `json:"type"`
+				Index        int    `json:"index"`
+				ContentBlock struct {
+					Type string `json:"type"`
+					Name string `json:"name"`
+					ID   string `json:"id"`
+				} `json:"content_block"`
+				Delta struct {
+					Type        string `json:"type"`
+					Text        string `json:"text"`
+					Thinking    string `json:"thinking"`
+					PartialJSON string `json:"partial_json"`
+				} `json:"delta"`
+			}
+			if err := json.Unmarshal(wrapper.Event, &inner); err != nil {
+				return
+			}
+
+			switch inner.Type {
+			case "content_block_start":
+				if inner.ContentBlock.Type == "tool_use" {
+					toolIDs[inner.Index] = inner.ContentBlock.ID
+					toolNames[inner.Index] = inner.ContentBlock.Name
+					toolInputs[inner.Index] = ""
+					sendFn(WSMessage{
+						Type:     "tool_start",
+						ToolID:   inner.ContentBlock.ID,
+						ToolName: inner.ContentBlock.Name,
+					})
+				}
+
+			case "content_block_delta":
+				switch inner.Delta.Type {
+				case "text_delta":
+					if inner.Delta.Text != "" {
+						fullResponse += inner.Delta.Text
+						assistantFullText += inner.Delta.Text
+						sendFn(WSMessage{Type: "chunk", Content: inner.Delta.Text})
+					}
+				case "thinking_delta":
+					if inner.Delta.Thinking != "" {
+						thinkingSummary += inner.Delta.Thinking
+						sendFn(WSMessage{Type: "thinking", Content: inner.Delta.Thinking})
+					}
+				case "input_json_delta":
+					if inner.Delta.PartialJSON != "" {
+						if _, ok := toolIDs[inner.Index]; ok {
+							toolInputs[inner.Index] += inner.Delta.PartialJSON
+							sendFn(WSMessage{
+								Type:    "tool_input",
+								ToolID:  toolIDs[inner.Index],
+								Content: inner.Delta.PartialJSON,
+							})
+						}
+					}
+				}
+
+			case "content_block_stop":
+				if toolID, ok := toolIDs[inner.Index]; ok {
+					steps = append(steps, StepInfo{
+						Type:   "tool",
+						Name:   toolNames[inner.Index],
+						Input:  truncateString(toolInputs[inner.Index], 200),
+						Status: "done",
+					})
+					sendFn(WSMessage{Type: "tool_result", ToolID: toolID, Content: "done"})
+				}
+			}
+
+		case "assistant":
+			// Final assistant message
+			var msg struct {
+				Message struct {
+					Content []struct {
+						Type string `json:"type"`
+						Text string `json:"text"`
+					} `json:"content"`
+				} `json:"message"`
+			}
+			if json.Unmarshal([]byte(line), &msg) == nil {
+				for _, block := range msg.Message.Content {
+					if block.Type == "text" && block.Text != "" {
+						if fullResponse == "" {
+							fullResponse = block.Text
+						}
+					}
+				}
+			}
+
+		case "result":
+			// Stream completed
+			if wrapper.Subtype == "success" && fullResponse == "" && assistantFullText != "" {
+				fullResponse = assistantFullText
+			}
+		}
+	})
+
+	// Build metadata JSON
+	if len(steps) > 0 || thinkingSummary != "" {
+		meta := StepsMetadata{Steps: steps}
+		if len(thinkingSummary) > 500 {
+			meta.Thinking = thinkingSummary[:500] + "..."
+		} else {
+			meta.Thinking = thinkingSummary
+		}
+		if b, err := json.Marshal(meta); err == nil {
+			metadataJSON = string(b)
+		}
+	}
+
+	if err != nil {
+		return fullResponse, metadataJSON, err
+	}
+
+	log.Printf("[shadow-stream] shadow=%d broadcast_as=%d: completed, response_len=%d", shadowSession.ID, broadcastAsID, len(fullResponse))
+	return fullResponse, metadataJSON, nil
+}
+
+// truncateString truncates a string to maxLen characters
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
