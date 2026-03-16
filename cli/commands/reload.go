@@ -15,9 +15,11 @@ func RunReload(c *client.Client, args []string) int {
 	}
 
 	target := args[0]
+	flags := args[1:]
+
 	switch target {
 	case "vector":
-		return reloadVector(c)
+		return reloadVector(c, flags)
 	case "config":
 		return reloadConfig(c)
 	case "skills":
@@ -36,22 +38,43 @@ func printReloadHelp() {
 	fmt.Println(`AI Hub Hot Reload
 
 Usage:
-  ai-hub reload <target>
+  ai-hub reload <target> [options]
 
 Targets:
   vector     Reload vector engine (re-initialize embedding model)
   config     Reload configuration files
   skills     Reload skill definitions
 
+Vector Options:
+  --force-download    Force re-download model even if it exists locally
+
 Examples:
-  ai-hub reload vector    # Reload vector model without restarting
-  ai-hub reload config    # Reload configuration
-  ai-hub reload skills    # Reload skill definitions`)
+  ai-hub reload vector                  # Reload vector model (use cached if exists)
+  ai-hub reload vector --force-download # Force re-download model
+  ai-hub reload config                  # Reload configuration
+  ai-hub reload skills                  # Reload skill definitions`)
 }
 
-func reloadVector(c *client.Client) int {
-	fmt.Println("Reloading vector engine...")
-	resp, err := c.POST("/api/v1/reload/vector", nil)
+func reloadVector(c *client.Client, flags []string) int {
+	forceDownload := false
+	for _, f := range flags {
+		if f == "--force-download" || f == "-f" {
+			forceDownload = true
+		}
+	}
+
+	if forceDownload {
+		fmt.Println("Reloading vector engine (force download)...")
+	} else {
+		fmt.Println("Reloading vector engine...")
+	}
+
+	endpoint := "/api/v1/reload/vector"
+	if forceDownload {
+		endpoint += "?force_download=true"
+	}
+
+	resp, err := c.POST(endpoint, nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to reload vector engine: %v\n", err)
 		return 1

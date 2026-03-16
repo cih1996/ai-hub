@@ -96,6 +96,12 @@ ai-hub daemon status     # 状态
 
 ## 热重载
 
-ai-hub reload vector     # 重载向量模型（不重启服务）
-ai-hub reload config     # 重载配置（预留）
-ai-hub reload skills     # 重载 Skill（预留）
+ai-hub reload vector                  # 重载向量模型（使用本地缓存）
+ai-hub reload vector --force-download # 强制重新下载模型
+ai-hub reload config                  # 重载配置（预留）
+ai-hub reload skills                  # 重载 Skill（预留）
+
+向量引擎故障排查：
+1. 查看状态：ai-hub status（检查 vector 部分）
+2. 查看日志：tail -100 ~/.ai-hub/logs/ai-hub.log | grep vector
+3. 强制重下载：ai-hub reload vector --force-download

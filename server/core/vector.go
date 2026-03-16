@@ -96,7 +96,16 @@ func (v *VectorEngine) bootstrap() {
 
 // Reload reinitializes the vector engine (hot reload)
 func (v *VectorEngine) Reload() {
-	log.Println("[vector] reloading...")
+	v.ReloadWithOptions(false)
+}
+
+// ReloadWithOptions reinitializes the vector engine with options
+func (v *VectorEngine) ReloadWithOptions(forceDownload bool) {
+	if forceDownload {
+		log.Println("[vector] reloading with force download...")
+	} else {
+		log.Println("[vector] reloading...")
+	}
 
 	v.mu.Lock()
 	v.ready = false
@@ -106,7 +115,7 @@ func (v *VectorEngine) Reload() {
 	v.mu.Unlock()
 
 	// Reload model
-	if err := v.loadModel(); err != nil {
+	if err := v.loadModelWithRetry(forceDownload); err != nil {
 		v.setDisabled("model reload failed: " + err.Error())
 		return
 	}
@@ -118,6 +127,10 @@ func (v *VectorEngine) Reload() {
 }
 
 func (v *VectorEngine) loadModel() error {
+	return v.loadModelWithRetry(false)
+}
+
+func (v *VectorEngine) loadModelWithRetry(forceDownload bool) error {
 	os.MkdirAll(v.modelDir, 0755)
 
 	// Check if model exists locally
@@ -125,13 +138,22 @@ func (v *VectorEngine) loadModel() error {
 	spagoModel := filepath.Join(modelPath, "spago_model.bin")
 
 	var downloadPolicy tasks.DownloadPolicy
-	if _, err := os.Stat(spagoModel); err == nil {
+	modelExists := false
+
+	if _, err := os.Stat(spagoModel); err == nil && !forceDownload {
 		// Model exists, use offline mode
 		downloadPolicy = tasks.DownloadNever
+		modelExists = true
 		log.Printf("[vector] using cached model: %s", modelPath)
 	} else {
-		// Model doesn't exist, need to download
+		// Model doesn't exist or force download requested
 		downloadPolicy = tasks.DownloadMissing
+
+		if forceDownload {
+			log.Printf("[vector] force download requested, removing existing model...")
+			os.RemoveAll(modelPath)
+		}
+
 		log.Printf("[vector] downloading model: %s", DefaultModelName)
 
 		// Check if HuggingFace is accessible, if not use mirror
@@ -141,18 +163,39 @@ func (v *VectorEngine) loadModel() error {
 		}
 	}
 
-	model, err := tasks.Load[textencoding.Interface](&tasks.Config{
-		ModelsDir:      v.modelDir,
-		ModelName:      DefaultModelName,
-		DownloadPolicy: downloadPolicy,
-	})
+	// Try to load model with retry for download failures
+	var model textencoding.Interface
+	var err error
+	maxRetries := 1
+	if !modelExists {
+		maxRetries = 3 // Retry up to 3 times for downloads
+	}
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		model, err = tasks.Load[textencoding.Interface](&tasks.Config{
+			ModelsDir:      v.modelDir,
+			ModelName:      DefaultModelName,
+			DownloadPolicy: downloadPolicy,
+		})
+		if err == nil {
+			break
+		}
+
+		if attempt < maxRetries {
+			log.Printf("[vector] model load attempt %d/%d failed: %v, retrying in 3s...", attempt, maxRetries, err)
+			time.Sleep(3 * time.Second)
+		}
+	}
+
 	if err != nil {
-		// Provide manual download instructions on failure
-		return fmt.Errorf("模型加载失败: %w\n\n手动下载方法:\n1. 访问 %s/%s\n2. 下载所有文件到 %s\n3. 重启 AI Hub",
-			err, HFMirrorEndpoint, DefaultModelName, modelPath)
+		// Provide detailed error and manual download instructions
+		log.Printf("[vector] ERROR: model load failed after %d attempts: %v", maxRetries, err)
+		return fmt.Errorf("模型加载失败: %w\n\n可能原因:\n1. 网络连接问题（无法访问 HuggingFace 或镜像站）\n2. 磁盘空间不足\n3. 模型文件损坏\n\n解决方法:\n1. 检查网络连接，确保可以访问 %s\n2. 运行 ai-hub reload vector --force-download 强制重新下载\n3. 手动下载: 访问 %s/%s 下载所有文件到 %s",
+			err, HFMirrorEndpoint, HFMirrorEndpoint, DefaultModelName, modelPath)
 	}
 
 	v.model = model
+	log.Printf("[vector] model loaded successfully")
 	return nil
 }
 
