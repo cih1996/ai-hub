@@ -77,7 +77,7 @@ func GetInitStatus(c *gin.Context) {
 
 	// Check Claude CLI auth status
 	var claudeAuth *ClaudeAuthInfo
-	if checkCommand("claude", "--version") {
+	if checkCommand(getClaudeCmd(), "--version") {
 		claudeAuth = checkClaudeAuthStatus()
 		// If not logged in, add to missing deps with appropriate hint
 		if claudeAuth != nil && !claudeAuth.LoggedIn {
@@ -124,7 +124,7 @@ func getCurrentUsername() string {
 
 // checkClaudeAuthStatus checks Claude CLI authentication status
 func checkClaudeAuthStatus() *ClaudeAuthInfo {
-	cmd := exec.Command("claude", "auth", "status")
+	cmd := exec.Command(getClaudeCmd(), "auth", "status")
 	out, err := cmd.Output()
 	if err != nil {
 		// Try to get stderr for error message
@@ -231,7 +231,7 @@ func checkMissingDeps(pkgMgr string) []MissingDep {
 	}
 
 	// Check Claude CLI (required)
-	if !checkCommand("claude", "--version") {
+	if !checkCommand(getClaudeCmd(), "--version") {
 		dep := getClaudeCLIDep(pkgMgr)
 		missing = append(missing, dep)
 	}
@@ -367,6 +367,15 @@ func checkCommand(name string, args ...string) bool {
 	cmd := exec.Command(name, args...)
 	err := cmd.Run()
 	return err == nil
+}
+
+// getClaudeCmd returns the correct claude command for the current OS
+// Windows npm global installs create .cmd files, not bare executables
+func getClaudeCmd() string {
+	if runtime.GOOS == "windows" {
+		return "claude.cmd"
+	}
+	return "claude"
 }
 
 // checkNpmPermissionIssue checks if npm global install might have permission issues
