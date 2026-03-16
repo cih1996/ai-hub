@@ -447,6 +447,30 @@ func CreateShadowSession(parentID int64) (*model.Session, error) {
 	return shadow, nil
 }
 
+// CreateShadowSessionWithTitle creates a shadow session with a custom title suffix
+func CreateShadowSessionWithTitle(parentID int64, titleSuffix string) (*model.Session, error) {
+	parent, err := GetSession(parentID)
+	if err != nil {
+		return nil, fmt.Errorf("parent session not found: %w", err)
+	}
+
+	shadow := &model.Session{
+		Title:            fmt.Sprintf("[%s] %s", titleSuffix, parent.Title),
+		ProviderID:       parent.ProviderID,
+		WorkDir:          parent.WorkDir,
+		GroupName:        parent.GroupName,
+		AttentionEnabled: false,
+		IsShadow:         true,
+		ParentID:         parentID,
+	}
+
+	if err := CreateSession(shadow); err != nil {
+		return nil, err
+	}
+
+	return shadow, nil
+}
+
 // CopyRecentMessagesToShadow copies the last N messages from parent to shadow session.
 // This provides context for the shadow session to work with.
 func CopyRecentMessagesToShadow(parentID, shadowID int64, limit int) error {

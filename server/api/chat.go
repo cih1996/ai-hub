@@ -368,22 +368,13 @@ func SendChat(c *gin.Context) {
 				c.JSON(http.StatusConflict, gin.H{"error": "session is busy (attention mode)"})
 				return
 			}
-			// Save user message first
-			userMsg := &model.Message{
-				SessionID: session.ID,
-				Role:      "user",
-				Content:   originalContent,
-			}
-			if err := store.AddMessage(userMsg); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "save message failed: " + err.Error()})
-				return
-			}
-			// Kick off attention mode v2 flow in background
-			go runAttentionV2Flow(session, originalContent)
+			// V3: Don't save user message here, let the flow save it at the end (clean sync)
+			// Kick off attention mode v3 flow in background
+			go runAttentionV3Flow(session, originalContent)
 			c.JSON(http.StatusOK, gin.H{
 				"session_id": session.ID,
 				"status":     "started",
-				"mode":       "attention_v2",
+				"mode":       "attention_v3",
 			})
 			return
 		}
@@ -1368,6 +1359,178 @@ func runAttentionV2Flow(parentSession *model.Session, userMessage string) {
 
 	broadcast(WSMessage{Type: "done", SessionID: parentID, Content: ""})
 	log.Printf("[attention-v2] session %d: flow completed", parentID)
+}
+
+// ============================================================================
+// Attention Mode V3: Simplified Flow
+// ============================================================================
+
+// runAttentionV3Flow orchestrates the simplified attention mode execution
+// Phase 1: Attention AI queries info and generates preprocessing text
+// Phase 2: Send enhanced message (wrapped context + user message) to parent session
+func runAttentionV3Flow(parentSession *model.Session, userMessage string) {
+	parentID := parentSession.ID
+	log.Printf("[attention-v3] session %d: starting flow", parentID)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Register as active stream
+	stream := &ActiveStream{sendFn: func(WSMessage) {}, cancelFn: cancel}
+	activeStreamsMu.Lock()
+	activeStreams[parentID] = stream
+	activeStreamsMu.Unlock()
+	broadcast(WSMessage{Type: "session_update", SessionID: parentID, Content: "streaming"})
+	defer func() {
+		activeStreamsMu.Lock()
+		delete(activeStreams, parentID)
+		activeStreamsMu.Unlock()
+		broadcast(WSMessage{Type: "session_update", SessionID: parentID, Content: "idle"})
+		log.Printf("[attention-v3] session %d: flow ended", parentID)
+	}()
+
+	// Get provider
+	provider, err := store.GetProvider(parentSession.ProviderID)
+	if err != nil {
+		log.Printf("[attention-v3] session %d: provider %s not found, trying default", parentID, parentSession.ProviderID)
+		provider, err = store.GetDefaultProvider()
+		if err != nil {
+			broadcast(WSMessage{Type: "error", SessionID: parentID, Content: "provider not found"})
+			return
+		}
+	}
+	log.Printf("[attention-v3] session %d: using provider %s", parentID, provider.Name)
+
+	// Create executor with callbacks
+	executor := &core.AttentionV3Executor{
+		ParentSession: parentSession,
+		Provider:      provider,
+		BroadcastFn: func(sessionID int64, msgType, content, detail string) {
+			broadcast(WSMessage{Type: msgType, SessionID: sessionID, Content: content, Detail: detail})
+		},
+		CreateAttentionSessionFn: func(parentID int64) (*model.Session, error) {
+			return store.CreateShadowSessionWithTitle(parentID, "注意力AI")
+		},
+		DeleteAttentionSessionFn: func(sessionID int64) error {
+			return store.DeleteShadowSession(sessionID)
+		},
+		RunAttentionStreamFn: func(attentionSession *model.Session, query string, broadcastAsID int64) (string, error) {
+			// Run attention AI with Claude CLI, broadcast to parent
+			response, _, err := runShadowStream(ctx, attentionSession, query, broadcastAsID, provider)
+			return response, err
+		},
+		RunParentStreamFn: func(parentSession *model.Session, query string) error {
+			// Run parent session normally with enhanced message
+			return runParentStream(ctx, parentSession, query, provider)
+		},
+		SaveMessageFn: func(sessionID int64, role, content string) error {
+			msg := &model.Message{
+				SessionID: sessionID,
+				Role:      role,
+				Content:   content,
+			}
+			return store.AddMessage(msg)
+		},
+	}
+
+	// Execute the flow
+	err = executor.Execute(ctx, userMessage)
+	if err != nil {
+		log.Printf("[attention-v3] session %d: flow failed: %v", parentID, err)
+		broadcast(WSMessage{Type: "error", SessionID: parentID, Content: "注意力模式执行失败: " + err.Error()})
+		return
+	}
+
+	log.Printf("[attention-v3] session %d: flow completed", parentID)
+	broadcast(WSMessage{Type: "done", SessionID: parentID, Content: ""})
+}
+
+// runParentStream runs the parent session with enhanced message
+// Reuses streamClaudeCode for consistent streaming behavior
+func runParentStream(ctx context.Context, parentSession *model.Session, query string, provider *model.Provider) error {
+	log.Printf("[parent-stream] session=%d: starting", parentSession.ID)
+
+	// Pre-insert empty assistant message for incremental saves
+	assistantMsg := &model.Message{
+		SessionID: parentSession.ID,
+		Role:      "assistant",
+		Content:   "",
+		Metadata:  "",
+	}
+	if err := store.AddMessage(assistantMsg); err != nil {
+		log.Printf("[parent-stream] session=%d: failed to pre-insert message: %v", parentSession.ID, err)
+		return err
+	}
+	progressMsgID := assistantMsg.ID
+
+	// Reset proxy usage accumulator
+	ResetProxyUsage(parentSession.ID)
+
+	// Send function that broadcasts to parent session
+	sendFn := func(msg WSMessage) {
+		msg.SessionID = parentSession.ID
+		broadcast(msg)
+	}
+
+	// isResume: parent session continues from existing conversation
+	isResume := core.Pool.HasProcess(parentSession.ID) || store.HasAssistantMessages(parentSession.ID)
+
+	// Use streamClaudeCode for consistent streaming behavior
+	fullResponse, metadataJSON, usageInput, usageOutput, usageCacheCreation, usageCacheRead, err := streamClaudeCode(
+		ctx, provider, query, parentSession.ClaudeSessionID, isResume, sendFn,
+		parentSession.ID, parentSession.WorkDir, parentSession.GroupName, progressMsgID,
+	)
+
+	if err != nil {
+		log.Printf("[parent-stream] session=%d: error: %v", parentSession.ID, err)
+		// Save partial response if any
+		if fullResponse != "" || metadataJSON != "" {
+			content := fullResponse
+			if content == "" {
+				content = "[任务已执行，详见执行步骤]"
+			}
+			store.UpdateMessageContent(progressMsgID, content, metadataJSON)
+		} else {
+			store.UpdateMessageContent(progressMsgID, "❌ "+err.Error(), "")
+		}
+		return err
+	}
+
+	// Prefer proxy-captured usage
+	if pu := ConsumeProxyUsage(parentSession.ID); pu != nil {
+		usageInput = pu.InputTokens
+		usageOutput = pu.OutputTokens
+		usageCacheCreation = pu.CacheCreationInputTokens
+		usageCacheRead = pu.CacheReadInputTokens
+	}
+
+	// Save response
+	if fullResponse != "" || metadataJSON != "" {
+		content := fullResponse
+		if content == "" {
+			content = "[任务已执行，详见执行步骤]"
+		}
+		store.UpdateMessageContent(progressMsgID, content, metadataJSON)
+		extractAndSaveErrors(parentSession.ID, progressMsgID, content)
+
+		// Save token usage
+		if usageInput > 0 || usageOutput > 0 || usageCacheCreation > 0 || usageCacheRead > 0 {
+			tu := &model.TokenUsage{
+				SessionID: parentSession.ID, MessageID: progressMsgID,
+				InputTokens: usageInput, OutputTokens: usageOutput,
+				CacheCreationInputTokens: usageCacheCreation, CacheReadInputTokens: usageCacheRead,
+			}
+			store.AddTokenUsage(tu)
+			usageJSON, _ := json.Marshal(tu)
+			broadcast(WSMessage{Type: "token_usage", SessionID: parentSession.ID, Content: string(usageJSON)})
+		}
+	} else {
+		// No content - delete empty message
+		store.DeleteMessage(progressMsgID)
+	}
+
+	log.Printf("[parent-stream] session=%d: complete", parentSession.ID)
+	return nil
 }
 
 // runShadowStream executes streaming in shadow session but broadcasts to parent session ID
