@@ -332,7 +332,45 @@ grep -i "error\|forbidden\|timeout" ~/.ai-hub/logs/ai-hub.log | tail -20
 
 ---
 
-## §9 脚本引擎
+## §9 静态资源挂载
+
+### CLI 命令
+
+```bash
+# 挂载本地目录
+ai-hub mount ~/Pictures --alias media
+ai-hub mount /tmp/screenshots --alias shots
+
+# 列出所有挂载
+ai-hub mount list
+
+# 移除挂载
+ai-hub mount remove media
+```
+
+### 访问方式
+
+挂载后，文件可通过 HTTP 访问：
+```
+http://localhost:<port>/static/<alias>/<filename>
+```
+
+### 在 AI 回复中使用
+
+```html
+<img src="http://localhost:9527/static/media/test.png">
+<video src="http://localhost:9527/static/media/demo.mp4" controls></video>
+```
+
+### 使用场景
+
+- AI 生成图片后展示给用户
+- 截图分享
+- 本地媒体文件预览
+
+---
+
+## §10 脚本引擎
 
 ### 规范
 

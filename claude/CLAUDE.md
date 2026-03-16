@@ -56,3 +56,9 @@
 - 核心 CLI 命令已内置（见 CLI 速查表），直接使用。
 - 第三方平台 Skill 触发后 Read ~/.ai-hub/skills/<目录名>/SKILL.md。
 
+§6 静态资源挂载
+- 可将本地目录挂载为静态文件服务，用于在消息中展示图片/视频
+- 挂载：`ai-hub mount <本地路径> --alias <别名>`
+- 访问：`http://localhost:{{PORT}}/static/<别名>/<文件名>`
+- 在回复中使用：`<img src="http://localhost:{{PORT}}/static/media/test.png">`
+

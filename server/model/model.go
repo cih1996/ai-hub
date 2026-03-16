@@ -178,3 +178,12 @@ type Group struct {
 	CreatedAt   string `json:"created_at"`
 	UpdatedAt   string `json:"updated_at"`
 }
+
+// Mount 静态资源挂载
+type Mount struct {
+	ID        int64     `json:"id"`
+	Alias     string    `json:"alias"`     // 访问别名，如 media
+	LocalPath string    `json:"local_path"` // 本地目录路径
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}

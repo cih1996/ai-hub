@@ -162,6 +162,8 @@ func Run(args []string) int {
 		return commands.RunDaemon(c, commandArgs)
 	case "reload":
 		return commands.RunReload(c, commandArgs)
+	case "mount":
+		return commands.RunMount(c, commandArgs)
 	case "mem":
 		return runMem(c, globalFlags.GroupName, commandArgs)
 	default:
@@ -282,6 +284,11 @@ Hot Reload:
   reload vector      Reload vector engine
   reload config      Reload configuration
   reload skills      Reload skill definitions
+
+Static Mount:
+  mount <path> --alias <name>   Mount local directory for static file serving
+  mount list                    List all mounts
+  mount remove <alias>          Remove a mount
 
 Use "ai-hub <command> --help" for more information about a command.`)
 }

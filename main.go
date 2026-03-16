@@ -342,6 +342,11 @@ func main() {
 		v1.POST("/reload/config", api.ReloadConfig)
 		v1.POST("/reload/skills", api.ReloadSkills)
 
+		// Static mount management
+		v1.GET("/mounts", api.ListMounts)
+		v1.POST("/mounts", api.CreateMount)
+		v1.DELETE("/mounts/:alias", api.DeleteMount)
+
 		// Anthropic API reverse proxy for precise token metering (Issue #72)
 		v1.Any("/proxy/s/:session_id/anthropic/*path", api.HandleAnthropicProxy)
 		v1.Any("/proxy/anthropic/*path", api.HandleAnthropicProxy) // legacy compat
@@ -349,6 +354,9 @@ func main() {
 
 	// WebSocket
 	r.GET("/ws/chat", api.HandleChat)
+
+	// Static mount serving: /static/:alias/*filepath
+	r.GET("/static/:alias/*filepath", api.ServeStaticMount)
 
 	// Serve new version (demo.html) at /new
 	r.GET("/new", func(c *gin.Context) {

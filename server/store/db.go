@@ -187,6 +187,15 @@ func migrate() error {
 	DB.Exec(`ALTER TABLE sessions ADD COLUMN is_shadow INTEGER NOT NULL DEFAULT 0`)
 	DB.Exec(`ALTER TABLE sessions ADD COLUMN parent_id INTEGER NOT NULL DEFAULT 0`)
 
+	// Mounts table (static file serving)
+	DB.Exec(`CREATE TABLE IF NOT EXISTS mounts (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		alias TEXT NOT NULL UNIQUE,
+		local_path TEXT NOT NULL DEFAULT '',
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`)
+
 	return nil
 }
 
