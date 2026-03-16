@@ -124,7 +124,15 @@ func getCurrentUsername() string {
 
 // checkClaudeAuthStatus checks Claude CLI authentication status
 func checkClaudeAuthStatus() *ClaudeAuthInfo {
-	cmd := exec.Command("claude", "auth", "status")
+	// Use LookPath to find claude command (handles .cmd on Windows)
+	claudePath, err := exec.LookPath("claude")
+	if err != nil {
+		return &ClaudeAuthInfo{
+			LoggedIn: false,
+			Error:    "Claude CLI not found",
+		}
+	}
+	cmd := exec.Command(claudePath, "auth", "status")
 	out, err := cmd.Output()
 	if err != nil {
 		// Try to get stderr for error message
@@ -364,8 +372,14 @@ func getGitDep(pkgMgr string) MissingDep {
 
 // checkCommand checks if a command is available
 func checkCommand(name string, args ...string) bool {
-	cmd := exec.Command(name, args...)
-	err := cmd.Run()
+	// On Windows, npm-installed commands are .cmd files (e.g., claude.cmd)
+	// exec.LookPath handles this automatically by checking PATHEXT extensions
+	path, err := exec.LookPath(name)
+	if err != nil {
+		return false
+	}
+	cmd := exec.Command(path, args...)
+	err = cmd.Run()
 	return err == nil
 }
 
