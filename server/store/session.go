@@ -82,8 +82,8 @@ func DeleteSession(id int64) error {
 func AddMessage(m *model.Message) error {
 	m.CreatedAt = time.Now()
 	result, err := DB.Exec(
-		`INSERT INTO messages (session_id, role, content, metadata, created_at) VALUES (?, ?, ?, ?, ?)`,
-		m.SessionID, m.Role, m.Content, m.Metadata, m.CreatedAt,
+		`INSERT INTO messages (session_id, role, content, metadata, attention_context, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		m.SessionID, m.Role, m.Content, m.Metadata, m.AttentionContext, m.CreatedAt,
 	)
 	if err != nil {
 		return err
@@ -116,7 +116,7 @@ func DeleteMessage(id int64) error {
 
 func GetMessages(sessionID int64) ([]model.Message, error) {
 	rows, err := DB.Query(
-		`SELECT id, session_id, role, content, metadata, created_at FROM messages WHERE session_id = ? ORDER BY created_at`,
+		`SELECT id, session_id, role, content, metadata, attention_context, created_at FROM messages WHERE session_id = ? ORDER BY created_at`,
 		sessionID,
 	)
 	if err != nil {
@@ -126,7 +126,7 @@ func GetMessages(sessionID int64) ([]model.Message, error) {
 	var list []model.Message
 	for rows.Next() {
 		var m model.Message
-		if err := rows.Scan(&m.ID, &m.SessionID, &m.Role, &m.Content, &m.Metadata, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.SessionID, &m.Role, &m.Content, &m.Metadata, &m.AttentionContext, &m.CreatedAt); err != nil {
 			return nil, err
 		}
 		list = append(list, m)
@@ -147,8 +147,8 @@ func GetMessagesPaginated(sessionID int64, beforeID int64, limit int) ([]model.M
 	if beforeID > 0 {
 		// Subquery: get the last `limit` rows before beforeID, then re-order ASC
 		rows2, err2 := DB.Query(
-			`SELECT id, session_id, role, content, metadata, created_at FROM (
-				SELECT id, session_id, role, content, metadata, created_at FROM messages
+			`SELECT id, session_id, role, content, metadata, attention_context, created_at FROM (
+				SELECT id, session_id, role, content, metadata, attention_context, created_at FROM messages
 				WHERE session_id = ? AND id < ? ORDER BY id DESC LIMIT ?
 			) sub ORDER BY id ASC`,
 			sessionID, beforeID, limit,
@@ -158,8 +158,8 @@ func GetMessagesPaginated(sessionID int64, beforeID int64, limit int) ([]model.M
 	} else {
 		// No cursor: get the latest `limit` messages
 		rows2, err2 := DB.Query(
-			`SELECT id, session_id, role, content, metadata, created_at FROM (
-				SELECT id, session_id, role, content, metadata, created_at FROM messages
+			`SELECT id, session_id, role, content, metadata, attention_context, created_at FROM (
+				SELECT id, session_id, role, content, metadata, attention_context, created_at FROM messages
 				WHERE session_id = ? ORDER BY id DESC LIMIT ?
 			) sub ORDER BY id ASC`,
 			sessionID, limit,
@@ -174,7 +174,7 @@ func GetMessagesPaginated(sessionID int64, beforeID int64, limit int) ([]model.M
 	var list []model.Message
 	for rows.Next() {
 		var m model.Message
-		if err := rows.Scan(&m.ID, &m.SessionID, &m.Role, &m.Content, &m.Metadata, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.SessionID, &m.Role, &m.Content, &m.Metadata, &m.AttentionContext, &m.CreatedAt); err != nil {
 			return nil, err
 		}
 		list = append(list, m)

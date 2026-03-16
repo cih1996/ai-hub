@@ -64,12 +64,13 @@ type Session struct {
 
 // Message 消息
 type Message struct {
-	ID        int64     `json:"id"`
-	SessionID int64     `json:"session_id"`
-	Role      string    `json:"role"` // "user" | "assistant"
-	Content   string    `json:"content"`
-	Metadata  string    `json:"metadata,omitempty"` // JSON: 执行步骤持久化数据
-	CreatedAt time.Time `json:"created_at"`
+	ID               int64     `json:"id"`
+	SessionID        int64     `json:"session_id"`
+	Role             string    `json:"role"` // "user" | "assistant"
+	Content          string    `json:"content"`
+	Metadata         string    `json:"metadata,omitempty"`          // JSON: 执行步骤持久化数据
+	AttentionContext string    `json:"attention_context,omitempty"` // 注意力模式预处理内容
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 // Trigger 定时触发器

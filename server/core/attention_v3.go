@@ -117,7 +117,7 @@ type AttentionV3Executor struct {
 	DeleteAttentionSessionFn func(sessionID int64) error
 	RunAttentionStreamFn     func(attentionSession *model.Session, query string, broadcastAsID int64) (string, error)
 	RunParentStreamFn        func(parentSession *model.Session, query string) error
-	SaveMessageFn            func(sessionID int64, role, content string) error
+	SaveMessageFn            func(sessionID int64, role, content, attentionContext string) error
 }
 
 // Execute runs the simplified attention mode flow
@@ -182,9 +182,9 @@ func (e *AttentionV3Executor) Execute(ctx context.Context, userMessage string) e
 	wrappedContext := WrapWithAttentionTag(preprocessResponse)
 	enhancedMessage := wrappedContext + userMessage
 
-	// Save user message (original, without attention context)
+	// Save user message (original, without attention context in content, but with attention_context field)
 	if e.SaveMessageFn != nil {
-		if err := e.SaveMessageFn(parentID, "user", userMessage); err != nil {
+		if err := e.SaveMessageFn(parentID, "user", userMessage, preprocessResponse); err != nil {
 			log.Printf("[attention-v3] session %d: failed to save user message: %v", parentID, err)
 		}
 	}

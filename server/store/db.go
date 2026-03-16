@@ -67,6 +67,9 @@ func migrate() error {
 	// Messages: add metadata column
 	DB.Exec(`ALTER TABLE messages ADD COLUMN metadata TEXT NOT NULL DEFAULT ''`)
 
+	// Messages: add attention_context column
+	DB.Exec(`ALTER TABLE messages ADD COLUMN attention_context TEXT NOT NULL DEFAULT ''`)
+
 	// Sessions: add group_name column
 	DB.Exec(`ALTER TABLE sessions ADD COLUMN group_name TEXT NOT NULL DEFAULT ''`)
 

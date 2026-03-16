@@ -1423,11 +1423,12 @@ func runAttentionV3Flow(parentSession *model.Session, userMessage string) {
 			// Run parent session normally with enhanced message
 			return runParentStream(ctx, parentSession, query, provider)
 		},
-		SaveMessageFn: func(sessionID int64, role, content string) error {
+		SaveMessageFn: func(sessionID int64, role, content, attentionContext string) error {
 			msg := &model.Message{
-				SessionID: sessionID,
-				Role:      role,
-				Content:   content,
+				SessionID:        sessionID,
+				Role:             role,
+				Content:          content,
+				AttentionContext: attentionContext,
 			}
 			return store.AddMessage(msg)
 		},

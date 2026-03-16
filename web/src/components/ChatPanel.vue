@@ -20,14 +20,6 @@ const moreMenuOpen = ref(false)
 const providerDropdownOpen = ref(false)
 // Track expanded state for historical message steps (by message id)
 const historyStepsExpanded = ref<Record<number, boolean>>({})
-// Attention mode status details expanded
-const attentionDetailsExpanded = ref(false)
-// Track expanded state for attention history items
-const expandedHistoryItems = ref<Record<number, boolean>>({})
-
-function toggleHistoryDetail(idx: number) {
-  expandedHistoryItems.value[idx] = !expandedHistoryItems.value[idx]
-}
 
 // Tool name Chinese mapping
 const toolNameMap: Record<string, string> = {
@@ -239,6 +231,17 @@ const memoryFileSaving = ref(false)
 const memoryEditing = ref(false)
 const memoryCreating = ref(false)
 const memoryNewFileName = ref('')
+
+// Attention context modal state
+const showAttentionContextModal = ref(false)
+const attentionContextContent = ref('')
+const attentionContextMsgId = ref(0)
+
+function showAttentionContext(msg: Message) {
+  attentionContextContent.value = msg.attention_context || ''
+  attentionContextMsgId.value = msg.id
+  showAttentionContextModal.value = true
+}
 
 // Raw request modal state
 const showRawRequestModal = ref(false)
@@ -1183,6 +1186,17 @@ function formatToolInput(raw: string): string {
               v-html="renderMd(msg.content)"
             />
             <div v-else class="message-content">{{ msg.content }}</div>
+            <!-- Attention context badge (for user messages with attention context) -->
+            <button
+              v-if="msg.role === 'user' && msg.attention_context"
+              class="attention-badge"
+              @click="showAttentionContext(msg)"
+              title="查看注意力模式预处理内容"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>
+              </svg>
+            </button>
             <!-- Retry button: only for the last user message, always visible -->
             <button
               v-if="msg.role === 'user' && msg.id === lastUserMsgId && !store.streaming"
@@ -1255,39 +1269,10 @@ function formatToolInput(raw: string): string {
           </div>
         </div>
 
-        <!-- Attention mode status panel -->
-        <div v-if="store.attentionActive" class="attention-status-panel">
-          <div class="attention-status-header" @click="attentionDetailsExpanded = !attentionDetailsExpanded">
-            <div class="attention-status-indicator">
-              <span class="attention-pulse"></span>
-              <svg class="attention-status-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>
-              </svg>
-            </div>
-            <span class="attention-status-text">{{ store.attentionStatus }}</span>
-            <svg class="attention-expand-icon" :class="{ expanded: attentionDetailsExpanded }" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M6 9l6 6 6-6"/>
-            </svg>
-          </div>
-          <!-- Current detail content -->
-          <div v-if="attentionDetailsExpanded && store.attentionDetail" class="attention-current-detail">
-            <div class="attention-detail-content md-content" v-html="renderMd(store.attentionDetail)" />
-          </div>
-          <!-- History with details -->
-          <div v-if="attentionDetailsExpanded && store.attentionHistory.length > 1" class="attention-status-history">
-            <div v-for="(item, idx) in store.attentionHistory.slice(0, -1)" :key="idx" class="attention-history-item">
-              <div class="attention-history-header" @click.stop="toggleHistoryDetail(idx)">
-                <span class="attention-history-check">✓</span>
-                <span class="attention-history-status">{{ item.status }}</span>
-                <svg v-if="item.detail" class="attention-history-expand" :class="{ expanded: expandedHistoryItems[idx] }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M6 9l6 6 6-6"/>
-                </svg>
-              </div>
-              <div v-if="item.detail && expandedHistoryItems[idx]" class="attention-history-detail">
-                <div class="attention-detail-content md-content" v-html="renderMd(item.detail)" />
-              </div>
-            </div>
-          </div>
+        <!-- Attention mode status (simplified: only show during preprocessing) -->
+        <div v-if="store.attentionActive" class="attention-status-simple">
+          <span class="attention-pulse-dot"></span>
+          <span class="attention-status-text">{{ store.attentionStatus }}</span>
         </div>
 
         <!-- Streaming message (combines waiting state and content) -->
@@ -1363,6 +1348,33 @@ function formatToolInput(raw: string): string {
         </div>
       </div>
     </div>
+
+    <!-- Attention context modal -->
+    <Teleport to="body">
+      <div v-if="showAttentionContextModal" class="modal-overlay" @click="showAttentionContextModal = false">
+        <div class="attention-context-modal" @click.stop>
+          <div class="rules-modal-header">
+            <div class="attention-context-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>
+              </svg>
+            </div>
+            <div class="rules-modal-title-group">
+              <span class="rules-modal-title">注意力模式预处理</span>
+              <span class="rules-modal-dir">消息 #{{ attentionContextMsgId }}</span>
+            </div>
+            <button class="rules-modal-close" @click="showAttentionContextModal = false">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 6L6 18M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+          <div class="attention-context-body">
+            <div class="attention-context-content md-content" v-html="renderMd(attentionContextContent)" />
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <!-- Session rules modal -->
     <Teleport to="body">
@@ -2539,9 +2551,12 @@ function formatToolInput(raw: string): string {
 /* Session rules */
 .session-rules-body {
   display: flex; flex-direction: column; flex: 1; min-height: 0;
+  padding: 16px 20px;
 }
 .session-group-selector {
-  margin-bottom: 12px;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
 }
 .group-label {
   display: block;
@@ -2587,6 +2602,9 @@ function formatToolInput(raw: string): string {
 }
 .session-rules-textarea {
   min-height: 300px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-secondary);
 }
 .session-rules-actions {
   gap: 8px;
@@ -2903,146 +2921,108 @@ function formatToolInput(raw: string): string {
   .message { gap: 8px; margin-bottom: 16px; }
 }
 
-/* Attention mode status panel */
-.attention-status-panel {
-  margin: 12px 0;
-  padding: 12px 16px;
-  background: linear-gradient(135deg, rgba(255, 149, 0, 0.08), rgba(255, 149, 0, 0.04));
-  border: 1px solid rgba(255, 149, 0, 0.2);
+/* Attention mode - simplified status */
+.attention-status-simple {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  padding: 8px 12px;
+  background: rgba(255, 149, 0, 0.08);
   border-radius: var(--radius);
   animation: attention-fade-in 0.3s ease;
 }
 
 @keyframes attention-fade-in {
-  from { opacity: 0; transform: translateY(-8px); }
+  from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
-.attention-status-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  cursor: pointer;
-  user-select: none;
-}
-
-.attention-status-indicator {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.attention-pulse {
-  position: absolute;
-  width: 24px;
-  height: 24px;
+.attention-pulse-dot {
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background: rgba(255, 149, 0, 0.3);
-  animation: attention-pulse 1.5s ease-in-out infinite;
+  background: #ff9500;
+  animation: attention-pulse-dot 1.5s ease-in-out infinite;
 }
 
-@keyframes attention-pulse {
-  0%, 100% { transform: scale(0.8); opacity: 0.5; }
-  50% { transform: scale(1.2); opacity: 0; }
+@keyframes attention-pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.8); }
 }
 
-.attention-status-icon {
-  color: #ff9500;
-  z-index: 1;
-}
-
-.attention-status-text {
-  flex: 1;
+.attention-status-simple .attention-status-text {
   font-size: 13px;
   color: #ff9500;
   font-weight: 500;
 }
 
-.attention-expand-icon {
-  color: var(--text-secondary);
-  transition: transform 0.2s ease;
+/* Attention badge on user messages */
+.attention-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-top: 4px;
+  margin-right: 8px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 149, 0, 0.12);
+  color: #ff9500;
+  cursor: pointer;
+  transition: all 0.2s ease;
 }
 
-.attention-expand-icon.expanded {
-  transform: rotate(180deg);
+.attention-badge:hover {
+  background: rgba(255, 149, 0, 0.25);
+  transform: scale(1.1);
 }
 
-.attention-status-history {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid rgba(255, 149, 0, 0.15);
+/* Attention context modal */
+.attention-context-modal {
+  width: 600px;
+  max-width: 95vw;
+  max-height: 80vh;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
-.attention-history-item {
-  font-size: 12px;
-  color: var(--text-secondary);
-  padding: 4px 0;
-  border-bottom: 1px solid rgba(255, 149, 0, 0.08);
-}
-
-.attention-history-item:last-child {
-  border-bottom: none;
-}
-
-.attention-history-header {
+.attention-context-icon {
   display: flex;
   align-items: center;
-  gap: 8px;
-  cursor: pointer;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: rgba(255, 149, 0, 0.15);
+  color: #ff9500;
 }
 
-.attention-history-status {
+.attention-context-body {
   flex: 1;
-}
-
-.attention-history-expand {
-  color: var(--text-secondary);
-  transition: transform 0.2s ease;
-}
-
-.attention-history-expand.expanded {
-  transform: rotate(180deg);
-}
-
-.attention-history-check {
-  color: #34c759;
-  font-size: 11px;
-}
-
-.attention-current-detail {
-  margin-top: 10px;
-  padding: 10px;
-  background: rgba(0, 0, 0, 0.1);
-  border-radius: 6px;
-  max-height: 300px;
+  padding: 16px 20px;
   overflow-y: auto;
+  min-height: 0;
 }
 
-.attention-history-detail {
-  margin-top: 6px;
-  margin-left: 20px;
-  padding: 8px;
-  background: rgba(0, 0, 0, 0.08);
-  border-radius: 4px;
-  max-height: 200px;
-  overflow-y: auto;
+.attention-context-content {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-primary);
 }
 
-.attention-detail-content {
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--text-secondary);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.attention-detail-content pre {
-  background: rgba(0, 0, 0, 0.1);
-  padding: 8px;
-  border-radius: 4px;
+.attention-context-content pre {
+  background: var(--bg-tertiary);
+  padding: 12px;
+  border-radius: var(--radius);
   overflow-x: auto;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .attention-detail-content code {

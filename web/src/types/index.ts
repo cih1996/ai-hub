@@ -38,6 +38,7 @@ export interface Message {
   role: 'user' | 'assistant'
   content: string
   metadata?: string
+  attention_context?: string
   created_at: string
 }
 
