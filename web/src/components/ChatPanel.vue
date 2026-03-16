@@ -109,93 +109,6 @@ async function toggleAttention() {
   }
 }
 
-// Open attention rules modal (right-click or long-press on attention button)
-async function openAttentionRulesModal() {
-  const session = store.currentSession
-  if (!session) return
-  attentionRulesLoading.value = true
-  showAttentionRulesModal.value = true
-  try {
-    const res = await api.getAttentionRules(session.id)
-    // Load system rules (read-only)
-    systemActivationRule.value = res.system_activation_rule || ''
-    systemReviewRule.value = res.system_review_rule || ''
-    // Load custom rules (editable)
-    activationCustom.value = res.activation_custom || ''
-    reviewCustom.value = res.review_custom || ''
-  } catch (e: unknown) {
-    showToast('加载注意力规则失败: ' + (e instanceof Error ? e.message : String(e)), 'error')
-    systemActivationRule.value = ''
-    systemReviewRule.value = ''
-    activationCustom.value = ''
-    reviewCustom.value = ''
-  } finally {
-    attentionRulesLoading.value = false
-  }
-}
-
-// Save attention rules (new v2 format)
-async function saveAttentionRules() {
-  const session = store.currentSession
-  if (!session) return
-  attentionRulesSaving.value = true
-  try {
-    await api.updateAttentionRulesV2(session.id, activationCustom.value, reviewCustom.value)
-    // Update local session state
-    const rulesData = { activation_custom: activationCustom.value, review_custom: reviewCustom.value }
-    session.attention_rules = JSON.stringify(rulesData)
-    showToast('注意力规则已保存', 'success')
-    showAttentionRulesModal.value = false
-  } catch (e: unknown) {
-    showToast('保存失败: ' + (e instanceof Error ? e.message : String(e)), 'error')
-  } finally {
-    attentionRulesSaving.value = false
-  }
-}
-
-// Clear attention rules
-async function clearAttentionRules() {
-  const session = store.currentSession
-  if (!session) return
-  attentionRulesSaving.value = true
-  try {
-    await api.updateAttentionRulesV2(session.id, '', '')
-    activationCustom.value = ''
-    reviewCustom.value = ''
-    session.attention_rules = ''
-    showToast('注意力规则已清除', 'success')
-  } catch (e: unknown) {
-    showToast('清除失败: ' + (e instanceof Error ? e.message : String(e)), 'error')
-  } finally {
-    attentionRulesSaving.value = false
-  }
-}
-
-// Long press handlers for mobile
-function onAttentionTouchStart() {
-  longPressTriggered.value = false
-  longPressTimer = setTimeout(() => {
-    longPressTriggered.value = true
-    openAttentionRulesModal()
-  }, 500)
-}
-
-function onAttentionTouchEnd() {
-  if (longPressTimer) {
-    clearTimeout(longPressTimer)
-    longPressTimer = null
-  }
-}
-
-function onAttentionClick() {
-  // If long press was triggered, don't toggle
-  if (longPressTriggered.value) {
-    longPressTriggered.value = false
-    return
-  }
-  toggleAttention()
-}
-
 // Session rules modal state
 const showSessionRulesModal = ref(false)
 const sessionRulesContent = ref('')
@@ -205,19 +118,6 @@ const sessionRulesLoading = ref(false)
 const groupsList = ref<api.Group[]>([])
 const selectedGroupName = ref('')
 const groupSaving = ref(false)
-
-// Attention rules modal state
-const showAttentionRulesModal = ref(false)
-const attentionRulesSaving = ref(false)
-const attentionRulesLoading = ref(false)
-// New v2 structure: system rules (read-only) + custom rules (editable)
-const systemActivationRule = ref('')
-const systemReviewRule = ref('')
-const activationCustom = ref('')
-const reviewCustom = ref('')
-// Long press support for mobile
-let longPressTimer: ReturnType<typeof setTimeout> | null = null
-const longPressTriggered = ref(false)
 
 // Memory modal state
 const showMemoryModal = ref(false)
@@ -1303,13 +1203,9 @@ function formatToolInput(raw: string): string {
         <div class="input-wrapper" :class="{ disabled: store.streaming, 'attention-active': store.currentSession?.attention_enabled }">
           <button
             class="btn-attention"
-            :class="{ active: store.currentSession?.attention_enabled, 'has-rules': store.currentSession?.attention_rules }"
-            @click="onAttentionClick"
-            @contextmenu.prevent="openAttentionRulesModal"
-            @touchstart.prevent="onAttentionTouchStart"
-            @touchend="onAttentionTouchEnd"
-            @touchcancel="onAttentionTouchEnd"
-            :title="store.currentSession?.attention_enabled ? '关闭注意力模式（右键/长按配置规则）' : '开启注意力模式（右键/长按配置规则）'"
+            :class="{ active: store.currentSession?.attention_enabled }"
+            @click="toggleAttention"
+            :title="store.currentSession?.attention_enabled ? '关闭注意力模式' : '开启注意力模式'"
           >
             <svg class="attention-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="12" cy="12" r="10"/>
@@ -1442,84 +1338,6 @@ function formatToolInput(raw: string): string {
                   @click="saveSessionRules"
                 >
                   {{ sessionRulesSaving ? '保存中...' : '保存' }}
-                </button>
-              </div>
-            </template>
-          </div>
-        </div>
-      </div>
-    </Teleport>
-
-    <!-- Attention rules modal (v2: dual panel) -->
-    <Teleport to="body">
-      <div v-if="showAttentionRulesModal" class="modal-overlay" @click="showAttentionRulesModal = false">
-        <div class="rules-modal attention-rules-modal-v2" @click.stop>
-          <div class="rules-modal-header">
-            <span class="rules-modal-title">注意力规则配置</span>
-            <span class="rules-modal-dir">会话 #{{ store.currentSession?.id }}</span>
-            <button class="rules-modal-close" @click="showAttentionRulesModal = false">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M18 6L6 18M6 6l12 12"/>
-              </svg>
-            </button>
-          </div>
-          <div class="attention-rules-body-v2">
-            <div v-if="attentionRulesLoading" class="rules-empty">加载中...</div>
-            <template v-else>
-              <!-- Activation Rules Panel -->
-              <div class="attention-panel">
-                <div class="attention-panel-header">
-                  <span class="attention-panel-title">激活规则</span>
-                  <span class="attention-panel-desc">用户发消息时注入，要求 AI 输出结构化计划</span>
-                </div>
-                <div class="attention-system-rule">
-                  <div class="attention-system-label">系统内置（只读）</div>
-                  <div class="attention-system-content">{{ systemActivationRule }}</div>
-                </div>
-                <div class="attention-custom-rule">
-                  <div class="attention-custom-label">自定义补充</div>
-                  <textarea
-                    v-model="activationCustom"
-                    class="attention-custom-textarea"
-                    placeholder="补充激活规则（可选）...&#10;例如：&#10;- 涉及数据库操作时必须说明影响范围&#10;- 修改配置文件前列出所有变更项"
-                  />
-                </div>
-              </div>
-
-              <!-- Review Rules Panel -->
-              <div class="attention-panel">
-                <div class="attention-panel-header">
-                  <span class="attention-panel-title">审核规则</span>
-                  <span class="attention-panel-desc">检测到计划后触发，独立 AI 审核是否符合规则</span>
-                </div>
-                <div class="attention-system-rule">
-                  <div class="attention-system-label">系统内置（只读）</div>
-                  <div class="attention-system-content">{{ systemReviewRule }}</div>
-                </div>
-                <div class="attention-custom-rule">
-                  <div class="attention-custom-label">自定义补充</div>
-                  <textarea
-                    v-model="reviewCustom"
-                    class="attention-custom-textarea"
-                    placeholder="补充审核规则（可选）...&#10;例如：&#10;- 禁止删除生产数据库&#10;- 必须检查是否遗漏单元测试"
-                  />
-                </div>
-              </div>
-
-              <div class="rules-editor-actions attention-rules-actions">
-                <button
-                  class="btn-delete-rule"
-                  @click="clearAttentionRules"
-                  :disabled="(!activationCustom && !reviewCustom) || attentionRulesSaving"
-                >
-                  清除全部
-                </button>
-                <button
-                  class="btn-save-rule"
-                  :disabled="attentionRulesSaving"
-                  @click="saveAttentionRules"
-                >
-                  {{ attentionRulesSaving ? '保存中...' : '保存' }}
                 </button>
               </div>
             </template>
@@ -2617,111 +2435,6 @@ function formatToolInput(raw: string): string {
 }
 .btn-delete-rule:hover:not(:disabled) { opacity: 0.8; }
 .btn-delete-rule:disabled { opacity: 0.4; cursor: not-allowed; }
-/* Attention rules modal */
-.attention-rules-modal {
-  width: 600px; max-width: 95vw;
-}
-.attention-rules-body {
-  display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 16px;
-}
-.attention-rules-hint {
-  font-size: 13px; color: var(--text-secondary);
-  margin-bottom: 12px; line-height: 1.5;
-  padding: 10px 12px;
-  background: var(--bg-tertiary);
-  border-radius: var(--radius);
-  border-left: 3px solid #f59e0b;
-}
-.attention-rules-textarea {
-  min-height: 250px;
-}
-.attention-rules-actions {
-  gap: 8px;
-}
-.btn-attention.has-rules::after {
-  content: '';
-  position: absolute;
-  top: 4px; right: 4px;
-  width: 6px; height: 6px;
-  background: #f59e0b;
-  border-radius: 50%;
-}
-/* Attention rules modal v2 (dual panel) */
-.attention-rules-modal-v2 {
-  width: 800px; max-width: 95vw;
-  max-height: 85vh;
-}
-.attention-rules-body-v2 {
-  padding: 16px 20px;
-  overflow-y: auto;
-  display: flex; flex-direction: column; gap: 20px;
-}
-.attention-panel {
-  background: var(--bg-tertiary);
-  border-radius: var(--radius-lg);
-  padding: 16px;
-  border: 1px solid var(--border);
-}
-.attention-panel-header {
-  display: flex; align-items: baseline; gap: 12px;
-  margin-bottom: 12px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--border);
-}
-.attention-panel-title {
-  font-size: 14px; font-weight: 600;
-  color: var(--text-primary);
-}
-.attention-panel-desc {
-  font-size: 12px; color: var(--text-muted);
-}
-.attention-system-rule {
-  margin-bottom: 12px;
-}
-.attention-system-label {
-  font-size: 11px; font-weight: 500;
-  color: var(--text-muted);
-  margin-bottom: 6px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-.attention-system-content {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 10px 12px;
-  font-size: 12px; line-height: 1.5;
-  color: var(--text-secondary);
-  white-space: pre-wrap;
-  max-height: 120px;
-  overflow-y: auto;
-}
-.attention-custom-rule {
-  margin-top: 8px;
-}
-.attention-custom-label {
-  font-size: 11px; font-weight: 500;
-  color: var(--accent);
-  margin-bottom: 6px;
-}
-.attention-custom-textarea {
-  width: 100%;
-  min-height: 80px;
-  padding: 10px 12px;
-  font-size: 13px; line-height: 1.5;
-  background: var(--bg-primary);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--text-primary);
-  resize: vertical;
-}
-.attention-custom-textarea:focus {
-  outline: none;
-  border-color: var(--accent);
-}
-.attention-custom-textarea::placeholder {
-  color: var(--text-muted);
-}
 /* Memory modal */
 .memory-modal {
   background: var(--bg-secondary);
