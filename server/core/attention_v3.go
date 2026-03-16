@@ -54,50 +54,31 @@ func (m *AttentionV3Manager) ClearState(parentSessionID int64) {
 
 // BuildAttentionAIPrompt builds the prompt for the attention AI
 func BuildAttentionAIPrompt(targetSessionID int64, targetGroupName string, userMessage string) string {
-	return fmt.Sprintf(`你是注意力模式 AI，负责为会话 #%d 提供预处理支持。
+	return fmt.Sprintf(`你是注意力模式预处理 AI。你的任务是为会话 #%d 生成简洁的预处理提示。
 
-## 你的任务
+## 执行步骤
 
-分析用户请求，查询相关信息，生成预处理文本来增强本体会话的执行效果。
+1. 查近期聊天记录：ai-hub sessions %d messages --limit 10
+2. 查会话规则：ai-hub rules get %d
+3. 如有团队「%s」，查团队规则：ai-hub rules list --level team
 
-### 查询步骤（请按顺序执行）
-
-1. 查近期聊天记录了解上下文：
-   ai-hub sessions %d messages --limit 20
-
-2. 查会话规则：
-   ai-hub rules get %d
-
-3. 如果会话属于团队「%s」，查团队规则：
-   ai-hub rules list --level team
-   （然后读取相关规则文件）
-
-4. 根据聊天记录和用户请求，按需查询记忆：
-   - 会话级记忆：ai-hub search "关键词" --level session
-   - 团队级记忆：ai-hub search "关键词" --level team
-   - 全局记忆（慎用）：ai-hub search "关键词" --level global
-
-### 目标会话信息
-- 会话 ID：%d
+## 目标会话
+- ID：%d
 - 团队：%s
 
-### 用户当前请求
+## 用户请求
 %s
 
-### 输出要求
+## 输出要求
 
-完成查询后，直接输出预处理文本（不需要任何标签包裹），内容包括：
-- 发现的需要注意的事项
-- 相关规则约束
-- 相关记忆信息
-- 对本次请求的建议
+根据查询结果，输出简洁的预处理提示（3-5 行），包括：
+- 需要遵守的关键规则
+- 需要注意的事项
+- 相关上下文提醒
 
-如果没有特别需要注意的事项，输出：
-无特别注意事项，可正常执行。
+如果没有特别注意事项，只输出：无特别注意事项。
 
----
-
-请开始执行查询，然后输出预处理结果。`,
+注意：只输出最终的预处理提示，不要输出查询过程。`,
 		targetSessionID, targetSessionID, targetSessionID, targetGroupName, targetSessionID, targetGroupName, userMessage)
 }
 
@@ -139,13 +120,14 @@ func (e *AttentionV3Executor) Execute(ctx context.Context, userMessage string) e
 	defer AttentionV3Mgr.ClearState(parentID)
 
 	// ========== Phase 1: Create Attention AI and do preprocessing ==========
-	e.broadcastStatus("注意力模式：正在分析请求...")
+	e.broadcastStatus("注意力模式：正在预处理...")
 	log.Printf("[attention-v3] session %d: Phase 1 - Creating attention AI", parentID)
 
 	attentionSession, err := e.CreateAttentionSessionFn(parentID)
 	if err != nil {
 		state.Phase = "failed"
 		state.Error = err.Error()
+		e.broadcastClear() // Clear status on failure
 		log.Printf("[attention-v3] session %d: create attention session failed: %v", parentID, err)
 		return fmt.Errorf("create attention session failed: %w", err)
 	}
@@ -158,24 +140,23 @@ func (e *AttentionV3Executor) Execute(ctx context.Context, userMessage string) e
 		e.DeleteAttentionSessionFn(attentionSession.ID)
 	}()
 
-	// Run attention AI to do preprocessing
-	e.broadcastStatus("注意力模式：正在查询相关信息...")
+	// Run attention AI to do preprocessing (silently)
 	attentionPrompt := BuildAttentionAIPrompt(parentID, e.ParentSession.GroupName, userMessage)
 
 	preprocessResponse, err := e.RunAttentionStreamFn(attentionSession, attentionPrompt, parentID)
 	if err != nil {
 		state.Phase = "failed"
 		state.Error = err.Error()
+		e.broadcastClear() // Clear status on failure
 		log.Printf("[attention-v3] session %d: attention AI failed: %v", parentID, err)
 		return fmt.Errorf("attention AI failed: %w", err)
 	}
 	state.PreprocessedText = preprocessResponse
 	log.Printf("[attention-v3] session %d: preprocessing complete, len=%d", parentID, len(preprocessResponse))
-	e.broadcastStatusWithDetail("注意力模式：预处理完成", preprocessResponse)
 
 	// ========== Phase 2: Send to parent session with wrapped context ==========
 	state.Phase = "executing"
-	e.broadcastStatus("注意力模式：正在执行...")
+	e.broadcastClear() // Clear attention status before parent execution
 	log.Printf("[attention-v3] session %d: Phase 2 - Executing with parent session", parentID)
 
 	// Build enhanced message: wrapped preprocessing + user message
@@ -205,17 +186,16 @@ func (e *AttentionV3Executor) Execute(ctx context.Context, userMessage string) e
 
 // broadcastStatus sends a status message
 func (e *AttentionV3Executor) broadcastStatus(message string) {
-	e.broadcastStatusWithDetail(message, "")
+	if e.BroadcastFn != nil {
+		e.BroadcastFn(e.ParentSession.ID, "attention_status", message, "")
+	}
+	log.Printf("[attention-v3] session %d: %s", e.ParentSession.ID, message)
 }
 
-// broadcastStatusWithDetail sends a status message with optional detail
-func (e *AttentionV3Executor) broadcastStatusWithDetail(message, detail string) {
+// broadcastClear clears the attention status
+func (e *AttentionV3Executor) broadcastClear() {
 	if e.BroadcastFn != nil {
-		e.BroadcastFn(e.ParentSession.ID, "attention_status", message, detail)
+		e.BroadcastFn(e.ParentSession.ID, "attention_clear", "", "")
 	}
-	if detail != "" {
-		log.Printf("[attention-v3] session %d: %s (detail len=%d)", e.ParentSession.ID, message, len(detail))
-	} else {
-		log.Printf("[attention-v3] session %d: %s", e.ParentSession.ID, message)
-	}
+	log.Printf("[attention-v3] session %d: status cleared", e.ParentSession.ID)
 }

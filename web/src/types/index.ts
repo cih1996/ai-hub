@@ -55,10 +55,9 @@ export interface StepsMetadata {
 }
 
 export interface WSMessage {
-  type: 'chat' | 'stop' | 'subscribe' | 'error' | 'chunk' | 'thinking' | 'tool_start' | 'tool_input' | 'tool_result' | 'done' | 'session_created' | 'streaming_status' | 'session_update' | 'session_title_update' | 'process_update' | 'message_queued' | 'token_usage' | 'attention_update' | 'attention_status'
+  type: 'chat' | 'stop' | 'subscribe' | 'error' | 'chunk' | 'thinking' | 'tool_start' | 'tool_input' | 'tool_result' | 'done' | 'session_created' | 'streaming_status' | 'session_update' | 'session_title_update' | 'process_update' | 'message_queued' | 'token_usage' | 'attention_update' | 'attention_status' | 'attention_clear'
   session_id: number
   content: string
-  detail?: string  // Optional detail content for attention_status
   tool_id?: string
   tool_name?: string
 }

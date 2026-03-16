@@ -1415,8 +1415,8 @@ func runAttentionV3Flow(parentSession *model.Session, userMessage string) {
 			return store.DeleteShadowSession(sessionID)
 		},
 		RunAttentionStreamFn: func(attentionSession *model.Session, query string, broadcastAsID int64) (string, error) {
-			// Run attention AI with Claude CLI, broadcast to parent
-			response, _, err := runShadowStream(ctx, attentionSession, query, broadcastAsID, provider)
+			// Run attention AI silently (no broadcast to frontend)
+			response, err := runSilentStream(ctx, attentionSession, query, provider)
 			return response, err
 		},
 		RunParentStreamFn: func(parentSession *model.Session, query string) error {
@@ -1731,6 +1731,103 @@ func runShadowStream(ctx context.Context, shadowSession *model.Session, query st
 
 	log.Printf("[shadow-stream] shadow=%d broadcast_as=%d: completed, response_len=%d", shadowSession.ID, broadcastAsID, len(fullResponse))
 	return fullResponse, metadataJSON, nil
+}
+
+// runSilentStream executes Claude CLI without broadcasting to frontend
+// Used for attention AI preprocessing - only returns the final response
+func runSilentStream(ctx context.Context, session *model.Session, query string, provider *model.Provider) (string, error) {
+	log.Printf("[silent-stream] session=%d: starting", session.ID)
+
+	// Build system prompt
+	tplVars := runtimeTemplateVars(session.ID, session.GroupName)
+	var promptParts []string
+	if globalPrompt := core.BuildSystemPromptWithVars(tplVars); globalPrompt != "" {
+		promptParts = append(promptParts, globalPrompt)
+	}
+	if teamRules := core.BuildTeamRulesWithVars(session.GroupName, tplVars); teamRules != "" {
+		promptParts = append(promptParts, teamRules)
+	}
+
+	req := core.ClaudeCodeRequest{
+		Query:        query,
+		SessionID:    session.ClaudeSessionID,
+		Resume:       false,
+		BaseURL:      provider.BaseURL,
+		APIKey:       provider.APIKey,
+		AuthMode:     provider.AuthMode,
+		ProxyURL:     provider.ProxyURL,
+		ModelID:      strings.TrimSpace(provider.ModelID),
+		WorkDir:      session.WorkDir,
+		HubSessionID: session.ID,
+		GroupName:    session.GroupName,
+	}
+	if provider.AuthMode == "oauth" {
+		req.ModelID = ""
+	}
+	if len(promptParts) > 0 {
+		req.SystemPrompt = strings.Join(promptParts, "\n\n---\n\n")
+	}
+
+	var fullResponse string
+	var assistantFullText string
+
+	err := claudeClient.StreamPersistent(ctx, req, func(line string) {
+		var wrapper struct {
+			Type    string          `json:"type"`
+			Subtype string          `json:"subtype"`
+			Event   json.RawMessage `json:"event"`
+		}
+		if err := json.Unmarshal([]byte(line), &wrapper); err != nil {
+			return
+		}
+
+		switch wrapper.Type {
+		case "stream_event":
+			var inner struct {
+				Type  string `json:"type"`
+				Delta struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"delta"`
+			}
+			if json.Unmarshal(wrapper.Event, &inner) == nil {
+				if inner.Type == "content_block_delta" && inner.Delta.Type == "text_delta" {
+					assistantFullText += inner.Delta.Text
+				}
+			}
+
+		case "assistant":
+			var msg struct {
+				Message struct {
+					Content []struct {
+						Type string `json:"type"`
+						Text string `json:"text"`
+					} `json:"content"`
+				} `json:"message"`
+			}
+			if json.Unmarshal([]byte(line), &msg) == nil {
+				for _, block := range msg.Message.Content {
+					if block.Type == "text" && block.Text != "" {
+						if fullResponse == "" {
+							fullResponse = block.Text
+						}
+					}
+				}
+			}
+
+		case "result":
+			if wrapper.Subtype == "success" && fullResponse == "" && assistantFullText != "" {
+				fullResponse = assistantFullText
+			}
+		}
+	})
+
+	if err != nil {
+		return fullResponse, err
+	}
+
+	log.Printf("[silent-stream] session=%d: completed, response_len=%d", session.ID, len(fullResponse))
+	return fullResponse, nil
 }
 
 // truncateString truncates a string to maxLen characters

@@ -27,13 +27,7 @@ export const useChatStore = defineStore('chat', () => {
   let _suppressChunksFor = 0
 
   // Attention mode v2 status tracking
-  interface AttentionHistoryItem {
-    status: string
-    detail?: string
-  }
   const attentionStatus = ref('')  // Current status message
-  const attentionDetail = ref('')  // Current detail content
-  const attentionHistory = ref<AttentionHistoryItem[]>([])  // History of status messages with details
   const attentionActive = ref(false)  // Whether attention mode is currently running
 
   const workDir = ref('')
@@ -161,8 +155,6 @@ export const useChatStore = defineStore('chat', () => {
             // Clear attention status when session becomes idle
             attentionActive.value = false
             attentionStatus.value = ''
-            attentionDetail.value = ''
-            attentionHistory.value = []
             api.getMessagesPaginated(msg.session_id, 50).then((resp) => {
               messages.value = resp.messages
               hasMoreMessages.value = resp.has_more
@@ -172,23 +164,20 @@ export const useChatStore = defineStore('chat', () => {
         return
       }
 
-      // attention_status: attention mode v2 status update
+      // attention_status: attention mode status update
       if (msg.type === 'attention_status') {
         if (msg.session_id === currentSessionId.value) {
           attentionActive.value = true
           attentionStatus.value = msg.content
-          attentionDetail.value = msg.detail || ''
-          // Add to history if not duplicate status
-          const lastItem = attentionHistory.value[attentionHistory.value.length - 1]
-          if (!lastItem || lastItem.status !== msg.content) {
-            attentionHistory.value.push({
-              status: msg.content,
-              detail: msg.detail
-            })
-          } else if (msg.detail && lastItem.detail !== msg.detail) {
-            // Update detail if status is same but detail changed
-            lastItem.detail = msg.detail
-          }
+        }
+        return
+      }
+
+      // attention_clear: clear attention mode status
+      if (msg.type === 'attention_clear') {
+        if (msg.session_id === currentSessionId.value) {
+          attentionActive.value = false
+          attentionStatus.value = ''
         }
         return
       }
@@ -675,7 +664,5 @@ export const useChatStore = defineStore('chat', () => {
     // Attention mode v2
     attentionActive,
     attentionStatus,
-    attentionDetail,
-    attentionHistory,
   }
 })
