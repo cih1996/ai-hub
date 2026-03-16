@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -19,6 +20,30 @@ type Client struct {
 func NewClient(port int) *Client {
 	return &Client{
 		BaseURL: fmt.Sprintf("http://localhost:%d/api/v1", port),
+		HTTP: &http.Client{
+			Timeout: 30 * time.Second,
+		},
+	}
+}
+
+// NewClientWithURL creates a new API client with custom base URL
+// URL format: http://host:port or http://host (default port 9527)
+func NewClientWithURL(baseURL string) *Client {
+	// Normalize URL
+	baseURL = strings.TrimSuffix(baseURL, "/")
+
+	// Add default port if not specified
+	if !strings.Contains(baseURL[strings.Index(baseURL, "://")+3:], ":") {
+		baseURL += ":9527"
+	}
+
+	// Ensure /api/v1 suffix
+	if !strings.HasSuffix(baseURL, "/api/v1") {
+		baseURL += "/api/v1"
+	}
+
+	return &Client{
+		BaseURL: baseURL,
 		HTTP: &http.Client{
 			Timeout: 30 * time.Second,
 		},

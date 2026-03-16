@@ -18,10 +18,13 @@ Send a message to a session. Use session_id=0 to create a new session.
 Flags:
   --group <name>       Group name for new session
   --work-dir <path>    Working directory for new session
+  --remote <url>       Send to remote AI Hub instance (default port: 9527)
 
 Examples:
   ai-hub send 25 "你好"
   ai-hub send 0 "初始化" --group "团队A" --work-dir "/path/to/project"
+  ai-hub send 23 "跨系统协作" --remote http://192.168.1.100
+  ai-hub send 23 "跨系统协作" --remote http://192.168.1.100:8080
 `)
 		return 1
 	}
@@ -35,7 +38,7 @@ Examples:
 	content := args[1]
 
 	// Parse optional flags
-	var groupName, workDir string
+	var groupName, workDir, remoteURL string
 	for i := 2; i < len(args); i++ {
 		switch args[i] {
 		case "--group":
@@ -48,7 +51,19 @@ Examples:
 				i++
 				workDir = args[i]
 			}
+		case "--remote":
+			if i+1 < len(args) {
+				i++
+				remoteURL = args[i]
+			}
 		}
+	}
+
+	// Use remote client if --remote is specified
+	targetClient := c
+	if remoteURL != "" {
+		targetClient = client.NewClientWithURL(remoteURL)
+		fmt.Printf("Sending to remote: %s\n", targetClient.BaseURL)
 	}
 
 	body := map[string]interface{}{
@@ -62,7 +77,7 @@ Examples:
 		body["work_dir"] = workDir
 	}
 
-	respData, err := c.POST("/chat/send", body)
+	respData, err := targetClient.POST("/chat/send", body)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 1
@@ -77,6 +92,10 @@ Examples:
 		return 1
 	}
 
-	fmt.Printf("Session #%d: %s\n", resp.SessionID, resp.Status)
+	if remoteURL != "" {
+		fmt.Printf("Remote Session #%d: %s\n", resp.SessionID, resp.Status)
+	} else {
+		fmt.Printf("Session #%d: %s\n", resp.SessionID, resp.Status)
+	}
 	return 0
 }

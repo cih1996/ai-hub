@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Hub 注意力模式</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg: #0a0a0f;
+            --card: #14141f;
+            --accent: #00d4ff;
+            --purple: #a855f7;
+            --green: #22c55e;
+            --text: #ffffff;
+            --muted: #94a3b8;
+            --border: #2a2a3a;
+        }
+        html, body { height: 100%; overflow: hidden; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+        }
+
+        /* 幻灯片容器 */
+        .slides { height: 100%; position: relative; }
+        .slide {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 60px;
+            opacity: 0;
+            visibility: hidden;
+            transform: translateX(100px);
+            transition: all 0.5s ease;
+        }
+        .slide.active {
+            opacity: 1;
+            visibility: visible;
+            transform: translateX(0);
+        }
+        .slide.prev {
+            transform: translateX(-100px);
+        }
+
+        /* 背景效果 */
+        .bg-grid {
+            position: fixed;
+            inset: 0;
+            background-image:
+                linear-gradient(rgba(0,212,255,0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0,212,255,0.03) 1px, transparent 1px);
+            background-size: 60px 60px;
+            pointer-events: none;
+        }
+        .glow {
+            position: fixed;
+            width: 500px;
+            height: 500px;
+            border-radius: 50%;
+            filter: blur(120px);
+            opacity: 0.12;
+            pointer-events: none;
+        }
+        .glow-1 { top: -200px; right: -200px; background: var(--accent); }
+        .glow-2 { bottom: -200px; left: -200px; background: var(--purple); }
+
+        /* 导航 */
+        .nav {
+            position: fixed;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 12px;
+            z-index: 100;
+        }
+        .nav-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: var(--border);
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .nav-dot.active { background: var(--accent); transform: scale(1.3); }
+        .nav-dot:hover { background: var(--muted); }
+
+        .nav-arrows {
+            position: fixed;
+            bottom: 40px;
+            right: 40px;
+            display: flex;
+            gap: 10px;
+            z-index: 100;
+        }
+        .nav-btn {
+            width: 50px;
+            height: 50px;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            background: var(--card);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s;
+        }
+        .nav-btn:hover { border-color: var(--accent); background: rgba(0,212,255,0.1); }
+        .nav-btn svg { width: 20px; height: 20px; stroke: var(--text); }
+
+        /* 页码 */
+        .page-num {
+            position: fixed;
+            bottom: 45px;
+            left: 40px;
+            font-size: 14px;
+            color: var(--muted);
+            z-index: 100;
+        }
+
+        /* 通用样式 */
+        h1 {
+            font-size: clamp(2.5rem, 6vw, 4.5rem);
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--text), var(--accent));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 20px;
+        }
+        h2 {
+            font-size: clamp(1.8rem, 4vw, 2.5rem);
+            margin-bottom: 40px;
+            color: var(--accent);
+        }
+        .subtitle {
+            font-size: 1.3rem;
+            color: var(--muted);
+            max-width: 700px;
+            text-align: center;
+            line-height: 1.8;
+        }
+        .logo {
+            font-size: 14px;
+            letter-spacing: 4px;
+            color: var(--accent);
+            margin-bottom: 30px;
+        }
+
+        /* 对比布局 */
+        .compare {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 40px;
+            max-width: 1000px;
+            width: 100%;
+        }
+        .compare-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 40px;
+            transition: all 0.3s;
+        }
+        .compare-card:hover { transform: translateY(-5px); }
+        .compare-card.old { opacity: 0.7; }
+        .compare-card.new { border-color: var(--accent); }
+        .compare-card h3 {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            font-size: 1.4rem;
+            margin-bottom: 20px;
+        }
+        .compare-card ul { list-style: none; }
+        .compare-card li {
+            padding: 12px 0;
+            color: var(--muted);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 1rem;
+        }
+        .compare-card li svg { flex-shrink: 0; }
+        .old li svg { stroke: #ef4444; }
+        .new li svg { stroke: var(--green); }
+
+        /* 流程 */
+        .flow {
+            display: flex;
+            gap: 30px;
+            max-width: 1100px;
+        }
+        .flow-step {
+            flex: 1;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 30px;
+            text-align: center;
+            position: relative;
+        }
+        .flow-step::after {
+            content: '';
+            position: absolute;
+            right: -20px;
+            top: 50%;
+            transform: translateY(-50%);
+            border: 8px solid transparent;
+            border-left-color: var(--accent);
+        }
+        .flow-step:last-child::after { display: none; }
+        .flow-num {
+            width: 50px;
+            height: 50px;
+            margin: 0 auto 20px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--accent), var(--purple));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.3rem;
+            font-weight: 700;
+        }
+        .flow-step h4 { font-size: 1.1rem; margin-bottom: 10px; }
+        .flow-step p { font-size: 0.9rem; color: var(--muted); }
+
+        /* 架构图 */
+        .arch {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 50px;
+        }
+        .hub-core {
+            padding: 30px 60px;
+            background: linear-gradient(135deg, rgba(0,212,255,0.15), rgba(168,85,247,0.15));
+            border: 2px solid var(--accent);
+            border-radius: 20px;
+            text-align: center;
+            animation: pulse 2s ease-in-out infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 0 30px rgba(0,212,255,0.2); }
+            50% { box-shadow: 0 0 50px rgba(0,212,255,0.4); }
+        }
+        .hub-core h3 { font-size: 1.5rem; margin-bottom: 8px; display: flex; align-items: center; gap: 12px; justify-content: center; }
+        .hub-core span { color: var(--muted); font-size: 0.95rem; }
+        .agents {
+            display: flex;
+            gap: 25px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .agent {
+            width: 110px;
+            padding: 20px 15px;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .agent:hover { border-color: var(--accent); transform: translateY(-5px); }
+        .agent.active { border-color: var(--green); box-shadow: 0 0 25px rgba(34,197,94,0.3); }
+        .agent svg { width: 36px; height: 36px; margin-bottom: 10px; }
+        .agent .name { font-size: 0.8rem; color: var(--muted); }
+        .agent .status {
+            font-size: 0.7rem;
+            margin-top: 8px;
+            padding: 3px 8px;
+            border-radius: 8px;
+            background: rgba(148,163,184,0.2);
+        }
+        .agent.active .status { background: rgba(34,197,94,0.2); color: var(--green); }
+
+        /* 优势网格 */
+        .benefits {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 25px;
+            max-width: 900px;
+        }
+        .benefit {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 30px;
+            text-align: center;
+            transition: all 0.3s;
+        }
+        .benefit:hover { border-color: var(--accent); transform: translateY(-5px); }
+        .benefit svg { width: 48px; height: 48px; margin-bottom: 15px; stroke: var(--accent); }
+        .benefit h4 { font-size: 1rem; margin-bottom: 8px; }
+        .benefit p { font-size: 0.85rem; color: var(--muted); }
+
+        /* 键盘提示 */
+        .kbd-hint {
+            position: fixed;
+            top: 40px;
+            right: 40px;
+            font-size: 12px;
+            color: var(--muted);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        kbd {
+            padding: 4px 8px;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            font-family: inherit;
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-grid"></div>
+    <div class="glow glow-1"></div>
+    <div class="glow glow-2"></div>
+
+    <div class="kbd-hint"><kbd>←</kbd><kbd>→</kbd> 或点击切换</div>
+    <div class="page-num"><span id="current">1</span> / <span id="total">5</span></div>
+
+    <div class="slides">
+        <!-- Slide 1: 封面 -->
+        <div class="slide active" data-index="0">
+            <div class="logo">AI HUB</div>
+            <h1>注意力模式</h1>
+            <p class="subtitle">让 AI 智能体像人类团队一样协作<br>专注当前任务，按需唤醒，零空闲消耗</p>
+        </div>
+
+        <!-- Slide 2: 对比 -->
+        <div class="slide" data-index="1">
+            <h2>传统模式 vs 注意力模式</h2>
+            <div class="compare">
+                <div class="compare-card old">
+                    <h3>
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2">
+                            <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/>
+                        </svg>
+                        传统模式
+                    </h3>
+                    <ul>
+                        <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>每个会话独立运行进程</li>
+                        <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>空闲时持续消耗资源</li>
+                        <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>智能体之间无法协作</li>
+                        <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>上下文容易丢失</li>
+                    </ul>
+                </div>
+                <div class="compare-card new">
+                    <h3>
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2">
+                            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                        </svg>
+                        注意力模式
+                    </h3>
+                    <ul>
+                        <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>单一进程处理所有会话</li>
+                        <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>空闲会话零资源消耗</li>
+                        <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>智能体可互相发消息</li>
+                        <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>记忆库持久化上下文</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 3: 流程 -->
+        <div class="slide" data-index="2">
+            <h2>工作流程</h2>
+            <div class="flow">
+                <div class="flow-step">
+                    <div class="flow-num">1</div>
+                    <h4>消息到达</h4>
+                    <p>用户发送消息<br>进入消息队列</p>
+                </div>
+                <div class="flow-step">
+                    <div class="flow-num">2</div>
+                    <h4>注意力切换</h4>
+                    <p>调度器切换到<br>目标会话上下文</p>
+                </div>
+                <div class="flow-step">
+                    <div class="flow-num">3</div>
+                    <h4>智能处理</h4>
+                    <p>以角色身份处理<br>可调用工具协作</p>
+                </div>
+                <div class="flow-step">
+                    <div class="flow-num">4</div>
+                    <h4>释放注意力</h4>
+                    <p>处理完成释放<br>等待下次唤醒</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 4: 架构 -->
+        <div class="slide" data-index="3">
+            <h2>系统架构</h2>
+            <div class="arch">
+                <div class="hub-core">
+                    <h3>
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2">
+                            <path d="M12 2a4 4 0 0 1 4 4c0 1.5-.8 2.8-2 3.4V11h3a3 3 0 0 1 3 3v1.6c1.2.6 2 1.9 2 3.4a4 4 0 1 1-8 0c0-1.5.8-2.8 2-3.4V14a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v1.6c1.2.6 2 1.9 2 3.4a4 4 0 1 1-8 0c0-1.5.8-2.8 2-3.4V14a3 3 0 0 1 3-3h3V9.4c-1.2-.6-2-1.9-2-3.4a4 4 0 0 1 4-4z"/>
+                        </svg>
+                        AI Hub 调度中心
+                    </h3>
+                    <span>单一 Claude 进程 · 智能调度 · 统一管理</span>
+                </div>
+                <div class="agents">
+                    <div class="agent active" onclick="toggleAgent(this)">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="1.5">
+                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                            <circle cx="12" cy="7" r="4"/>
+                        </svg>
+                        <div class="name">售后客服</div>
+                        <div class="status">处理中</div>
+                    </div>
+                    <div class="agent" onclick="toggleAgent(this)">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="1.5">
+                            <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+                        </svg>
+                        <div class="name">技术维护</div>
+                        <div class="status">待命</div>
+                    </div>
+                    <div class="agent" onclick="toggleAgent(this)">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="1.5">
+                            <path d="M9 11l3 3L22 4"/>
+                            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+                        </svg>
+                        <div class="name">测试工程师</div>
+                        <div class="status">待命</div>
+                    </div>
+                    <div class="agent" onclick="toggleAgent(this)">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="1.5">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                            <polyline points="17 8 12 3 7 8"/>
+                            <line x1="12" y1="3" x2="12" y2="15"/>
+                        </svg>
+                        <div class="name">内容创作</div>
+                        <div class="status">待命</div>
+                    </div>
+                    <div class="agent" onclick="toggleAgent(this)">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="1.5">
+                            <line x1="18" y1="20" x2="18" y2="10"/>
+                            <line x1="12" y1="20" x2="12" y2="4"/>
+                            <line x1="6" y1="20" x2="6" y2="14"/>
+                        </svg>
+                        <div class="name">数据分析</div>
+                        <div class="status">待命</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 5: 优势 -->
+        <div class="slide" data-index="4">
+            <h2>核心优势</h2>
+            <div class="benefits">
+                <div class="benefit">
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5">
+                        <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                    </svg>
+                    <h4>成本节省 90%</h4>
+                    <p>空闲零消耗</p>
+                </div>
+                <div class="benefit">
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5">
+                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                        <circle cx="9" cy="7" r="4"/>
+                        <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                        <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                    </svg>
+                    <h4>智能体协作</h4>
+                    <p>互相发消息</p>
+                </div>
+                <div class="benefit">
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5">
+                        <path d="M12 2a4 4 0 0 1 4 4c0 1.5-.8 2.8-2 3.4V11h3a3 3 0 0 1 3 3v1.6c1.2.6 2 1.9 2 3.4a4 4 0 1 1-8 0c0-1.5.8-2.8 2-3.4V14a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v1.6c1.2.6 2 1.9 2 3.4a4 4 0 1 1-8 0c0-1.5.8-2.8 2-3.4V14a3 3 0 0 1 3-3h3V9.4c-1.2-.6-2-1.9-2-3.4a4 4 0 0 1 4-4z"/>
+                    </svg>
+                    <h4>持久记忆</h4>
+                    <p>三级记忆库</p>
+                </div>
+                <div class="benefit">
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5">
+                        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                    </svg>
+                    <h4>即时响应</h4>
+                    <p>消息即唤醒</p>
+                </div>
+                <div class="benefit">
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5">
+                        <polyline points="23 4 23 10 17 10"/>
+                        <polyline points="1 20 1 14 7 14"/>
+                        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                    </svg>
+                    <h4>无限扩展</h4>
+                    <p>按需激活</p>
+                </div>
+                <div class="benefit">
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                    </svg>
+                    <h4>上下文隔离</h4>
+                    <p>互不干扰</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 导航 -->
+    <div class="nav">
+        <div class="nav-dot active" data-index="0"></div>
+        <div class="nav-dot" data-index="1"></div>
+        <div class="nav-dot" data-index="2"></div>
+        <div class="nav-dot" data-index="3"></div>
+        <div class="nav-dot" data-index="4"></div>
+    </div>
+    <div class="nav-arrows">
+        <button class="nav-btn" id="prev">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+        <button class="nav-btn" id="next">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+    </div>
+
+    <script>
+        const slides = document.querySelectorAll('.slide');
+        const dots = document.querySelectorAll('.nav-dot');
+        const total = slides.length;
+        let current = 0;
+
+        function goTo(index) {
+            if (index < 0) index = total - 1;
+            if (index >= total) index = 0;
+
+            slides.forEach((s, i) => {
+                s.classList.remove('active', 'prev');
+                if (i < index) s.classList.add('prev');
+            });
+            slides[index].classList.add('active');
+
+            dots.forEach((d, i) => d.classList.toggle('active', i === index));
+            document.getElementById('current').textContent = index + 1;
+            current = index;
+        }
+
+        document.getElementById('prev').onclick = () => goTo(current - 1);
+        document.getElementById('next').onclick = () => goTo(current + 1);
+        dots.forEach(d => d.onclick = () => goTo(+d.dataset.index));
+
+        document.addEventListener('keydown', e => {
+            if (e.key === 'ArrowRight' || e.key === ' ') goTo(current + 1);
+            if (e.key === 'ArrowLeft') goTo(current - 1);
+        });
+
+        // 智能体切换
+        function toggleAgent(el) {
+            document.querySelectorAll('.agent').forEach(a => {
+                a.classList.remove('active');
+                a.querySelector('svg').style.stroke = 'var(--muted)';
+                a.querySelector('.status').textContent = '待命';
+            });
+            el.classList.add('active');
+            el.querySelector('svg').style.stroke = 'var(--green)';
+            el.querySelector('.status').textContent = '处理中';
+        }
+    </script>
+</body>
+</html>
