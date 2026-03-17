@@ -3,6 +3,7 @@ import { ref, computed, inject, watch } from 'vue'
 import type { Ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useChatStore } from '../stores/chat'
+import * as api from '../composables/api'
 
 const router = useRouter()
 const store = useChatStore()
@@ -82,12 +83,36 @@ function startWorker(sessionId: number) {
 }
 
 // Complete worker
-function completeWorker(sessionId: number, message?: string) {
+async function completeWorker(sessionId: number, fallbackMessage?: string) {
   const worker = workers.value.get(sessionId)
   if (!worker) return
 
   worker.state = 'completed'
-  worker.message = message || '任务完成'
+
+  // Try to get last assistant message
+  let message = fallbackMessage || '任务完成'
+  try {
+    const result = await api.getMessagesPaginated(sessionId, 5)
+    const lastAssistant = result.messages.find(m => m.role === 'assistant')
+    if (lastAssistant && lastAssistant.content) {
+      // Truncate and clean message
+      let content = lastAssistant.content
+        .replace(/!\[.*?\]\(data:image\/[^)]+\)/g, '[图片]') // Remove base64 images
+        .replace(/```[\s\S]*?```/g, '[代码]') // Replace code blocks
+        .replace(/\n+/g, ' ') // Replace newlines
+        .trim()
+      if (content.length > 60) {
+        content = content.slice(0, 57) + '...'
+      }
+      if (content) {
+        message = content
+      }
+    }
+  } catch {
+    // Use fallback message
+  }
+
+  worker.message = message
 
   // Play ding sound
   playDingSound()
@@ -121,7 +146,11 @@ function hideWorker(sessionId: number) {
 
 // Click to navigate
 function navigateToSession(sessionId: number) {
-  hideWorker(sessionId)
+  const worker = workers.value.get(sessionId)
+  // Only hide if completed, keep working state visible
+  if (worker && worker.state === 'completed') {
+    hideWorker(sessionId)
+  }
   router.push(`/chat/${sessionId}`)
 }
 
@@ -446,8 +475,9 @@ defineExpose({
 /* Close button */
 .btn-close {
   position: absolute;
-  top: 8px;
+  top: 50%;
   right: 8px;
+  transform: translateY(-50%);
   width: 20px;
   height: 20px;
   display: flex;

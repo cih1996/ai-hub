@@ -2272,6 +2272,14 @@ function formatToolInput(raw: string): string {
 }
 .message.user .message-content :deep(a) { color: white; text-decoration: underline; }
 .message.user .message-content :deep(code) { background: rgba(255,255,255,0.2); color: white; }
+.message.user .message-content :deep(img) {
+  max-width: 300px;
+  max-height: 200px;
+  border-radius: 8px;
+  object-fit: contain;
+  display: block;
+  margin: 8px 0;
+}
 /* AI message: card style, left-aligned */
 .message.assistant .message-content {
   background: var(--bg-secondary);
