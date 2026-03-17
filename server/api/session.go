@@ -90,7 +90,35 @@ func GetSession(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
 		return
 	}
-	c.JSON(http.StatusOK, s)
+
+	// Build response with runtime status
+	resp := SessionResponse{
+		Session:   *s,
+		Streaming: IsSessionStreaming(id),
+	}
+
+	// Check if session has triggers
+	triggerSessions, _ := store.SessionsWithTriggers()
+	resp.HasTriggers = triggerSessions[id]
+
+	// Get process pool status
+	poolStatus := core.Pool.Status()
+	if info, ok := poolStatus[id]; ok {
+		resp.ProcessAlive = true
+		resp.ProcessPid = info.Pid
+		resp.ProcessState = info.State
+		resp.UptimeSec = info.UptimeSec
+		resp.IdleSec = info.IdleSec
+	}
+
+	// Get error counts
+	errorCounts, _ := store.GetSessionErrorCounts([]int64{id})
+	if ec, ok := errorCounts[id]; ok {
+		resp.ErrorCount = ec.ErrorCount
+		resp.WarningCount = ec.WarningCount
+	}
+
+	c.JSON(http.StatusOK, resp)
 }
 
 func UpdateSession(c *gin.Context) {

@@ -160,20 +160,36 @@ func sessionDetail(c *client.Client, id int64) int {
 	}
 
 	var s struct {
-		ID        int64  `json:"id"`
-		Title     string `json:"title"`
-		GroupName string `json:"group_name"`
-		WorkDir   string `json:"work_dir"`
-		CreatedAt string `json:"created_at"`
-		UpdatedAt string `json:"updated_at"`
+		ID           int64  `json:"id"`
+		Title        string `json:"title"`
+		GroupName    string `json:"group_name"`
+		WorkDir      string `json:"work_dir"`
+		Streaming    bool   `json:"streaming"`
+		ProcessAlive bool   `json:"process_alive"`
+		ProcessState string `json:"process_state"`
+		ProcessPid   int    `json:"process_pid"`
+		CreatedAt    string `json:"created_at"`
+		UpdatedAt    string `json:"updated_at"`
 	}
 	if err := json.Unmarshal(respData, &s); err != nil {
 		fmt.Fprintf(os.Stderr, "Error parsing response: %v\n", err)
 		return 1
 	}
 
+	// Determine status
+	status := "idle"
+	if s.Streaming {
+		status = "🔄 streaming"
+	} else if s.ProcessAlive {
+		status = "alive"
+	}
+
 	fmt.Printf("Session #%d\n", s.ID)
 	fmt.Printf("  标题: %s\n", s.Title)
+	fmt.Printf("  状态: %s\n", status)
+	if s.ProcessAlive && s.ProcessPid > 0 {
+		fmt.Printf("  进程: PID %d (%s)\n", s.ProcessPid, s.ProcessState)
+	}
 	fmt.Printf("  团队: %s\n", s.GroupName)
 	fmt.Printf("  目录: %s\n", s.WorkDir)
 	fmt.Printf("  创建: %s\n", FormatTime(s.CreatedAt))
