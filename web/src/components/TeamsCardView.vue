@@ -26,6 +26,23 @@ const groupsMap = computed(() => {
   return map
 })
 
+// Expanded teams (accordion state)
+const expandedTeams = ref<Set<string>>(new Set())
+
+function toggleTeam(teamName: string) {
+  const s = new Set(expandedTeams.value)
+  if (s.has(teamName)) {
+    s.delete(teamName)
+  } else {
+    s.add(teamName)
+  }
+  expandedTeams.value = s
+}
+
+function isTeamExpanded(teamName: string): boolean {
+  return expandedTeams.value.has(teamName)
+}
+
 // Group sessions by group_name (exclude sessions without group)
 const groupedTeams = computed(() => {
   const result: Record<string, Session[]> = {}
@@ -56,12 +73,9 @@ function getAvatar(session: Session): string {
   return `/avatars/avatar${index}.svg`
 }
 
-// Navigate to team's first session
-function openTeam(teamName: string) {
-  const sessions = groupedTeams.value[teamName]
-  if (sessions && sessions.length > 0) {
-    router.push(`/chat/${sessions[0]!.id}`)
-  }
+// Navigate to session detail
+function openSession(sessionId: number) {
+  router.push(`/chat/${sessionId}`)
 }
 
 // Update team icon
@@ -102,8 +116,8 @@ onMounted(() => {
   <div class="teams-view">
     <div class="teams-header">
       <div>
-        <h2 class="teams-title">团队列表</h2>
-        <p class="teams-desc">选择一个团队进行管理和对话</p>
+        <h2 class="teams-title">数字员工</h2>
+        <p class="teams-desc">点击团队展开成员列表，点击成员进入对话</p>
       </div>
     </div>
 
@@ -112,9 +126,10 @@ onMounted(() => {
         v-for="(sessions, teamName) in groupedTeams"
         :key="teamName"
         class="team-card"
-        @click="openTeam(teamName as string)"
+        :class="{ expanded: isTeamExpanded(teamName as string) }"
       >
-        <div class="team-card-header">
+        <!-- Team header (clickable to expand/collapse) -->
+        <div class="team-card-header" @click="toggleTeam(teamName as string)">
           <div class="team-icon" @click.stop>
             <IconPicker
               :model-value="groupsMap[teamName as string]?.icon || ''"
@@ -122,33 +137,63 @@ onMounted(() => {
               @update:model-value="(icon) => updateTeamIcon(teamName as string, icon)"
             />
           </div>
-          <div class="team-badges">
-            <span class="team-badge member-badge">{{ sessions.length }} 成员</span>
-            <span v-if="getBusyCount(sessions) > 0" class="team-badge active-badge">
-              {{ getBusyCount(sessions) }} 对话中
-            </span>
+          <div class="team-header-content">
+            <h3 class="team-name">{{ teamName }}</h3>
+            <div class="team-badges">
+              <span class="team-badge member-badge">{{ sessions.length }} 成员</span>
+              <span v-if="getBusyCount(sessions) > 0" class="team-badge active-badge">
+                {{ getBusyCount(sessions) }} 对话中
+              </span>
+            </div>
+          </div>
+          <svg class="expand-icon" :class="{ rotated: isTeamExpanded(teamName as string) }" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </div>
+
+        <!-- Members list (accordion content) -->
+        <div v-if="isTeamExpanded(teamName as string)" class="team-members">
+          <div
+            v-for="session in sessions"
+            :key="session.id"
+            class="member-item"
+            @click="openSession(session.id)"
+          >
+            <img :src="getAvatar(session)" class="member-avatar" :alt="session.title" />
+            <div class="member-info">
+              <div class="member-name">
+                <span v-if="session.streaming || session.process_alive" class="member-status" :class="{ busy: session.streaming }"></span>
+                <span class="member-id">#{{ session.id }}</span>
+                {{ session.title }}
+              </div>
+              <div class="member-desc">{{ session.work_dir || '默认工作目录' }}</div>
+            </div>
+            <svg class="member-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="9 18 15 12 9 6"/>
+            </svg>
           </div>
         </div>
 
-        <h3 class="team-name">{{ teamName }}</h3>
-        <p class="team-members-preview">
-          {{ sessions.slice(0, 3).map(s => s.title).join(', ') }}
-          <span v-if="sessions.length > 3">...</span>
-        </p>
-
-        <div class="team-avatars">
-          <div
-            v-for="(session, idx) in sessions.slice(0, 4)"
-            :key="session.id"
-            class="team-avatar"
-            :style="{ zIndex: 5 - idx }"
-          >
-            <img :src="getAvatar(session)" :alt="session.title" />
-            <span v-if="session.streaming || session.process_alive" class="avatar-status"></span>
+        <!-- Collapsed preview -->
+        <div v-else class="team-preview" @click="toggleTeam(teamName as string)">
+          <div class="team-avatars">
+            <div
+              v-for="(session, idx) in sessions.slice(0, 4)"
+              :key="session.id"
+              class="team-avatar"
+              :style="{ zIndex: 5 - idx }"
+            >
+              <img :src="getAvatar(session)" :alt="session.title" />
+              <span v-if="session.streaming || session.process_alive" class="avatar-status"></span>
+            </div>
+            <div v-if="sessions.length > 4" class="team-avatar-more">
+              +{{ sessions.length - 4 }}
+            </div>
           </div>
-          <div v-if="sessions.length > 4" class="team-avatar-more">
-            +{{ sessions.length - 4 }}
-          </div>
+          <p class="team-members-preview">
+            {{ sessions.slice(0, 3).map(s => s.title).join(', ') }}
+            <span v-if="sessions.length > 3">...</span>
+          </p>
         </div>
       </div>
     </div>
@@ -190,31 +235,38 @@ onMounted(() => {
 }
 
 .teams-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .team-card {
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 20px;
-  cursor: pointer;
+  overflow: hidden;
   transition: all 0.2s ease;
 }
 
 .team-card:hover {
   border-color: var(--accent);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  transform: translateY(-2px);
+}
+
+.team-card.expanded {
+  border-color: var(--accent);
 }
 
 .team-card-header {
   display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 12px;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.team-card-header:hover {
+  background: var(--bg-hover);
 }
 
 .team-icon {
@@ -222,6 +274,7 @@ onMounted(() => {
   height: 40px;
   border-radius: 10px;
   overflow: hidden;
+  flex-shrink: 0;
 }
 
 .team-icon :deep(.icon-trigger) {
@@ -233,6 +286,23 @@ onMounted(() => {
   height: 40px;
 }
 
+.team-header-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.team-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 4px;
+  transition: color 0.2s ease;
+}
+
+.team-card-header:hover .team-name {
+  color: var(--accent);
+}
+
 .team-badges {
   display: flex;
   gap: 6px;
@@ -241,7 +311,7 @@ onMounted(() => {
 .team-badge {
   font-size: 11px;
   font-weight: 500;
-  padding: 3px 8px;
+  padding: 2px 8px;
   border-radius: 12px;
 }
 
@@ -257,33 +327,105 @@ onMounted(() => {
   border: 1px solid rgba(34, 197, 94, 0.2);
 }
 
-.team-name {
-  font-size: 16px;
-  font-weight: 600;
+.expand-icon {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  transition: transform 0.2s ease;
+}
+
+.expand-icon.rotated {
+  transform: rotate(180deg);
+}
+
+/* Members list (accordion content) */
+.team-members {
+  border-top: 1px solid var(--border);
+  background: var(--bg-tertiary);
+}
+
+.member-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+  border-bottom: 1px solid var(--border);
+}
+
+.member-item:last-child {
+  border-bottom: none;
+}
+
+.member-item:hover {
+  background: var(--bg-hover);
+}
+
+.member-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.member-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.member-name {
+  font-size: 14px;
+  font-weight: 500;
   color: var(--text-primary);
-  margin: 0 0 6px;
-  transition: color 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
-.team-card:hover .team-name {
-  color: var(--accent);
+.member-id {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-hover);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: monospace;
 }
 
-.team-members-preview {
+.member-status {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warning);
+}
+
+.member-status.busy {
+  background: var(--success);
+}
+
+.member-desc {
   font-size: 12px;
   color: var(--text-muted);
-  margin: 0 0 16px;
-  line-height: 1.4;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  margin-top: 2px;
+  white-space: nowrap;
   overflow: hidden;
-  min-height: 34px;
+  text-overflow: ellipsis;
+}
+
+.member-arrow {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+/* Collapsed preview */
+.team-preview {
+  padding: 0 20px 16px;
+  cursor: pointer;
 }
 
 .team-avatars {
   display: flex;
   align-items: center;
+  margin-bottom: 8px;
 }
 
 .team-avatar {
@@ -333,6 +475,17 @@ onMounted(() => {
   color: var(--text-muted);
 }
 
+.team-members-preview {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 .teams-empty {
   display: flex;
   flex-direction: column;
@@ -358,8 +511,16 @@ onMounted(() => {
     padding: 16px;
   }
 
-  .teams-grid {
-    grid-template-columns: 1fr;
+  .team-card-header {
+    padding: 12px 16px;
+  }
+
+  .member-item {
+    padding: 10px 16px;
+  }
+
+  .team-preview {
+    padding: 0 16px 12px;
   }
 }
 </style>
