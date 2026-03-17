@@ -14,10 +14,23 @@ const store = useChatStore()
 const input = ref('')
 const messagesEl = ref<HTMLElement>()
 const textareaEl = ref<HTMLTextAreaElement>()
+const fileInputEl = ref<HTMLInputElement>()
 const stepsExpanded = ref(false)
 const isComposing = ref(false)
 const moreMenuOpen = ref(false)
 const providerDropdownOpen = ref(false)
+
+// Attachments state
+interface Attachment {
+  id: string
+  type: 'image' | 'file'
+  name: string
+  preview?: string  // base64 data URL for images
+  file?: File
+  path?: string     // for pasted file paths
+}
+const attachments = ref<Attachment[]>([])
+
 // Track expanded state for historical message steps (by message id)
 const historyStepsExpanded = ref<Record<number, boolean>>({})
 
@@ -602,11 +615,134 @@ function formatUsageLine(u: { input_tokens: number; output_tokens: number; cache
 
 function send() {
   const text = input.value.trim()
-  if (!text || store.streaming) return
-  store.sendMessage(text)
+  const hasAttachments = attachments.value.length > 0
+  if ((!text && !hasAttachments) || store.streaming) return
+
+  // Build message content with attachments
+  let content = text
+  if (hasAttachments) {
+    const attachmentParts: string[] = []
+    for (const att of attachments.value) {
+      if (att.type === 'image' && att.preview) {
+        // Embed image as base64
+        attachmentParts.push(`![${att.name}](${att.preview})`)
+      } else if (att.path) {
+        // File path reference
+        attachmentParts.push(`[附件: ${att.name}](file://${att.path})`)
+      }
+    }
+    if (attachmentParts.length > 0) {
+      content = (text ? text + '\n\n' : '') + attachmentParts.join('\n')
+    }
+  }
+
+  store.sendMessage(content)
   input.value = ''
+  attachments.value = []
   stepsExpanded.value = false
   autoResize()
+}
+
+// Attachment handling
+function generateId(): string {
+  return Math.random().toString(36).slice(2, 10)
+}
+
+function removeAttachment(id: string) {
+  attachments.value = attachments.value.filter(a => a.id !== id)
+}
+
+function handleFileSelect(e: Event) {
+  const input = e.target as HTMLInputElement
+  if (!input.files) return
+  for (const file of Array.from(input.files)) {
+    addFileAsAttachment(file)
+  }
+  input.value = '' // Reset for re-selection
+}
+
+function addFileAsAttachment(file: File) {
+  const isImage = file.type.startsWith('image/')
+  const att: Attachment = {
+    id: generateId(),
+    type: isImage ? 'image' : 'file',
+    name: file.name,
+    file,
+  }
+
+  if (isImage) {
+    const reader = new FileReader()
+    reader.onload = () => {
+      att.preview = reader.result as string
+      attachments.value = [...attachments.value] // Trigger reactivity
+    }
+    reader.readAsDataURL(file)
+  }
+
+  attachments.value.push(att)
+}
+
+function handlePaste(e: ClipboardEvent) {
+  const items = e.clipboardData?.items
+  if (!items) return
+
+  // Check for images in clipboard
+  for (const item of Array.from(items)) {
+    if (item.type.startsWith('image/')) {
+      e.preventDefault()
+      const file = item.getAsFile()
+      if (file) {
+        const att: Attachment = {
+          id: generateId(),
+          type: 'image',
+          name: `粘贴图片_${Date.now()}.png`,
+          file,
+        }
+        const reader = new FileReader()
+        reader.onload = () => {
+          att.preview = reader.result as string
+          attachments.value = [...attachments.value]
+        }
+        reader.readAsDataURL(file)
+        attachments.value.push(att)
+      }
+      return
+    }
+  }
+
+  // Check for file path in text
+  const text = e.clipboardData?.getData('text')
+  if (text && isFilePath(text)) {
+    e.preventDefault()
+    const path = text.trim()
+    const name = path.split('/').pop() || path
+    const isImage = /\.(png|jpg|jpeg|gif|webp|svg|bmp)$/i.test(name)
+
+    const att: Attachment = {
+      id: generateId(),
+      type: isImage ? 'image' : 'file',
+      name,
+      path,
+    }
+
+    // For image paths, try to load preview via static mount
+    if (isImage) {
+      // Just show the path, actual preview would need server support
+      att.preview = undefined
+    }
+
+    attachments.value.push(att)
+  }
+}
+
+function isFilePath(text: string): boolean {
+  const trimmed = text.trim()
+  // Unix absolute path or Windows path
+  return /^\/[^\s]+/.test(trimmed) || /^[A-Za-z]:\\[^\s]+/.test(trimmed)
+}
+
+function openFileDialog() {
+  fileInputEl.value?.click()
 }
 
 async function onSwitchProvider(providerId: string) {
@@ -1199,6 +1335,25 @@ function formatToolInput(raw: string): string {
     </div>
 
     <div class="input-area">
+      <!-- Attachments preview -->
+      <div v-if="attachments.length > 0" class="attachments-preview">
+        <div v-for="att in attachments" :key="att.id" class="attachment-item">
+          <img v-if="att.type === 'image' && att.preview" :src="att.preview" class="attachment-thumb" />
+          <div v-else class="attachment-file">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+            </svg>
+          </div>
+          <span class="attachment-name">{{ att.name }}</span>
+          <button class="attachment-remove" @click="removeAttachment(att.id)" title="移除">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 6L6 18M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
       <div class="input-row">
         <div class="input-wrapper" :class="{ disabled: store.streaming, 'attention-active': store.currentSession?.attention_enabled }">
           <button
@@ -1217,16 +1372,37 @@ function formatToolInput(raw: string): string {
               <line x1="20" y1="12" x2="22" y2="12"/>
             </svg>
           </button>
+          <button
+            class="btn-attach"
+            @click="openFileDialog"
+            :disabled="store.streaming"
+            title="添加图片"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+              <circle cx="8.5" cy="8.5" r="1.5"/>
+              <polyline points="21 15 16 10 5 21"/>
+            </svg>
+          </button>
+          <input
+            ref="fileInputEl"
+            type="file"
+            accept="image/*"
+            multiple
+            style="display: none"
+            @change="handleFileSelect"
+          />
           <textarea
             ref="textareaEl"
             v-model="input"
             :disabled="store.streaming"
             @keydown="onKeydown"
             @input="autoResize"
+            @paste="handlePaste"
             @focus="store.triggerInputFocus()"
             @compositionstart="isComposing = true"
             @compositionend="isComposing = false"
-            :placeholder="store.streaming ? 'AI is responding...' : (store.currentSession?.attention_enabled ? '注意力模式：AI 会先规划再执行...' : 'Type a message... (Shift+Enter for new line)')"
+            :placeholder="store.streaming ? 'AI is responding...' : (store.currentSession?.attention_enabled ? '注意力模式：AI 会先规划再执行...' : '输入消息... (可粘贴图片)')"
             rows="1"
           />
           <div class="input-actions">
@@ -1235,7 +1411,7 @@ function formatToolInput(raw: string): string {
                 <rect x="6" y="6" width="12" height="12" rx="2"/>
               </svg>
             </button>
-            <button v-else class="btn-send" :disabled="!input.trim()" @click="send" title="Send">
+            <button v-else class="btn-send" :disabled="!input.trim() && attachments.length === 0" @click="send" title="Send">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
               </svg>
@@ -2280,6 +2456,82 @@ function formatToolInput(raw: string): string {
 .btn-send:disabled { color: var(--text-muted); cursor: not-allowed; }
 .btn-stop { color: var(--danger); }
 .btn-stop:hover { background: rgba(239, 68, 68, 0.1); }
+
+/* Attach button */
+.btn-attach {
+  flex-shrink: 0;
+  width: 32px; height: 32px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  transition: all var(--transition);
+  cursor: pointer;
+}
+.btn-attach:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.btn-attach:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Attachments preview */
+.attachments-preview {
+  max-width: 720px;
+  margin: 0 auto 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.attachment-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  max-width: 200px;
+}
+.attachment-thumb {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+.attachment-file {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  color: var(--text-muted);
+}
+.attachment-name {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attachment-remove {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: var(--text-muted);
+  transition: all var(--transition);
+  cursor: pointer;
+}
+.attachment-remove:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--danger);
+}
+
 /* Rules modal */
 .modal-overlay {
   position: fixed; inset: 0;
