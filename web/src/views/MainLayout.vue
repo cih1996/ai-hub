@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, provide } from 'vue'
 import Sidebar from '../components/Sidebar.vue'
+import AIWorkerStatus from '../components/AIWorkerStatus.vue'
 
 const isMobile = ref(false)
 const sidebarOpen = ref(false)
@@ -39,6 +40,7 @@ onUnmounted(() => {
     <main class="main">
       <router-view />
     </main>
+    <AIWorkerStatus />
   </div>
 </template>
 

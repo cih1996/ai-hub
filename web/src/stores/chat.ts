@@ -80,6 +80,17 @@ export const useChatStore = defineStore('chat', () => {
     sessions.value.filter((s) => s.streaming).length
   )
 
+  // Other sessions streaming status (for AI worker status component)
+  const otherSessionsStreaming = computed(() => {
+    const result: Record<number, boolean> = {}
+    for (const s of sessions.value) {
+      if (s.id !== currentSessionId.value && s.streaming) {
+        result[s.id] = true
+      }
+    }
+    return result
+  })
+
   const defaultProvider = computed(() =>
     providers.value.find((p) => p.is_default) || providers.value[0]
   )
@@ -628,6 +639,7 @@ export const useChatStore = defineStore('chat', () => {
     currentSessionId,
     currentSession,
     busySessionCount,
+    otherSessionsStreaming,
     messages,
     providers,
     defaultProvider,
