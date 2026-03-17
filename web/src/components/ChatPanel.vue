@@ -2272,9 +2272,10 @@ function formatToolInput(raw: string): string {
 }
 .message.user .message-content :deep(a) { color: white; text-decoration: underline; }
 .message.user .message-content :deep(code) { background: rgba(255,255,255,0.2); color: white; }
-.message.user .message-content :deep(img) {
-  max-width: 300px;
-  max-height: 200px;
+.message.user .message-content :deep(img),
+.message.user .md-content :deep(img) {
+  max-width: 300px !important;
+  max-height: 200px !important;
   border-radius: 8px;
   object-fit: contain;
   display: block;

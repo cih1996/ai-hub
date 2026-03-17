@@ -179,32 +179,45 @@ function playDingSound() {
   }
 }
 
-// Watch store streaming state
-watch(() => store.streaming, (streaming, wasStreaming) => {
-  const sessionId = store.currentSessionId
-  if (!sessionId || sessionId === 0) return
-
-  if (streaming && !wasStreaming) {
-    startWorker(sessionId)
-  } else if (!streaming && wasStreaming) {
-    completeWorker(sessionId, '回复完成')
-  }
-})
-
 // Watch for other sessions streaming (via WebSocket events)
-// This would be triggered by the store when receiving ws messages for other sessions
-watch(() => store.otherSessionsStreaming, (streamingSessions) => {
+watch(() => store.otherSessionsStreaming, (streamingSessions, oldSessions) => {
+  // Handle sessions that started streaming
   for (const [sessionId, isStreaming] of Object.entries(streamingSessions)) {
     const sid = Number(sessionId)
     if (sid === store.currentSessionId) continue
 
     if (isStreaming) {
       startWorker(sid)
-    } else {
-      const worker = workers.value.get(sid)
-      if (worker && worker.state === 'working') {
-        completeWorker(sid, '任务完成')
+    }
+  }
+
+  // Handle sessions that stopped streaming (were in old but not in new, or changed to false)
+  if (oldSessions) {
+    for (const [sessionId, wasStreaming] of Object.entries(oldSessions)) {
+      const sid = Number(sessionId)
+      if (sid === store.currentSessionId) continue
+
+      const isNowStreaming = streamingSessions[sid]
+      if (wasStreaming && !isNowStreaming) {
+        const worker = workers.value.get(sid)
+        if (worker && worker.state === 'working') {
+          completeWorker(sid)
+        }
       }
+    }
+  }
+}, { deep: true })
+
+// Also watch sessions list for streaming status changes
+watch(() => store.sessions, (sessions) => {
+  for (const session of sessions) {
+    if (session.id === store.currentSessionId) continue
+
+    const worker = workers.value.get(session.id)
+    if (session.streaming && !worker) {
+      startWorker(session.id)
+    } else if (!session.streaming && worker && worker.state === 'working') {
+      completeWorker(session.id)
     }
   }
 }, { deep: true })
