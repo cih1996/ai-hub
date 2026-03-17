@@ -1,21 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, watch, reactive } from 'vue'
-import { useRouter } from 'vue-router'
 import { useChatStore } from '../stores/chat'
 import type { Provider, CompressSettings } from '../types'
 import * as api from '../composables/api'
 import type { ClaudeAuthStatus } from '../composables/api'
-import { useTheme, type ThemeMode } from '../composables/theme'
 
-const { mode: themeMode, setMode } = useTheme()
-const themeModeLabel: Record<string, string> = { system: '跟随系统', light: '亮色', dark: '暗色' }
-function toggleTheme() {
-  const order: ThemeMode[] = ['system', 'light', 'dark']
-  const next = order[(order.indexOf(themeMode.value) + 1) % 3] ?? 'system'
-  setMode(next)
-}
-
-const router = useRouter()
 const store = useChatStore()
 const showForm = ref(false)
 const editing = ref<Provider | null>(null)
@@ -165,21 +154,7 @@ async function saveCompressSettings() {
 
 <template>
   <div class="settings-page">
-    <button class="floating-theme-btn" @click="toggleTheme" :title="'主题: ' + themeModeLabel[themeMode]">
-      <svg v-if="themeMode === 'dark'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
-      <svg v-else-if="themeMode === 'light'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
-      <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-    </button>
     <div class="settings-container">
-      <div class="settings-header">
-        <button class="btn-back" @click="router.push('/chat')">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M19 12H5M12 19l-7-7 7-7"/>
-          </svg>
-          返回
-        </button>
-        <h1>设置</h1>
-      </div>
 
       <section class="section">
         <div class="section-header">
@@ -398,14 +373,6 @@ async function saveCompressSettings() {
   margin: 0 auto;
   padding: 32px 24px;
 }
-.settings-header { margin-bottom: 32px; }
-.settings-header h1 { font-size: 24px; font-weight: 600; margin-top: 16px; }
-.btn-back {
-  display: flex; align-items: center; gap: 6px;
-  color: var(--text-secondary); font-size: 13px; padding: 6px 0;
-  transition: color var(--transition);
-}
-.btn-back:hover { color: var(--text-primary); }
 
 .section { margin-bottom: 32px; }
 .section-header {
@@ -509,27 +476,6 @@ async function saveCompressSettings() {
 }
 .btn-save:hover:not(:disabled) { background: var(--accent-hover); }
 .btn-save:disabled { opacity: 0.4; cursor: not-allowed; }
-.floating-theme-btn {
-  position: fixed;
-  top: 16px;
-  right: 16px;
-  width: 36px;
-  height: 36px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius);
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  color: var(--text-secondary);
-  transition: all var(--transition);
-  z-index: 50;
-  cursor: pointer;
-}
-.floating-theme-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
 /* ---- Auto Compress Settings ---- */
 .compress-settings { display: flex; flex-direction: column; gap: 16px; }
 .threshold-row { display: flex; align-items: center; gap: 10px; }

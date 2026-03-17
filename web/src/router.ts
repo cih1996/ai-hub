@@ -11,19 +11,30 @@ const router = createRouter({
       children: [
         { path: 'chat/:id?', name: 'chat', component: () => import('./views/ChatView.vue') },
         { path: 'teams', name: 'teams', component: () => import('./views/TeamsView.vue') },
-        { path: 'manage', name: 'manage', component: () => import('./views/ManageView.vue') },
-        { path: 'extensions', name: 'extensions', component: () => import('./views/ExtensionsView.vue') },
         { path: 'services', name: 'services', component: () => import('./views/ServicesView.vue') },
-        { path: 'automation', name: 'automation', component: () => import('./views/AutomationView.vue') },
-        { path: 'token-usage', name: 'token-usage', component: () => import('./views/TokenUsageView.vue') },
-        // Legacy redirects for backward compatibility
-        { path: 'skills', redirect: '/extensions?tab=skills' },
-        { path: 'mcp', redirect: '/extensions?tab=mcp' },
-        { path: 'triggers', redirect: '/automation?tab=triggers' },
-        { path: 'channels', redirect: '/automation?tab=channels' },
+        // Legacy routes - redirect to settings sub-pages
+        { path: 'manage', redirect: '/settings/rules' },
+        { path: 'extensions', redirect: '/settings/extensions' },
+        { path: 'automation', redirect: '/settings/im' },
+        { path: 'token-usage', redirect: '/settings/data' },
+        { path: 'skills', redirect: '/settings/extensions?tab=skills' },
+        { path: 'mcp', redirect: '/settings/extensions?tab=mcp' },
+        { path: 'triggers', redirect: '/settings/triggers' },
+        { path: 'channels', redirect: '/settings/im' },
       ],
     },
-    { path: '/settings', name: 'settings', component: () => import('./views/SettingsView.vue') },
+    {
+      path: '/settings',
+      component: () => import('./views/SettingsLayout.vue'),
+      children: [
+        { path: '', name: 'settings', component: () => import('./views/SettingsView.vue') },
+        { path: 'rules', name: 'settings-rules', component: () => import('./views/ManageView.vue') },
+        { path: 'extensions', name: 'settings-extensions', component: () => import('./views/ExtensionsView.vue') },
+        { path: 'data', name: 'settings-data', component: () => import('./views/TokenUsageView.vue') },
+        { path: 'im', name: 'settings-im', component: () => import('./views/AutomationView.vue'), props: { defaultTab: 'channels' } },
+        { path: 'triggers', name: 'settings-triggers', component: () => import('./views/AutomationView.vue'), props: { defaultTab: 'triggers' } },
+      ],
+    },
   ],
 })
 

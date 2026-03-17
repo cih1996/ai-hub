@@ -120,12 +120,8 @@ function confirmDelete() {
   }
 }
 
-const isManage = computed(() => route.path.startsWith('/manage'))
 const isTeams = computed(() => route.path.startsWith('/teams'))
-const isExtensions = computed(() => route.path.startsWith('/extensions'))
 const isServices = computed(() => route.path.startsWith('/services'))
-const isAutomation = computed(() => route.path.startsWith('/automation'))
-const isTokenUsage = computed(() => route.path.startsWith('/token-usage'))
 
 interface SessionGroup {
   key: string
@@ -284,15 +280,6 @@ onMounted(async () => {
         </svg>
         <span>新会话</span>
       </button>
-      <button class="nav-item" :class="{ active: isManage }" @click="navTo('/manage')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
-          <polyline points="14 2 14 8 20 8"/>
-          <line x1="16" y1="13" x2="8" y2="13"/>
-          <line x1="16" y1="17" x2="8" y2="17"/>
-        </svg>
-        <span>管理</span>
-      </button>
       <button class="nav-item" :class="{ active: isTeams }" @click="navTo('/teams')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
@@ -303,14 +290,6 @@ onMounted(async () => {
         <span>团队</span>
         <span v-if="store.busySessionCount > 0" class="nav-badge busy-badge">{{ store.busySessionCount }}</span>
       </button>
-      <button class="nav-item" :class="{ active: isExtensions }" @click="navTo('/extensions')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M16 16v1a2 2 0 01-2 2H3a2 2 0 01-2-2V7a2 2 0 012-2h2m5.66 0H14a2 2 0 012 2v3.34l1 1L23 7v10"/>
-          <line x1="1" y1="1" x2="23" y2="23" stroke-width="0"/>
-          <rect x="8" y="2" width="8" height="8" rx="1"/>
-        </svg>
-        <span>扩展</span>
-      </button>
       <button class="nav-item" :class="{ active: isServices }" @click="navTo('/services')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 00-2.91-.09z"/>
@@ -319,24 +298,6 @@ onMounted(async () => {
           <path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-3 0-3"/>
         </svg>
         <span>作品</span>
-      </button>
-      <button class="nav-item" :class="{ active: isAutomation }" @click="navTo('/automation')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polyline points="16 3 21 3 21 8"/>
-          <line x1="4" y1="20" x2="21" y2="3"/>
-          <polyline points="21 16 21 21 16 21"/>
-          <line x1="15" y1="15" x2="21" y2="21"/>
-          <line x1="4" y1="4" x2="9" y2="9"/>
-        </svg>
-        <span>自动化</span>
-      </button>
-      <button class="nav-item" :class="{ active: isTokenUsage }" @click="navTo('/token-usage')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <rect x="4" y="4" width="16" height="16" rx="2"/>
-          <circle cx="9" cy="9" r="1.5"/><circle cx="15" cy="9" r="1.5"/>
-          <circle cx="9" cy="15" r="1.5"/><circle cx="15" cy="15" r="1.5"/>
-        </svg>
-        <span>用量</span>
       </button>
     </div>
 

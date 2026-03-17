@@ -4,6 +4,10 @@ import { useRoute, useRouter } from 'vue-router'
 import TriggersView from './TriggersView.vue'
 import ChannelsView from './ChannelsView.vue'
 
+const props = defineProps<{
+  defaultTab?: string
+}>()
+
 const route = useRoute()
 const router = useRouter()
 
@@ -12,7 +16,7 @@ const tabs = [
   { key: 'channels', label: '通讯' },
 ]
 
-const activeTab = ref((route.query.tab as string) || 'triggers')
+const activeTab = ref((route.query.tab as string) || props.defaultTab || 'triggers')
 
 watch(() => route.query.tab, (val) => {
   if (val && typeof val === 'string') activeTab.value = val
