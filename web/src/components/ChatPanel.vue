@@ -2287,6 +2287,15 @@ function formatToolInput(raw: string): string {
   border: 1px solid var(--border);
   border-radius: 4px 12px 12px 12px;
 }
+/* AI message images: responsive width */
+.message.assistant .message-content :deep(img),
+.message.assistant .md-content :deep(img) {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  display: block;
+  margin: 8px 0;
+}
 /* Retry button on last user message */
 .btn-retry {
   display: inline-flex;
