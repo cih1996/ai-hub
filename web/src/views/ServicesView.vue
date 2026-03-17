@@ -88,6 +88,10 @@ async function refreshLogs() {
   viewLogs(logTarget.value)
 }
 
+function openService(port: number) {
+  window.open(`http://localhost:${port}`, '_blank')
+}
+
 function statusColor(status: string) {
   if (status === 'running') return '#22c55e'
   if (status === 'dead') return '#ef4444'
@@ -107,7 +111,7 @@ onMounted(load)
   <div class="services-page">
     <div class="page-header">
       <div>
-        <h2 class="page-title">作品</h2>
+        <h2 class="page-title">我的作品</h2>
         <span class="page-desc">管理托管服务进程，支持启停控制和日志查看</span>
       </div>
       <button class="btn-create" @click="resetForm(); showCreate = true">
@@ -118,64 +122,76 @@ onMounted(load)
 
     <div v-if="loading" class="empty-state">加载中...</div>
     <div v-else-if="services.length === 0" class="empty-state">
-      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="1.5" style="margin-bottom:8px">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="1.5" style="margin-bottom:12px">
         <path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 00-2.91-.09z"/>
         <path d="M12 15l-3-3a22 22 0 012-3.95A12.88 12.88 0 0122 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 01-4 2z"/>
       </svg>
-      <div>暂无服务，点击「新建」添加你的第一个作品</div>
+      <div>暂无作品，点击「新建」添加你的第一个作品</div>
     </div>
 
-    <div class="card-list">
-      <div v-for="svc in services" :key="svc.id" class="card">
-        <div class="card-body">
-          <div class="card-top">
-            <span class="status-dot" :style="{ background: statusColor(svc.status) }"></span>
-            <span class="card-name">{{ svc.name }}</span>
-            <span class="status-label" :style="{ color: statusColor(svc.status) }">{{ statusLabel(svc.status) }}</span>
-          </div>
-          <div class="card-meta">
-            <span class="svc-meta-item" :title="svc.command">命令: {{ svc.command.length > 50 ? svc.command.slice(0, 50) + '...' : svc.command }}</span>
-            <span v-if="svc.port" class="svc-meta-item">端口: {{ svc.port }}</span>
-            <span v-if="svc.pid" class="svc-meta-item">PID: {{ svc.pid }}</span>
-            <span v-if="svc.work_dir" class="svc-meta-item" :title="svc.work_dir">目录: {{ svc.work_dir.length > 30 ? '...' + svc.work_dir.slice(-30) : svc.work_dir }}</span>
-            <span v-if="svc.auto_start" class="svc-meta-item auto-tag">自启</span>
+    <!-- Card Grid -->
+    <div class="card-grid">
+      <div v-for="svc in services" :key="svc.id" class="service-card" :class="{ running: svc.status === 'running' }">
+        <div class="card-header">
+          <div class="status-indicator" :style="{ background: statusColor(svc.status) }"></div>
+          <span class="status-text" :style="{ color: statusColor(svc.status) }">{{ statusLabel(svc.status) }}</span>
+          <div class="card-menu">
+            <button class="menu-btn" @click="openEdit(svc)" title="编辑">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            </button>
+            <button class="menu-btn menu-del" @click="deleteTarget = svc" title="删除">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </button>
           </div>
         </div>
-        <div class="card-actions">
+
+        <h3 class="card-title">{{ svc.name }}</h3>
+        <p class="card-command" :title="svc.command">{{ svc.command }}</p>
+
+        <div class="card-meta">
+          <span v-if="svc.port" class="meta-tag port-tag">:{{ svc.port }}</span>
+          <span v-if="svc.pid" class="meta-tag">PID {{ svc.pid }}</span>
+          <span v-if="svc.auto_start" class="meta-tag auto-tag">自启</span>
+        </div>
+
+        <div class="card-footer">
+          <div class="action-btns">
+            <button
+              v-if="svc.status !== 'running'"
+              class="action-btn start"
+              :disabled="actionLoading[svc.id]"
+              @click="handleStart(svc.id)"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              启动
+            </button>
+            <button
+              v-if="svc.status === 'running'"
+              class="action-btn stop"
+              :disabled="actionLoading[svc.id]"
+              @click="handleStop(svc.id)"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+              停止
+            </button>
+            <button
+              class="action-btn restart"
+              :disabled="actionLoading[svc.id]"
+              @click="handleRestart(svc.id)"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+            </button>
+            <button class="action-btn log" @click="viewLogs(svc)">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            </button>
+          </div>
           <button
-            v-if="svc.status !== 'running'"
-            class="btn-action btn-start"
-            :disabled="actionLoading[svc.id]"
-            @click="handleStart(svc.id)"
-            title="启动"
+            v-if="svc.port && svc.status === 'running'"
+            class="open-btn"
+            @click="openService(svc.port)"
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-          </button>
-          <button
-            v-if="svc.status === 'running'"
-            class="btn-action btn-stop"
-            :disabled="actionLoading[svc.id]"
-            @click="handleStop(svc.id)"
-            title="停止"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
-          </button>
-          <button
-            class="btn-action btn-restart"
-            :disabled="actionLoading[svc.id]"
-            @click="handleRestart(svc.id)"
-            title="重启"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
-          </button>
-          <button class="btn-action btn-log" @click="viewLogs(svc)" title="日志">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-          </button>
-          <button class="btn-action btn-edit" @click="openEdit(svc)" title="编辑">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-          </button>
-          <button class="btn-action btn-del" @click="deleteTarget = svc" title="删除">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            打开
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
           </button>
         </div>
       </div>
@@ -296,43 +312,209 @@ onMounted(load)
 
 <style scoped>
 .services-page { padding: 24px; overflow-y: auto; height: 100%; }
-.page-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 20px; }
-.page-title { font-size: 18px; font-weight: 600; color: var(--text-primary); margin: 0; }
-.page-desc { font-size: 12px; color: var(--text-muted); margin-top: 4px; display: block; }
+.page-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 24px; }
+.page-title { font-size: 20px; font-weight: 600; color: var(--text-primary); margin: 0; }
+.page-desc { font-size: 13px; color: var(--text-muted); margin-top: 4px; display: block; }
 .btn-create {
-  display: flex; align-items: center; gap: 4px; padding: 6px 14px;
+  display: flex; align-items: center; gap: 6px; padding: 8px 16px;
   border-radius: var(--radius); font-size: 13px; font-weight: 500;
   background: var(--accent); color: var(--btn-text); transition: opacity var(--transition); flex-shrink: 0;
 }
 .btn-create:hover { opacity: 0.9; }
-.empty-state { text-align: center; color: var(--text-muted); padding: 48px 16px; font-size: 14px; display: flex; flex-direction: column; align-items: center; }
-.card-list { display: flex; flex-direction: column; gap: 6px; }
-.card {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 16px; background: var(--bg-secondary); border: 1px solid var(--border);
-  border-radius: var(--radius); transition: background var(--transition);
+.empty-state { text-align: center; color: var(--text-muted); padding: 60px 16px; font-size: 14px; display: flex; flex-direction: column; align-items: center; }
+
+/* Card Grid */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
 }
-.card:hover { background: var(--bg-hover); }
-.card-body { flex: 1; min-width: 0; }
-.card-top { display: flex; align-items: center; gap: 8px; }
-.card-name { font-size: 14px; font-weight: 500; color: var(--text-primary); }
-.status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.status-label { font-size: 11px; flex-shrink: 0; }
-.card-meta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 6px; }
-.svc-meta-item { font-size: 11px; color: var(--text-muted); max-width: 300px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.auto-tag { color: var(--accent); background: var(--accent-soft); padding: 0 6px; border-radius: 9999px; }
-.card-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; margin-left: 12px; }
-.btn-action {
-  width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
-  border-radius: var(--radius-sm); color: var(--text-muted); transition: all var(--transition);
+
+.service-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  transition: all 0.2s ease;
 }
-.btn-action:disabled { opacity: 0.4; cursor: not-allowed; }
-.btn-start:hover:not(:disabled) { color: #22c55e; background: rgba(34,197,94,0.1); }
-.btn-stop:hover:not(:disabled) { color: #f59e0b; background: rgba(245,158,11,0.1); }
-.btn-restart:hover:not(:disabled) { color: var(--accent); background: var(--accent-soft); }
-.btn-log:hover { color: var(--info); background: rgba(59,130,246,0.1); }
-.btn-edit:hover { color: var(--accent); background: var(--accent-soft); }
-.btn-del:hover { color: var(--danger); background: rgba(239,68,68,0.1); }
+
+.service-card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.service-card.running {
+  border-color: rgba(34, 197, 94, 0.3);
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.status-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-text {
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.card-menu {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.service-card:hover .card-menu {
+  opacity: 1;
+}
+
+.menu-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  transition: all 0.2s;
+}
+
+.menu-btn:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.menu-del:hover {
+  color: var(--danger);
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.card-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 8px;
+}
+
+.card-command {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0 0 12px;
+  font-family: 'SF Mono', monospace;
+  background: var(--bg-tertiary);
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.meta-tag {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 12px;
+  background: var(--bg-hover);
+  color: var(--text-muted);
+}
+
+.port-tag {
+  color: var(--accent);
+  background: var(--accent-soft);
+  font-weight: 500;
+}
+
+.auto-tag {
+  color: var(--success);
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.action-btns {
+  display: flex;
+  gap: 4px;
+}
+
+.action-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text-muted);
+  background: var(--bg-hover);
+  transition: all 0.2s;
+}
+
+.action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.action-btn.start:hover:not(:disabled) {
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.action-btn.stop:hover:not(:disabled) {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.action-btn.restart:hover:not(:disabled) {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.action-btn.log:hover {
+  color: var(--info);
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.open-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--btn-text);
+  background: var(--accent);
+  transition: all 0.2s;
+}
+
+.open-btn:hover {
+  opacity: 0.9;
+}
+
 /* Modals */
 .modal-overlay {
   position: fixed; inset: 0; background: var(--overlay);
@@ -404,10 +586,11 @@ onMounted(load)
 }
 .spinning { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
 @media (max-width: 768px) {
-  .services-page { padding: 12px; }
-  .card { flex-direction: column; align-items: flex-start; gap: 8px; }
-  .card-actions { width: 100%; justify-content: flex-end; margin-left: 0; }
+  .services-page { padding: 16px; }
+  .card-grid { grid-template-columns: 1fr; }
+  .card-menu { opacity: 1; }
   .form-row { flex-direction: column; gap: 0; }
   .log-modal { width: 100vw; max-width: 100vw; border-radius: 0; max-height: 100vh; max-height: 100dvh; }
 }

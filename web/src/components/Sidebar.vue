@@ -299,7 +299,7 @@ onMounted(async () => {
           <path d="M9 12H4s.55-3.03 2-4c1.62-1.08 3 0 3 0"/>
           <path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-3 0-3"/>
         </svg>
-        <span>作品</span>
+        <span>我的作品</span>
       </button>
     </div>
 
