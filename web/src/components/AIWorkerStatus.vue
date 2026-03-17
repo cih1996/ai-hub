@@ -222,6 +222,22 @@ watch(() => store.sessions, (sessions) => {
   }
 }, { deep: true })
 
+// Watch currentSessionId changes - when user switches to a session, hide its worker
+watch(() => store.currentSessionId, (newSessionId) => {
+  if (!newSessionId) return
+
+  // Check if the new current session has a worker
+  const worker = workers.value.get(newSessionId)
+  if (worker) {
+    // Find session to check its streaming status
+    const session = store.sessions.find(s => s.id === newSessionId)
+    if (session && !session.streaming) {
+      // Session is not streaming, hide the worker (it's completed or stale)
+      hideWorker(newSessionId)
+    }
+  }
+})
+
 // Visible workers (not idle)
 const visibleWorkers = computed(() => {
   return Array.from(workers.value.values()).filter(w => w.state !== 'idle')
