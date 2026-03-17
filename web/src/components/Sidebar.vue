@@ -154,31 +154,33 @@ const groupedSessions = computed<SessionGroup[]>(() => {
   return result
 })
 
-// Collapsed state for each group (persisted in localStorage)
-const COLLAPSED_KEY = 'ai-hub-sidebar-collapsed-groups'
-const collapsedGroups = ref<Set<string>>(new Set())
+// Expanded state for each group (persisted in localStorage)
+// Default: collapsed. Store expanded groups.
+const EXPANDED_KEY = 'ai-hub-sidebar-expanded-groups'
+const expandedGroups = ref<Set<string>>(new Set())
 
-// Load collapsed state from localStorage on init
+// Load expanded state from localStorage on init
 ;(() => {
   try {
-    const saved = localStorage.getItem(COLLAPSED_KEY)
-    if (saved) collapsedGroups.value = new Set(JSON.parse(saved))
+    const saved = localStorage.getItem(EXPANDED_KEY)
+    if (saved) expandedGroups.value = new Set(JSON.parse(saved))
   } catch { /* ignore */ }
 })()
 
 function toggleGroupCollapse(groupKey: string) {
-  const s = new Set(collapsedGroups.value)
+  const s = new Set(expandedGroups.value)
   if (s.has(groupKey)) s.delete(groupKey)
   else s.add(groupKey)
-  collapsedGroups.value = s
+  expandedGroups.value = s
   // Persist to localStorage
   try {
-    localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...s]))
+    localStorage.setItem(EXPANDED_KEY, JSON.stringify([...s]))
   } catch { /* ignore */ }
 }
 
 function isGroupCollapsed(groupKey: string): boolean {
-  return collapsedGroups.value.has(groupKey)
+  // Collapsed = NOT in expandedGroups
+  return !expandedGroups.value.has(groupKey)
 }
 
 function openNewChatDialog() {
@@ -287,7 +289,7 @@ onMounted(async () => {
           <path d="M23 21v-2a4 4 0 00-3-3.87"/>
           <path d="M16 3.13a4 4 0 010 7.75"/>
         </svg>
-        <span>团队</span>
+        <span>数字员工</span>
         <span v-if="store.busySessionCount > 0" class="nav-badge busy-badge">{{ store.busySessionCount }}</span>
       </button>
       <button class="nav-item" :class="{ active: isServices }" @click="navTo('/services')">
@@ -307,22 +309,16 @@ onMounted(async () => {
         <div
           v-if="group.key !== ''"
           class="group-label group-label-clickable"
-          @click="teamDetailGroup = group.key"
+          @click="toggleGroupCollapse(group.key)"
         >
+          <svg class="group-expand-icon" :class="{ expanded: !isGroupCollapsed(group.key) }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="9 18 15 12 9 6"/>
+          </svg>
           <span class="group-label-text">{{ group.label }}</span>
-          <svg class="group-label-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <span class="group-member-count">{{ group.sessions.length }}</span>
+          <svg class="group-label-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" @click.stop="teamDetailGroup = group.key" title="查看团队详情">
             <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
           </svg>
-          <button
-            class="group-collapse-btn"
-            :title="isGroupCollapsed(group.key) ? '展开' : '收缩'"
-            @click.stop="toggleGroupCollapse(group.key)"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline v-if="isGroupCollapsed(group.key)" points="6 9 12 15 18 9"/>
-              <polyline v-else points="18 15 12 9 6 15"/>
-            </svg>
-          </button>
         </div>
         <!-- Sessions (hidden if group is collapsed) -->
         <template v-if="group.key === '' || !isGroupCollapsed(group.key)">
@@ -600,6 +596,30 @@ onMounted(async () => {
 .group-label-icon {
   flex-shrink: 0;
   opacity: 0.6;
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 4px;
+  transition: all var(--transition);
+}
+.group-label-icon:hover {
+  opacity: 1;
+  background: var(--bg-hover);
+}
+.group-expand-icon {
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+.group-expand-icon.expanded {
+  transform: rotate(90deg);
+}
+.group-member-count {
+  font-size: 10px;
+  color: var(--text-muted);
+  background: var(--bg-hover);
+  padding: 1px 6px;
+  border-radius: 10px;
+  margin-left: auto;
+  margin-right: 4px;
 }
 .group-collapse-btn {
   margin-left: auto;
