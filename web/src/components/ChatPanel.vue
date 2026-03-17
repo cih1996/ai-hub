@@ -1221,7 +1221,7 @@ function formatToolInput(raw: string): string {
               class="message-content md-content"
               v-html="renderMd(msg.content)"
             />
-            <div v-else class="message-content">{{ msg.content }}</div>
+            <div v-else class="message-content md-content" v-html="renderMd(msg.content)" />
             <!-- Attention context badge (for user messages with attention context) -->
             <button
               v-if="msg.role === 'user' && msg.attention_context"
