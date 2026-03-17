@@ -93,7 +93,8 @@ async function completeWorker(sessionId: number, fallbackMessage?: string) {
   let message = fallbackMessage || '任务完成'
   try {
     const result = await api.getMessagesPaginated(sessionId, 5)
-    const lastAssistant = result.messages.find(m => m.role === 'assistant')
+    // Messages are ordered ASC (oldest first), so reverse to get newest first
+    const lastAssistant = [...result.messages].reverse().find(m => m.role === 'assistant')
     if (lastAssistant && lastAssistant.content) {
       // Truncate and clean message
       let content = lastAssistant.content
@@ -226,15 +227,12 @@ watch(() => store.sessions, (sessions) => {
 watch(() => store.currentSessionId, (newSessionId) => {
   if (!newSessionId) return
 
-  // Check if the new current session has a worker
+  // Check if the new current session has a worker displayed
   const worker = workers.value.get(newSessionId)
   if (worker) {
-    // Find session to check its streaming status
-    const session = store.sessions.find(s => s.id === newSessionId)
-    if (session && !session.streaming) {
-      // Session is not streaming, hide the worker (it's completed or stale)
-      hideWorker(newSessionId)
-    }
+    // User is now viewing this session, hide the worker regardless of state
+    // (they can see the actual chat content now)
+    hideWorker(newSessionId)
   }
 })
 
@@ -269,9 +267,9 @@ defineExpose({
         <div class="worker-info">
           <div class="worker-header">
             <p class="worker-name">{{ worker.name }}</p>
-            <span class="session-id">#{{ worker.sessionId }}</span>
           </div>
           <div class="worker-meta">
+            <span class="session-id">#{{ worker.sessionId }}</span>
             <span v-if="worker.team" class="team-name">{{ worker.team }}</span>
             <p class="worker-role">{{ worker.role }}</p>
           </div>
@@ -468,6 +466,7 @@ defineExpose({
   padding: 2px 6px;
   border-radius: 4px;
   display: none;
+  margin-right: 6px;
 }
 
 .ai-worker.completed .session-id {
