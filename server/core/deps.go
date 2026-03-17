@@ -243,35 +243,68 @@ func EnhancedEnv() []string {
 // Must be called early in main() so that exec.Command LookPath can find binaries
 // when running as a launchd/systemd service where PATH is minimal.
 func InitEnhancedPATH() {
-	extraPaths := []string{
-		"/usr/local/bin",
-		"/usr/bin",
-		"/bin",
-		"/usr/sbin",
-		"/sbin",
-	}
-	if runtime.GOOS == "darwin" {
-		extraPaths = append(extraPaths, "/opt/homebrew/bin", "/opt/homebrew/sbin")
-	}
-	if home, err := os.UserHomeDir(); err == nil {
-		extraPaths = append(extraPaths,
-			filepath.Join(home, ".local/bin"),
-			filepath.Join(home, "go/bin"),
-		)
-		// Resolve nvm glob
-		if matches, _ := filepath.Glob(filepath.Join(home, ".nvm/versions/node/*/bin")); len(matches) > 0 {
-			extraPaths = append(extraPaths, matches...)
+	var extraPaths []string
+	var pathSep string
+
+	if runtime.GOOS == "windows" {
+		pathSep = ";"
+		// Windows-specific paths
+		if appData := os.Getenv("APPDATA"); appData != "" {
+			// npm global packages: %APPDATA%\npm
+			extraPaths = append(extraPaths, filepath.Join(appData, "npm"))
 		}
-		// fnm support
-		if matches, _ := filepath.Glob(filepath.Join(home, "Library/Application Support/fnm/node-versions/*/installation/bin")); len(matches) > 0 {
-			extraPaths = append(extraPaths, matches...)
+		if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
+			// Some tools install here
+			extraPaths = append(extraPaths, filepath.Join(localAppData, "Programs", "nodejs"))
+		}
+		if programFiles := os.Getenv("ProgramFiles"); programFiles != "" {
+			extraPaths = append(extraPaths, filepath.Join(programFiles, "nodejs"))
+			extraPaths = append(extraPaths, filepath.Join(programFiles, "Git", "cmd"))
+		}
+	} else {
+		pathSep = ":"
+		// Unix paths
+		extraPaths = []string{
+			"/usr/local/bin",
+			"/usr/bin",
+			"/bin",
+			"/usr/sbin",
+			"/sbin",
+		}
+		if runtime.GOOS == "darwin" {
+			extraPaths = append(extraPaths, "/opt/homebrew/bin", "/opt/homebrew/sbin")
+		}
+	}
+
+	// Home-relative paths (cross-platform)
+	if home, err := os.UserHomeDir(); err == nil {
+		if runtime.GOOS != "windows" {
+			extraPaths = append(extraPaths,
+				filepath.Join(home, ".local/bin"),
+				filepath.Join(home, "go/bin"),
+			)
+			// Resolve nvm glob
+			if matches, _ := filepath.Glob(filepath.Join(home, ".nvm/versions/node/*/bin")); len(matches) > 0 {
+				extraPaths = append(extraPaths, matches...)
+			}
+			// fnm support
+			if matches, _ := filepath.Glob(filepath.Join(home, "Library/Application Support/fnm/node-versions/*/installation/bin")); len(matches) > 0 {
+				extraPaths = append(extraPaths, matches...)
+			}
+		} else {
+			// Windows: nvm-windows
+			if matches, _ := filepath.Glob(filepath.Join(home, "AppData/Roaming/nvm/v*/node.exe")); len(matches) > 0 {
+				for _, m := range matches {
+					extraPaths = append(extraPaths, filepath.Dir(m))
+				}
+			}
 		}
 	}
 
 	currentPATH := os.Getenv("PATH")
 	// Deduplicate: only add paths not already present
 	existing := make(map[string]bool)
-	for _, p := range strings.Split(currentPATH, ":") {
+	for _, p := range strings.Split(currentPATH, pathSep) {
 		existing[p] = true
 	}
 	var toAdd []string
@@ -281,7 +314,7 @@ func InitEnhancedPATH() {
 		}
 	}
 	if len(toAdd) > 0 {
-		newPATH := currentPATH + ":" + strings.Join(toAdd, ":")
+		newPATH := currentPATH + pathSep + strings.Join(toAdd, pathSep)
 		os.Setenv("PATH", newPATH)
 		log.Printf("[deps] Enhanced PATH with %d additional directories", len(toAdd))
 	}
