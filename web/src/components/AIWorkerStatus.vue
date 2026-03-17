@@ -332,34 +332,37 @@ defineExpose({
 .ai-worker {
   pointer-events: auto;
   position: relative;
-  height: 64px;
   background: var(--bg-secondary);
-  border: 0 solid var(--border);
+  border: 1px solid var(--border);
   border-top: none;
   border-radius: 0 0 24px 24px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
   transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
   transform: translateY(-100%);
   width: 0;
+  height: 0;
   margin: 0;
   padding: 0;
   opacity: 0;
   overflow: hidden;
   display: flex;
   align-items: center;
+  justify-content: center;
   box-sizing: border-box;
   cursor: pointer;
 }
 
 .ai-worker.working {
-  width: 72px;
-  margin: 0 8px;
+  width: 56px;
+  height: 56px;
+  margin: 0 6px;
   padding: 0;
   opacity: 1;
-  border-width: 1px;
-  transform: translateY(-24px);
-  justify-content: center;
-  border-radius: 0 0 36px 36px;
+  transform: translateY(0);
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  box-shadow: none;
 }
 
 .ai-worker.completed {
@@ -368,10 +371,12 @@ defineExpose({
   margin: 0 8px;
   padding: 0 16px;
   opacity: 1;
-  border-width: 1px;
   transform: translateY(0);
   overflow: visible;
   z-index: 100;
+  background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
+  border: 1px solid var(--accent);
+  box-shadow: 0 4px 20px rgba(124, 106, 239, 0.2), 0 0 0 1px var(--accent);
 }
 
 /* Avatar */
@@ -385,9 +390,9 @@ defineExpose({
 }
 
 .ai-worker.working .avatar-wrapper {
-  width: 32px;
-  height: 32px;
-  transform: translateY(12px);
+  width: 40px;
+  height: 40px;
+  transform: none;
 }
 
 .avatar-img {
@@ -401,11 +406,11 @@ defineExpose({
 /* Spinner */
 .spinner {
   position: absolute;
-  top: -4px;
-  left: -4px;
-  right: -4px;
-  bottom: -4px;
-  border: 2px solid transparent;
+  top: -5px;
+  left: -5px;
+  right: -5px;
+  bottom: -5px;
+  border: 3px solid transparent;
   border-top-color: var(--accent);
   border-right-color: var(--accent);
   border-radius: 50%;
@@ -535,9 +540,9 @@ defineExpose({
   left: 50%;
   margin-top: 12px;
   transform: translateX(-50%) translateY(-10px) scale(0.9);
-  background: var(--bg-secondary);
+  background: linear-gradient(135deg, #1e1e2e 0%, #2a2a3e 100%);
   color: var(--text-primary);
-  border: 1px solid var(--border);
+  border: 1px solid var(--accent);
   padding: 12px 16px;
   border-radius: 12px;
   font-size: 13px;
@@ -550,7 +555,7 @@ defineExpose({
   opacity: 0;
   pointer-events: none;
   transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 8px 32px rgba(124, 106, 239, 0.25), 0 0 0 1px rgba(124, 106, 239, 0.3);
   z-index: 200;
 }
 
@@ -561,9 +566,9 @@ defineExpose({
   left: 50%;
   width: 10px;
   height: 10px;
-  background: var(--bg-secondary);
-  border-top: 1px solid var(--border);
-  border-left: 1px solid var(--border);
+  background: linear-gradient(135deg, #1e1e2e 0%, #2a2a3e 100%);
+  border-top: 1px solid var(--accent);
+  border-left: 1px solid var(--accent);
   transform: translateX(-50%) rotate(45deg);
 }
 
