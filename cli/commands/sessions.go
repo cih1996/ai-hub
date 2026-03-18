@@ -4,27 +4,32 @@ import (
 	"ai-hub/cli/client"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 )
 
 // RunSessions executes the sessions command
-// Usage: ai-hub sessions [id] [messages|move] [--with-errors]
+// Usage: ai-hub sessions [id] [messages|move] [--with-errors] [--group <name>]
 func RunSessions(c *client.Client, args []string) int {
-	// Check for --with-errors flag
+	// Check for flags
 	var withErrors bool
+	var groupName string
 	var filteredArgs []string
-	for _, arg := range args {
-		if arg == "--with-errors" {
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--with-errors" {
 			withErrors = true
+		} else if args[i] == "--group" && i+1 < len(args) {
+			groupName = args[i+1]
+			i++ // skip next arg
 		} else {
-			filteredArgs = append(filteredArgs, arg)
+			filteredArgs = append(filteredArgs, args[i])
 		}
 	}
 	args = filteredArgs
 
 	if len(args) == 0 {
-		return listSessions(c, withErrors)
+		return listSessions(c, withErrors, groupName)
 	}
 
 	// Parse session ID
@@ -47,9 +52,15 @@ func RunSessions(c *client.Client, args []string) int {
 	return sessionDetail(c, id)
 }
 
-func listSessions(c *client.Client, withErrors bool) int {
+func listSessions(c *client.Client, withErrors bool, groupName string) int {
+	// Build query path
+	path := "/sessions"
+	if groupName != "" {
+		path = fmt.Sprintf("/sessions?group=%s", url.QueryEscape(groupName))
+	}
+
 	// Get sessions
-	respData, err := c.GET("/sessions")
+	respData, err := c.GET(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 1

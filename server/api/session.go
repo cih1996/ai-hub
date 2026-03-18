@@ -29,7 +29,15 @@ type SessionResponse struct {
 }
 
 func ListSessions(c *gin.Context) {
-	list, err := store.ListSessions()
+	// Support filtering by group name
+	groupName := c.Query("group")
+	var list []model.Session
+	var err error
+	if groupName != "" {
+		list, err = store.ListSessionsByGroup(groupName)
+	} else {
+		list, err = store.ListSessions()
+	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
