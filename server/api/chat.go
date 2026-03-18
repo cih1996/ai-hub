@@ -934,7 +934,9 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 			}
 
 			// Determine if this result is an error condition
-			isResultError := wrapper.Subtype == "error" || wrapper.Subtype == "error_during_execution" || wrapper.IsError
+			// Only treat as error if is_error=true OR subtype="error"
+			// error_during_execution with is_error=false is non-fatal (e.g., telemetry failures)
+			isResultError := wrapper.IsError || wrapper.Subtype == "error"
 
 			if isResultError {
 				// Build composite error message

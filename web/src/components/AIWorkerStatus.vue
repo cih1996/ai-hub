@@ -540,7 +540,7 @@ defineExpose({
   left: 50%;
   margin-top: 12px;
   transform: translateX(-50%) translateY(-10px) scale(0.9);
-  background: linear-gradient(135deg, #1e1e2e 0%, #2a2a3e 100%);
+  background: var(--bg-secondary);
   color: var(--text-primary);
   border: 1px solid var(--accent);
   padding: 12px 16px;
@@ -566,7 +566,7 @@ defineExpose({
   left: 50%;
   width: 10px;
   height: 10px;
-  background: linear-gradient(135deg, #1e1e2e 0%, #2a2a3e 100%);
+  background: var(--bg-secondary);
   border-top: 1px solid var(--accent);
   border-left: 1px solid var(--accent);
   transform: translateX(-50%) rotate(45deg);
