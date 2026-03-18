@@ -453,13 +453,13 @@ drained:
 
 			onData(line)
 			var evt struct {
-				Type   string `json:"type"`
-				Result string `json:"result"`
+				Type    string `json:"type"`
+				Subtype string `json:"subtype"`
 			}
 			if json.Unmarshal([]byte(line), &evt) == nil && evt.Type == "result" {
-				if evt.Result == "error_during_execution" || evt.Result == "error" {
-					log.Printf("[pool] session %d: CLI result=%s, full line: %s", proc.hubSessionID, evt.Result, line)
-					return fmt.Errorf("cli_error: %s", evt.Result)
+				if evt.Subtype == "error_during_execution" || evt.Subtype == "error" {
+					log.Printf("[pool] session %d: CLI subtype=%s, full line: %s", proc.hubSessionID, evt.Subtype, line)
+					return fmt.Errorf("cli_error: %s", evt.Subtype)
 				}
 				return nil
 			}
