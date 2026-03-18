@@ -248,7 +248,7 @@ func InitEnhancedPATH() {
 
 	if runtime.GOOS == "windows" {
 		pathSep = ";"
-		// Windows-specific paths
+		// Windows-specific paths using environment variables
 		if appData := os.Getenv("APPDATA"); appData != "" {
 			// npm global packages: %APPDATA%\npm
 			extraPaths = append(extraPaths, filepath.Join(appData, "npm"))
@@ -305,8 +305,28 @@ func InitEnhancedPATH() {
 	// Deduplicate: only add paths not already present
 	existing := make(map[string]bool)
 	for _, p := range strings.Split(currentPATH, pathSep) {
-		existing[p] = true
+		existing[strings.TrimSpace(p)] = true
 	}
+
+	// Windows: read user PATH from registry (VBS doesn't inherit user PATH)
+	if runtime.GOOS == "windows" {
+		cmd := exec.Command("powershell", "-Command",
+			"[Environment]::GetEnvironmentVariable('PATH', 'User')")
+		if out, err := cmd.Output(); err == nil {
+			userPath := strings.TrimSpace(string(out))
+			if userPath != "" {
+				for _, p := range strings.Split(userPath, ";") {
+					p = strings.TrimSpace(p)
+					if p != "" && !existing[p] {
+						extraPaths = append(extraPaths, p)
+						existing[p] = true
+					}
+				}
+				log.Printf("[deps] Merged user PATH from registry")
+			}
+		}
+	}
+
 	var toAdd []string
 	for _, p := range extraPaths {
 		if !existing[p] {
