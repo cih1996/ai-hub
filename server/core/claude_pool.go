@@ -455,10 +455,13 @@ drained:
 			var evt struct {
 				Type    string `json:"type"`
 				Subtype string `json:"subtype"`
+				IsError bool   `json:"is_error"`
 			}
 			if json.Unmarshal([]byte(line), &evt) == nil && evt.Type == "result" {
-				if evt.Subtype == "error_during_execution" || evt.Subtype == "error" {
-					log.Printf("[pool] session %d: CLI subtype=%s, full line: %s", proc.hubSessionID, evt.Subtype, line)
+				// Only treat as fatal error if is_error is true
+				// error_during_execution with is_error=false is non-fatal (e.g., telemetry failures)
+				if evt.IsError && (evt.Subtype == "error_during_execution" || evt.Subtype == "error") {
+					log.Printf("[pool] session %d: CLI fatal error subtype=%s, full line: %s", proc.hubSessionID, evt.Subtype, line)
 					return fmt.Errorf("cli_error: %s", evt.Subtype)
 				}
 				return nil
