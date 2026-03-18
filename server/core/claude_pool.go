@@ -198,6 +198,13 @@ func (p *ProcessPool) idleReaper() {
 
 // spawnProcess starts a new persistent Claude CLI process
 func (p *ProcessPool) spawnProcess(req ClaudeCodeRequest, isResume bool) (*PersistentProcess, error) {
+	// Build disallowed tools list
+	disallowed := []string{"EnterPlanMode", "ExitPlanMode"}
+	// Non-Anthropic API providers don't support web_search server tool
+	if req.BaseURL != "" && !strings.Contains(req.BaseURL, "api.anthropic.com") {
+		disallowed = append(disallowed, "web_search")
+	}
+
 	args := []string{
 		"-p",
 		"--dangerously-skip-permissions",
@@ -205,7 +212,7 @@ func (p *ProcessPool) spawnProcess(req ClaudeCodeRequest, isResume bool) (*Persi
 		"--input-format", "stream-json",
 		"--output-format", "stream-json",
 		"--include-partial-messages",
-		"--disallowed-tools", "EnterPlanMode,ExitPlanMode",
+		"--disallowed-tools", strings.Join(disallowed, ","),
 	}
 	if req.SessionID != "" {
 		if isResume {
