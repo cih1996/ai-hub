@@ -679,6 +679,12 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 	if len(promptParts) > 0 {
 		req.SystemPrompt = strings.Join(promptParts, "\n\n---\n\n")
 	}
+	// For non-Anthropic API providers, append web_search disable hint
+	// (--disallowed-tools only works for client tools, not server_tool_use like web_search)
+	if p.BaseURL != "" && !strings.Contains(p.BaseURL, "api.anthropic.com") {
+		webSearchHint := "\n\n重要：当前 API 不支持 web_search 工具，请勿使用。如需搜索信息，请使用其他方式（如 MCP 浏览器工具）。"
+		req.SystemPrompt += webSearchHint
+	}
 	// Capture raw request snapshot for diagnostic purposes (GET /sessions/:id/last-request)
 	lastRawRequests.Store(sessID, RawRequestSnapshot{
 		SystemPrompt: req.SystemPrompt,
@@ -1573,6 +1579,11 @@ func runShadowStream(ctx context.Context, shadowSession *model.Session, query st
 	if len(promptParts) > 0 {
 		req.SystemPrompt = strings.Join(promptParts, "\n\n---\n\n")
 	}
+	// For non-Anthropic API providers, append web_search disable hint
+	if provider.BaseURL != "" && !strings.Contains(provider.BaseURL, "api.anthropic.com") {
+		webSearchHint := "\n\n重要：当前 API 不支持 web_search 工具，请勿使用。如需搜索信息，请使用其他方式（如 MCP 浏览器工具）。"
+		req.SystemPrompt += webSearchHint
+	}
 
 	var fullResponse string
 	var metadataJSON string
@@ -1768,6 +1779,11 @@ func runSilentStream(ctx context.Context, session *model.Session, query string, 
 	}
 	if len(promptParts) > 0 {
 		req.SystemPrompt = strings.Join(promptParts, "\n\n---\n\n")
+	}
+	// For non-Anthropic API providers, append web_search disable hint
+	if provider.BaseURL != "" && !strings.Contains(provider.BaseURL, "api.anthropic.com") {
+		webSearchHint := "\n\n重要：当前 API 不支持 web_search 工具，请勿使用。如需搜索信息，请使用其他方式（如 MCP 浏览器工具）。"
+		req.SystemPrompt += webSearchHint
 	}
 
 	var fullResponse string
