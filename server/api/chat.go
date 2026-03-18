@@ -639,6 +639,32 @@ func runtimeTemplateVars(sessID int64, groupName string) map[string]string {
 	return vars
 }
 
+// buildTeamMembersList generates a markdown table of team members for injection into system prompt
+func buildTeamMembersList(groupName string, currentSessionID int64) string {
+	if groupName == "" {
+		return ""
+	}
+	sessions, err := store.ListSessionsByGroup(groupName)
+	if err != nil || len(sessions) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("# 团队成员\n\n")
+	sb.WriteString("| 会话ID | 角色名称 |\n")
+	sb.WriteString("|--------|----------|\n")
+
+	for _, s := range sessions {
+		marker := ""
+		if s.ID == currentSessionID {
+			marker = " (当前)"
+		}
+		sb.WriteString(fmt.Sprintf("| %d | %s%s |\n", s.ID, s.Title, marker))
+	}
+
+	return sb.String()
+}
+
 func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID string, resume bool, send func(WSMessage), sessID int64, workDir string, groupName string, progressMsgID int64) (string, string, int64, int64, int64, int64, error) {
 	req := core.ClaudeCodeRequest{
 		Query:        query,
@@ -672,6 +698,12 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 	}
 	if teamRules := core.BuildTeamRulesWithVars(groupName, tplVars); teamRules != "" {
 		promptParts = append(promptParts, teamRules)
+	}
+	// Auto-inject team members list (between team rules and session rules)
+	if groupName != "" {
+		if membersList := buildTeamMembersList(groupName, sessID); membersList != "" {
+			promptParts = append(promptParts, membersList)
+		}
 	}
 	if rules, err := ReadSessionRules(sessID); err == nil && rules != "" {
 		promptParts = append(promptParts, core.RenderTemplateWithVars(rules, tplVars))
@@ -1556,6 +1588,12 @@ func runShadowStream(ctx context.Context, shadowSession *model.Session, query st
 	if teamRules := core.BuildTeamRulesWithVars(shadowSession.GroupName, tplVars); teamRules != "" {
 		promptParts = append(promptParts, teamRules)
 	}
+	// Auto-inject team members list
+	if shadowSession.GroupName != "" {
+		if membersList := buildTeamMembersList(shadowSession.GroupName, broadcastAsID); membersList != "" {
+			promptParts = append(promptParts, membersList)
+		}
+	}
 	if rules, err := ReadSessionRules(broadcastAsID); err == nil && rules != "" {
 		promptParts = append(promptParts, core.RenderTemplateWithVars(rules, tplVars))
 	}
@@ -1759,6 +1797,12 @@ func runSilentStream(ctx context.Context, session *model.Session, query string, 
 	}
 	if teamRules := core.BuildTeamRulesWithVars(session.GroupName, tplVars); teamRules != "" {
 		promptParts = append(promptParts, teamRules)
+	}
+	// Auto-inject team members list
+	if session.GroupName != "" {
+		if membersList := buildTeamMembersList(session.GroupName, session.ID); membersList != "" {
+			promptParts = append(promptParts, membersList)
+		}
 	}
 
 	req := core.ClaudeCodeRequest{
