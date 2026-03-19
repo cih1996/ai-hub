@@ -520,12 +520,14 @@ defineExpose({
   background: var(--bg-tertiary);
   color: var(--text-muted);
   opacity: 0;
+  pointer-events: none;
   transition: all 0.2s;
   cursor: pointer;
 }
 
 .ai-worker.completed .btn-close {
   opacity: 1;
+  pointer-events: auto;
 }
 
 .btn-close:hover {

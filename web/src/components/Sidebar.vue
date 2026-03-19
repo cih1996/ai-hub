@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, inject, onMounted, watch } from 'vue'
+import { computed, ref, inject, onMounted, watch, nextTick } from 'vue'
 import type { Ref } from 'vue'
 import type { Session } from '../types'
 import { useChatStore } from '../stores/chat'
@@ -32,8 +32,20 @@ const version = ref('')
 const highlightSessionId = ref<number | null>(null)
 
 // Watch for input focus trigger to scroll and highlight current session
-watch(() => store.inputFocusTrigger, () => {
+watch(() => store.inputFocusTrigger, async () => {
   if (!store.currentSessionId) return
+
+  // Find which group the current session belongs to and expand if collapsed
+  for (const group of groupedSessions.value) {
+    if (group.key === '') continue // default group is always visible
+    const found = group.sessions.some(s => s.id === store.currentSessionId)
+    if (found && isGroupCollapsed(group.key)) {
+      toggleGroupCollapse(group.key)
+      await nextTick() // wait for DOM to render the expanded group
+      break
+    }
+  }
+
   highlightSessionId.value = store.currentSessionId
   // Scroll to the session item
   const el = document.querySelector(`[data-session-id="${store.currentSessionId}"]`)
