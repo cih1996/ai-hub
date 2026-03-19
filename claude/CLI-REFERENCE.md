@@ -2,16 +2,17 @@
 
 环境变量自动继承：AI_HUB_SESSION_ID / AI_HUB_GROUP_NAME / AI_HUB_PORT
 
-## 记忆库（--level 必填：session / team / global）
+## 记忆库（--level 可选：session / team / global）
 
 ai-hub list --level <level>                          # 列出记忆文件
-ai-hub search "关键词" --level <level> [--top 10]    # 语义搜索
+ai-hub search "关键词" [--level <level>] [--top 10]  # 语义搜索（不带 --level 时全量搜索三层）
 ai-hub read "文件名.md" --level <level>              # 读取全文
 ai-hub write "文件名.md" --level <level> --content "内容"  # 写入
 ai-hub edit "文件名.md" --level <level> --old "旧" --new "新"  # diff修改
 ai-hub delete "文件名.md" --level <level> --force    # 删除
 
 level 解析：session 需要 GROUP_NAME+SESSION_ID，team 需要 GROUP_NAME，global 无需。
+search 返回字段：level（来源层级）、snippet（匹配片段）、hit_count（命中次数）、read_count（阅读次数）。
 写入规范：先搜后写，一主题一文件，正文写当前有效状态，历史追加到变更记录区。
 
 ## 会话管理

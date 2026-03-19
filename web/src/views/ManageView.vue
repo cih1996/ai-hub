@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
-import { listFiles, readFileContent, writeFileContent, createFileApi, deleteFileApi, getTemplateVars, getDefaultFile, searchMemory, readMemoryFile } from '../composables/api'
+import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { listFiles, readFileContent, writeFileContent, createFileApi, deleteFileApi, getTemplateVars, getDefaultFile, searchMemory } from '../composables/api'
 import type { TemplateVar, MemorySearchResult } from '../composables/api'
 
 interface FileItem {
@@ -41,9 +41,6 @@ const searchQuery = ref('')
 const searching = ref(false)
 const searchResults = ref<MemorySearchResult[]>([])
 const searchDone = ref(false)
-const expandedResult = ref<string | null>(null)
-const viewingContent = ref<{ fileName: string; content: string; scope: string } | null>(null)
-const loadingContent = ref(false)
 
 function similarityColor(s: number): string {
   if (s >= 0.7) return 'var(--success, #22c55e)'
@@ -83,7 +80,6 @@ async function onSearch() {
   searching.value = true
   searchResults.value = []
   searchDone.value = false
-  viewingContent.value = null
   try {
     const res = await searchMemory(q, 10)
     searchResults.value = res.results || []
@@ -94,22 +90,44 @@ async function onSearch() {
   searching.value = false
 }
 
-function toggleExpand(id: string) {
-  expandedResult.value = expandedResult.value === id ? null : id
+// 点击搜索结果项：关闭搜索框 + 定位到文件列表中对应文件
+async function locateFile(r: MemorySearchResult) {
+  // 搜索结果都是 memory 类型，切换到记忆 tab
+  if (activeTab.value !== 'memory') {
+    activeTab.value = 'memory'
+    await nextTick()
+    // watch 会触发 loadFiles，等文件列表加载完
+    await loadFiles()
+  }
+  // 在文件列表中找到对应文件并选中
+  const target = files.value.find(f => f.name === r.id)
+  if (target) {
+    selectFile(target)
+  }
+  // 关闭搜索结果
+  closeSearch()
 }
 
-async function viewFullContent(r: MemorySearchResult) {
-  const scope = r.metadata?.scope || ''
-  if (!scope) return
-  loadingContent.value = true
-  try {
-    const res = await readMemoryFile(scope, r.id)
-    viewingContent.value = { fileName: res.file_name, content: res.content, scope: res.scope }
-  } catch (e: any) {
-    viewingContent.value = { fileName: r.id, content: '加载失败: ' + (e.message || '未知错误'), scope }
-  }
-  loadingContent.value = false
+function closeSearch() {
+  searchResults.value = []
+  searchDone.value = false
 }
+
+// 点击外部关闭搜索结果
+const searchBarRef = ref<HTMLElement | null>(null)
+
+function onClickOutside(e: MouseEvent) {
+  if (searchBarRef.value && !searchBarRef.value.contains(e.target as Node)) {
+    closeSearch()
+  }
+}
+
+onMounted(async () => {
+  loadFiles()
+  try { templateVars.value = await getTemplateVars() } catch {}
+  document.addEventListener('click', onClickOutside)
+})
+
 
 async function restoreDefault() {
   if (!selectedFile.value) return
@@ -205,9 +223,8 @@ watch(activeTab, () => {
   loadFiles()
 })
 
-onMounted(async () => {
-  loadFiles()
-  try { templateVars.value = await getTemplateVars() } catch {}
+onBeforeUnmount(() => {
+  document.removeEventListener('click', onClickOutside)
 })
 </script>
 
@@ -224,7 +241,7 @@ onMounted(async () => {
         >{{ tab.label }}</button>
       </div>
       <div class="tab-desc">{{ activeTabDesc }}</div>
-      <div class="search-bar">
+      <div class="search-bar" ref="searchBarRef">
         <div class="search-inputs">
           <input
             v-model="searchQuery"
@@ -240,8 +257,8 @@ onMounted(async () => {
         </div>
         <div v-if="searchDone && searchResults.length === 0" class="search-empty">未找到相关结果</div>
         <div v-if="searchResults.length > 0" class="search-results">
-          <div v-for="r in searchResults" :key="r.id + (r.origin || '')" class="search-result-item">
-            <div class="result-header" @click="toggleExpand(r.id + (r.origin || ''))">
+          <div v-for="r in searchResults" :key="r.id + (r.origin || '')" class="search-result-item" @click="locateFile(r)">
+            <div class="result-header">
               <span class="result-level" :class="levelClass(r.origin || r.level)">{{ levelLabel(r.origin || r.level) }}</span>
               <span class="result-filename">{{ r.id }}</span>
               <span class="result-score" :style="{ color: similarityColor(r.similarity) }">{{ (r.similarity * 100).toFixed(1) }}%</span>
@@ -252,25 +269,7 @@ onMounted(async () => {
               <span class="meta-item" title="创建时间">创建 {{ formatTime(r.created_at) }}</span>
               <span class="meta-item" title="更新时间">更新 {{ formatTime(r.updated_at) }}</span>
             </div>
-            <div class="result-preview" @click="toggleExpand(r.id + (r.origin || ''))">{{ expandedResult === r.id + (r.origin || '') ? r.document : r.document.slice(0, 200) + (r.document.length > 200 ? '...' : '') }}</div>
-            <div v-if="expandedResult === r.id + (r.origin || '')" class="result-actions">
-              <button class="btn-view" :disabled="loadingContent" @click.stop="viewFullContent(r)">
-                {{ loadingContent ? '加载中...' : '查看完整内容' }}
-              </button>
-            </div>
-          </div>
-        </div>
-        <!-- Full content viewer modal -->
-        <div v-if="viewingContent" class="content-modal-overlay" @click.self="viewingContent = null">
-          <div class="content-modal">
-            <div class="content-modal-header">
-              <span class="content-modal-title">{{ viewingContent.fileName }}</span>
-              <span class="content-modal-scope">{{ viewingContent.scope }}</span>
-              <button class="content-modal-close" @click="viewingContent = null">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
-              </button>
-            </div>
-            <pre class="content-modal-body">{{ viewingContent.content }}</pre>
+            <div class="result-preview">{{ r.document.slice(0, 200) + (r.document.length > 200 ? '...' : '') }}</div>
           </div>
         </div>
       </div>
