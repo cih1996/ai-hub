@@ -191,6 +191,19 @@ func ListMemoryFiles(c *gin.Context) {
 	vectorList(c, "memory")
 }
 
+// detectScopeLevel determines the level from a scope string.
+// "memory" → "global", "<group>/memory" → "team", "<group>/sessions/<id>/memory" → "session"
+func detectScopeLevel(scope string) string {
+	if scope == "memory" {
+		return "global"
+	}
+	parts := strings.Split(scope, "/")
+	if len(parts) == 4 && parts[1] == "sessions" {
+		return "session"
+	}
+	return "team"
+}
+
 // enrichResult adds type, source_session_id, and level to a vector search result.
 // origin: "session" | "team" | "global" (used for sorting priority and level display).
 func enrichResult(r map[string]interface{}, scopeType, origin string) map[string]interface{} {
@@ -289,9 +302,10 @@ func vectorSearch(c *gin.Context, defaultScope string) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid scope"})
 			return
 		}
-		// Derive type from explicit scope suffix
+		// Derive type from explicit scope suffix and detect level
 		parts := strings.Split(req.Scope, "/")
 		scopeType = parts[len(parts)-1]
+		scopeLevel := detectScopeLevel(req.Scope)
 
 		results, err := core.Vector.Search(req.Scope, req.Query, fetchK)
 		if err != nil {
@@ -305,7 +319,7 @@ func vectorSearch(c *gin.Context, defaultScope string) {
 		seen := make(map[string]bool)
 		enriched := make([]map[string]interface{}, 0, len(results))
 		for _, r := range results {
-			e := enrichResult(r, scopeType, "global")
+			e := enrichResult(r, scopeType, scopeLevel)
 			e["origin"] = e["_origin"]
 			delete(e, "_origin")
 			id, _ := e["id"].(string)
@@ -316,7 +330,7 @@ func vectorSearch(c *gin.Context, defaultScope string) {
 		for _, r := range kwResults {
 			id, _ := r["id"].(string)
 			if !seen[id] {
-				e := enrichResult(r, scopeType, "global")
+				e := enrichResult(r, scopeType, scopeLevel)
 				e["origin"] = e["_origin"]
 				delete(e, "_origin")
 				seen[id] = true
