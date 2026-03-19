@@ -343,8 +343,8 @@ onMounted(async () => {
                 <svg v-if="s.has_triggers" class="trigger-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
                 </svg>
-                <span class="session-id">#{{ s.id }}</span>
                 <div class="session-title">{{ s.title }}</div>
+                <span class="session-id">{{ s.id }}</span>
               </div>
               <div class="session-time">
               {{ formatTime(s.updated_at) }}
@@ -695,6 +695,7 @@ onMounted(async () => {
 .session-info { flex: 1; min-width: 0; }
 .session-id {
   flex-shrink: 0;
+  margin-left: auto;
   font-size: 10px;
   color: var(--text-muted);
   background: var(--bg-hover);
