@@ -191,24 +191,27 @@ func ListMemoryFiles(c *gin.Context) {
 	vectorList(c, "memory")
 }
 
-// enrichResult adds type and source_session_id to a vector search result.
-// origin: "self" | "team" | "global" (used for sorting priority).
+// enrichResult adds type, source_session_id, and level to a vector search result.
+// origin: "session" | "team" | "global" (used for sorting priority and level display).
 func enrichResult(r map[string]interface{}, scopeType, origin string) map[string]interface{} {
 	out := make(map[string]interface{}, len(r)+5)
 	for k, v := range r {
 		out[k] = v
 	}
 	out["type"] = scopeType // "memory"
+	out["level"] = origin   // "session" | "team" | "global"
 	// Extract source_session_id from metadata (stored as float64 in JSON)
 	if meta, ok := r["metadata"].(map[string]interface{}); ok {
 		if sid, ok := meta["source_session_id"]; ok {
 			out["source_session_id"] = sid
 		}
-		// Add created_at / updated_at from file stat
-		if fp, ok := meta["file_path"].(string); ok && fp != "" {
-			if info, err := os.Stat(fp); err == nil {
-				out["updated_at"] = info.ModTime().Format(time.RFC3339)
-				out["created_at"] = fileBirthTime(info).Format(time.RFC3339)
+		// Add created_at / updated_at from file stat if not already present
+		if _, exists := out["created_at"]; !exists {
+			if fp, ok := meta["file_path"].(string); ok && fp != "" {
+				if info, err := os.Stat(fp); err == nil {
+					out["updated_at"] = info.ModTime().Format(time.RFC3339)
+					out["created_at"] = fileBirthTime(info).Format(time.RFC3339)
+				}
 			}
 		}
 	}
@@ -298,12 +301,27 @@ func vectorSearch(c *gin.Context, defaultScope string) {
 		if len(req.Tags) > 0 {
 			results = filterByTags(results, req.Tags)
 		}
+		// Merge keyword search results
+		seen := make(map[string]bool)
 		enriched := make([]map[string]interface{}, 0, len(results))
 		for _, r := range results {
 			e := enrichResult(r, scopeType, "global")
 			e["origin"] = e["_origin"]
 			delete(e, "_origin")
+			id, _ := e["id"].(string)
+			seen[id] = true
 			enriched = append(enriched, e)
+		}
+		kwResults := core.Vector.KeywordSearch(req.Scope, req.Query, fetchK)
+		for _, r := range kwResults {
+			id, _ := r["id"].(string)
+			if !seen[id] {
+				e := enrichResult(r, scopeType, "global")
+				e["origin"] = e["_origin"]
+				delete(e, "_origin")
+				seen[id] = true
+				enriched = append(enriched, e)
+			}
 		}
 		if len(enriched) > req.TopK {
 			enriched = enriched[:req.TopK]
@@ -340,6 +358,16 @@ func vectorSearch(c *gin.Context, defaultScope string) {
 				merged = append(merged, e)
 			}
 		}
+		// Keyword search in session scope
+		kwResults := core.Vector.KeywordSearch(sessionScope, req.Query, fetchK)
+		for _, r := range kwResults {
+			id, _ := r["id"].(string)
+			if !seen[id] {
+				e := enrichResult(r, scopeType, "session")
+				seen[id] = true
+				merged = append(merged, e)
+			}
+		}
 
 		// 2. Search team scope
 		teamScope := sessionGroup + "/" + defaultScope
@@ -356,6 +384,15 @@ func vectorSearch(c *gin.Context, defaultScope string) {
 				}
 			}
 		}
+		kwResults = core.Vector.KeywordSearch(teamScope, req.Query, fetchK)
+		for _, r := range kwResults {
+			id, _ := r["id"].(string)
+			if !seen[id] {
+				e := enrichResult(r, scopeType, "team")
+				seen[id] = true
+				merged = append(merged, e)
+			}
+		}
 
 		// 3. Search global scope
 		globalResults, err3 := core.Vector.Search(defaultScope, req.Query, fetchK)
@@ -367,7 +404,17 @@ func vectorSearch(c *gin.Context, defaultScope string) {
 				if !seen[id] {
 					e := enrichResult(r, scopeType, "global")
 					merged = append(merged, e)
+					seen[id] = true
 				}
+			}
+		}
+		kwResults = core.Vector.KeywordSearch(defaultScope, req.Query, fetchK)
+		for _, r := range kwResults {
+			id, _ := r["id"].(string)
+			if !seen[id] {
+				e := enrichResult(r, scopeType, "global")
+				merged = append(merged, e)
+				seen[id] = true
 			}
 		}
 
@@ -400,12 +447,26 @@ func vectorSearch(c *gin.Context, defaultScope string) {
 	if len(req.Tags) > 0 {
 		results = filterByTags(results, req.Tags)
 	}
+	seen := make(map[string]bool)
 	enriched := make([]map[string]interface{}, 0, len(results))
 	for _, r := range results {
 		e := enrichResult(r, scopeType, "global")
 		e["origin"] = e["_origin"]
 		delete(e, "_origin")
+		id, _ := e["id"].(string)
+		seen[id] = true
 		enriched = append(enriched, e)
+	}
+	kwResults := core.Vector.KeywordSearch(defaultScope, req.Query, fetchK)
+	for _, r := range kwResults {
+		id, _ := r["id"].(string)
+		if !seen[id] {
+			e := enrichResult(r, scopeType, "global")
+			e["origin"] = e["_origin"]
+			delete(e, "_origin")
+			seen[id] = true
+			enriched = append(enriched, e)
+		}
 	}
 	if len(enriched) > req.TopK {
 		enriched = enriched[:req.TopK]
@@ -520,6 +581,10 @@ func vectorRead(c *gin.Context, defaultScope string) {
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
 		return
+	}
+	// Increment read count
+	if core.Vector != nil && core.Vector.IsReady() {
+		core.Vector.IncrementReadCount(scope, req.FileName)
 	}
 	c.JSON(http.StatusOK, gin.H{"file_name": req.FileName, "content": string(data), "scope": scope})
 }
@@ -1077,6 +1142,10 @@ func ReadVector(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
 		return
+	}
+	// Increment read count
+	if core.Vector != nil && core.Vector.IsReady() {
+		core.Vector.IncrementReadCount(req.Scope, req.FileName)
 	}
 	c.JSON(http.StatusOK, gin.H{"file_name": req.FileName, "content": string(data), "scope": req.Scope})
 }

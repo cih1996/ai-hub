@@ -38,6 +38,8 @@ type VectorRecord struct {
 	UpdatedAt  string                 `json:"updated_at"`
 	HitCount   int                    `json:"hit_count"`
 	LastHitAt  string                 `json:"last_hit_at"`
+	ReadCount  int                    `json:"read_count"`
+	LastReadAt string                 `json:"last_read_at"`
 }
 
 // VectorEngine manages the Go-native vector engine
@@ -432,6 +434,8 @@ func (v *VectorEngine) Embed(scope, docID, text string, metadata map[string]inte
 		record.CreatedAt = existing.CreatedAt
 		record.HitCount = existing.HitCount
 		record.LastHitAt = existing.LastHitAt
+		record.ReadCount = existing.ReadCount
+		record.LastReadAt = existing.LastReadAt
 	} else {
 		record.CreatedAt = now
 	}
@@ -443,6 +447,8 @@ func (v *VectorEngine) Embed(scope, docID, text string, metadata map[string]inte
 	record.Metadata["updated_at"] = record.UpdatedAt
 	record.Metadata["hit_count"] = record.HitCount
 	record.Metadata["last_hit_time"] = record.LastHitAt
+	record.Metadata["read_count"] = record.ReadCount
+	record.Metadata["last_read_at"] = record.LastReadAt
 
 	v.collections[fileName][docID] = record
 	v.mu.Unlock()
@@ -572,10 +578,14 @@ func (v *VectorEngine) Search(scope, query string, topK int) ([]map[string]inter
 		}
 
 		items = append(items, map[string]interface{}{
-			"id":         r.record.ID,
-			"document":   r.record.Document,
-			"similarity": r.similarity,
-			"metadata":   r.record.Metadata,
+			"id":          r.record.ID,
+			"document":    r.record.Document,
+			"similarity":  r.similarity,
+			"metadata":    r.record.Metadata,
+			"hit_count":   r.record.HitCount,
+			"read_count":  r.record.ReadCount,
+			"created_at":  r.record.CreatedAt,
+			"updated_at":  r.record.UpdatedAt,
 		})
 	}
 	v.mu.Unlock()
@@ -583,6 +593,96 @@ func (v *VectorEngine) Search(scope, query string, topK int) ([]map[string]inter
 	go v.saveCollection(fileName)
 
 	return items, nil
+}
+
+// IncrementReadCount increments the read count for a document
+func (v *VectorEngine) IncrementReadCount(scope, docID string) {
+	if !v.IsReady() {
+		return
+	}
+
+	fileName := scopeToFileName(scope)
+	now := time.Now().Format("2006-01-02T15:04:05")
+
+	v.mu.Lock()
+	if v.collections[fileName] != nil {
+		if record := v.collections[fileName][docID]; record != nil {
+			record.ReadCount++
+			record.LastReadAt = now
+			if record.Metadata != nil {
+				record.Metadata["read_count"] = record.ReadCount
+				record.Metadata["last_read_at"] = record.LastReadAt
+			}
+		}
+	}
+	v.mu.Unlock()
+
+	go v.saveCollection(fileName)
+}
+
+// KeywordSearch performs keyword-based content search across a scope.
+// Returns matching records with context snippets (about 50 chars before/after match).
+func (v *VectorEngine) KeywordSearch(scope, keyword string, topK int) []map[string]interface{} {
+	fileName := scopeToFileName(scope)
+
+	v.mu.RLock()
+	records := v.collections[fileName]
+	v.mu.RUnlock()
+
+	if records == nil || len(records) == 0 {
+		return nil
+	}
+
+	lowerKeyword := strings.ToLower(keyword)
+	var results []map[string]interface{}
+
+	for _, record := range records {
+		lowerDoc := strings.ToLower(record.Document)
+		byteIdx := strings.Index(lowerDoc, lowerKeyword)
+		if byteIdx < 0 {
+			continue
+		}
+
+		// Convert byte index to rune index for proper snippet extraction
+		runes := []rune(record.Document)
+		runeIdx := len([]rune(record.Document[:byteIdx]))
+		keywordRuneLen := len([]rune(keyword))
+
+		start := runeIdx - 50
+		if start < 0 {
+			start = 0
+		}
+		end := runeIdx + keywordRuneLen + 50
+		if end > len(runes) {
+			end = len(runes)
+		}
+
+		snippet := ""
+		if start > 0 {
+			snippet = "..."
+		}
+		snippet += strings.ReplaceAll(string(runes[start:end]), "\n", " ")
+		if end < len(runes) {
+			snippet += "..."
+		}
+
+		results = append(results, map[string]interface{}{
+			"id":         record.ID,
+			"document":   record.Document,
+			"snippet":    snippet,
+			"hit_count":  record.HitCount,
+			"read_count": record.ReadCount,
+			"created_at": record.CreatedAt,
+			"updated_at": record.UpdatedAt,
+			"metadata":   record.Metadata,
+		})
+
+		if topK > 0 && len(results) >= topK {
+			break
+		}
+	}
+
+	return results
 }
 
 // Delete removes a vector record
