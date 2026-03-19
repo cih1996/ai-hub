@@ -15,11 +15,13 @@ func RunSessions(c *client.Client, args []string) int {
 	// Check for flags
 	var withErrors bool
 	var groupName string
+	var hasGroupFlag bool
 	var filteredArgs []string
 	for i := 0; i < len(args); i++ {
 		if args[i] == "--with-errors" {
 			withErrors = true
 		} else if args[i] == "--group" && i+1 < len(args) {
+			hasGroupFlag = true
 			groupName = args[i+1]
 			i++ // skip next arg
 		} else {
@@ -46,7 +48,7 @@ func RunSessions(c *client.Client, args []string) int {
 
 	// Check for "move" subcommand
 	if len(args) > 1 && args[1] == "move" {
-		return sessionMove(c, id, args[2:])
+		return sessionMove(c, id, groupName, hasGroupFlag)
 	}
 
 	return sessionDetail(c, id)
@@ -404,18 +406,8 @@ func ShowMessageWithContextPublic(c *client.Client, sessionID, msgID int64, line
 }
 
 // sessionMove moves a session to a different group
-func sessionMove(c *client.Client, id int64, args []string) int {
-	var groupName string
-
-	// Parse --group flag
-	for i := 0; i < len(args); i++ {
-		if args[i] == "--group" && i+1 < len(args) {
-			groupName = args[i+1]
-			break
-		}
-	}
-
-	if groupName == "" {
+func sessionMove(c *client.Client, id int64, groupName string, hasGroupFlag bool) int {
+	if !hasGroupFlag {
 		fmt.Fprintln(os.Stderr, "Usage: ai-hub sessions <id> move --group <group_name>")
 		fmt.Fprintln(os.Stderr, "  Use empty string to remove from group: --group \"\"")
 		return 1
