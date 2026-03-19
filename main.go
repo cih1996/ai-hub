@@ -347,6 +347,15 @@ func main() {
 		v1.POST("/mounts", api.CreateMount)
 		v1.DELETE("/mounts/:alias", api.DeleteMount)
 
+		// File transfer
+		v1.POST("/transfer/upload", api.TransferInit)
+		v1.PUT("/transfer/upload/:id/chunk", api.TransferChunk)
+		v1.POST("/transfer/upload/:id/complete", api.TransferComplete)
+		v1.GET("/transfer/status/:id", api.TransferStatus)
+		v1.GET("/transfer/list", api.TransferList)
+		v1.GET("/transfer/download/:id", api.TransferDownload)
+		v1.DELETE("/transfer/delete/:id", api.TransferDelete)
+
 		// Anthropic API reverse proxy for precise token metering (Issue #72)
 		v1.Any("/proxy/s/:session_id/anthropic/*path", api.HandleAnthropicProxy)
 		v1.Any("/proxy/anthropic/*path", api.HandleAnthropicProxy) // legacy compat

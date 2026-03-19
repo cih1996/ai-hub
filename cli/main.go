@@ -164,6 +164,8 @@ func Run(args []string) int {
 		return commands.RunReload(c, commandArgs)
 	case "mount":
 		return commands.RunMount(c, commandArgs)
+	case "transfer":
+		return commands.RunTransfer(c, commandArgs)
 	case "mem":
 		return runMem(c, globalFlags.GroupName, commandArgs)
 	default:
@@ -289,6 +291,13 @@ Static Mount:
   mount <path> --alias <name>   Mount local directory for static file serving
   mount list                    List all mounts
   mount remove <alias>          Remove a mount
+
+File Transfer:
+  transfer send     Upload file to remote (--file <path> --remote <url>)
+  transfer pull     Download file from remote (--remote <url> --id <id> --save <path>)
+  transfer list     List transfer records (--remote <url>)
+  transfer status   Check transfer status (<id> --remote <url>)
+  transfer delete   Delete transfer record (<id> --remote <url>)
 
 Use "ai-hub <command> --help" for more information about a command.`)
 }
