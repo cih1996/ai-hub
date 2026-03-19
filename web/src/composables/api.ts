@@ -236,6 +236,34 @@ export const vectorSearch = (scope: string, query: string, topK: number = 5) =>
     body: JSON.stringify({ scope, query, top_k: topK }),
   })
 
+// Memory search (three-layer merge: session → team → global)
+export interface MemorySearchResult {
+  id: string
+  document: string
+  similarity: number
+  level: string       // "session" | "team" | "global"
+  origin: string      // "session" | "team" | "global"
+  type: string        // "memory"
+  hit_count: number
+  read_count: number
+  source_session_id: number
+  created_at: string  // RFC3339
+  updated_at: string  // RFC3339
+  metadata: Record<string, any>
+}
+export const searchMemory = (query: string, topK: number = 10, sessionId?: number) =>
+  request<{ results: MemorySearchResult[] }>('/vector/search_memory', {
+    method: 'POST',
+    body: JSON.stringify({ query, top_k: topK, ...(sessionId ? { session_id: sessionId } : {}) }),
+  })
+
+// Read memory file content by scope + file_name
+export const readMemoryFile = (scope: string, fileName: string) =>
+  request<{ file_name: string; content: string; scope: string }>('/vector/read', {
+    method: 'POST',
+    body: JSON.stringify({ scope, file_name: fileName }),
+  })
+
 export const vectorHealth = () =>
   request<{ ready: boolean; disabled: boolean; error?: string; fix_hint?: string }>('/vector/health')
 

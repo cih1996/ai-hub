@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, onMounted } from 'vue'
-import { listFiles, readFileContent, writeFileContent, createFileApi, deleteFileApi, getTemplateVars, getDefaultFile, vectorSearch } from '../composables/api'
-import type { TemplateVar, VectorSearchResult } from '../composables/api'
+import { listFiles, readFileContent, writeFileContent, createFileApi, deleteFileApi, getTemplateVars, getDefaultFile, searchMemory, readMemoryFile } from '../composables/api'
+import type { TemplateVar, MemorySearchResult } from '../composables/api'
 
 interface FileItem {
   name: string
@@ -39,14 +39,42 @@ const restoringDefault = ref(false)
 // Vector search
 const searchQuery = ref('')
 const searching = ref(false)
-const searchResults = ref<(VectorSearchResult & { scope: string })[]>([])
+const searchResults = ref<MemorySearchResult[]>([])
 const searchDone = ref(false)
 const expandedResult = ref<string | null>(null)
+const viewingContent = ref<{ fileName: string; content: string; scope: string } | null>(null)
+const loadingContent = ref(false)
 
 function similarityColor(s: number): string {
   if (s >= 0.7) return 'var(--success, #22c55e)'
   if (s >= 0.4) return 'var(--warning, #eab308)'
   return 'var(--text-muted)'
+}
+
+function levelLabel(level: string): string {
+  switch (level) {
+    case 'session': return '会话'
+    case 'team': return '团队'
+    case 'global': return '全局'
+    default: return level
+  }
+}
+
+function levelClass(level: string): string {
+  switch (level) {
+    case 'session': return 'level-session'
+    case 'team': return 'level-team'
+    case 'global': return 'level-global'
+    default: return ''
+  }
+}
+
+function formatTime(t: string): string {
+  if (!t) return '-'
+  try {
+    const d = new Date(t)
+    return d.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }) + ' ' + d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+  } catch { return t }
 }
 
 async function onSearch() {
@@ -55,9 +83,10 @@ async function onSearch() {
   searching.value = true
   searchResults.value = []
   searchDone.value = false
+  viewingContent.value = null
   try {
-    const res = await vectorSearch('memory', q, 10)
-    searchResults.value = res.results.map(r => ({ ...r, scope: 'memory' }))
+    const res = await searchMemory(q, 10)
+    searchResults.value = res.results || []
   } catch (e: any) {
     searchResults.value = []
   }
@@ -69,8 +98,17 @@ function toggleExpand(id: string) {
   expandedResult.value = expandedResult.value === id ? null : id
 }
 
-function scopeLabel(_s: string): string {
-  return '记忆库'
+async function viewFullContent(r: MemorySearchResult) {
+  const scope = r.metadata?.scope || ''
+  if (!scope) return
+  loadingContent.value = true
+  try {
+    const res = await readMemoryFile(scope, r.id)
+    viewingContent.value = { fileName: res.file_name, content: res.content, scope: res.scope }
+  } catch (e: any) {
+    viewingContent.value = { fileName: r.id, content: '加载失败: ' + (e.message || '未知错误'), scope }
+  }
+  loadingContent.value = false
 }
 
 async function restoreDefault() {
@@ -202,13 +240,37 @@ onMounted(async () => {
         </div>
         <div v-if="searchDone && searchResults.length === 0" class="search-empty">未找到相关结果</div>
         <div v-if="searchResults.length > 0" class="search-results">
-          <div v-for="r in searchResults" :key="r.id + r.scope" class="search-result-item" @click="toggleExpand(r.id + r.scope)">
-            <div class="result-header">
-              <span class="result-scope" :class="'scope-' + r.scope">{{ scopeLabel(r.scope) }}</span>
+          <div v-for="r in searchResults" :key="r.id + (r.origin || '')" class="search-result-item">
+            <div class="result-header" @click="toggleExpand(r.id + (r.origin || ''))">
+              <span class="result-level" :class="levelClass(r.origin || r.level)">{{ levelLabel(r.origin || r.level) }}</span>
               <span class="result-filename">{{ r.id }}</span>
               <span class="result-score" :style="{ color: similarityColor(r.similarity) }">{{ (r.similarity * 100).toFixed(1) }}%</span>
             </div>
-            <div class="result-preview">{{ expandedResult === r.id + r.scope ? r.document : r.document.slice(0, 200) + (r.document.length > 200 ? '...' : '') }}</div>
+            <div class="result-meta">
+              <span class="meta-item" title="命中次数">命中 {{ r.hit_count || 0 }}</span>
+              <span class="meta-item" title="阅读次数">阅读 {{ r.read_count || 0 }}</span>
+              <span class="meta-item" title="创建时间">创建 {{ formatTime(r.created_at) }}</span>
+              <span class="meta-item" title="更新时间">更新 {{ formatTime(r.updated_at) }}</span>
+            </div>
+            <div class="result-preview" @click="toggleExpand(r.id + (r.origin || ''))">{{ expandedResult === r.id + (r.origin || '') ? r.document : r.document.slice(0, 200) + (r.document.length > 200 ? '...' : '') }}</div>
+            <div v-if="expandedResult === r.id + (r.origin || '')" class="result-actions">
+              <button class="btn-view" :disabled="loadingContent" @click.stop="viewFullContent(r)">
+                {{ loadingContent ? '加载中...' : '查看完整内容' }}
+              </button>
+            </div>
+          </div>
+        </div>
+        <!-- Full content viewer modal -->
+        <div v-if="viewingContent" class="content-modal-overlay" @click.self="viewingContent = null">
+          <div class="content-modal">
+            <div class="content-modal-header">
+              <span class="content-modal-title">{{ viewingContent.fileName }}</span>
+              <span class="content-modal-scope">{{ viewingContent.scope }}</span>
+              <button class="content-modal-close" @click="viewingContent = null">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+              </button>
+            </div>
+            <pre class="content-modal-body">{{ viewingContent.content }}</pre>
           </div>
         </div>
       </div>
@@ -398,11 +460,13 @@ onMounted(async () => {
   border-radius: var(--radius); cursor: pointer; transition: background var(--transition);
 }
 .search-result-item:hover { background: var(--bg-hover); }
-.result-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
-.result-scope {
-  font-size: 10px; padding: 1px 6px; border-radius: 9999px; flex-shrink: 0;
+.result-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; cursor: pointer; }
+.result-level {
+  font-size: 10px; padding: 1px 6px; border-radius: 9999px; flex-shrink: 0; font-weight: 500;
 }
-.scope-memory { background: rgba(168,85,247,0.15); color: #a855f7; }
+.level-session { background: rgba(59,130,246,0.15); color: #3b82f6; }
+.level-team { background: rgba(168,85,247,0.15); color: #a855f7; }
+.level-global { background: rgba(34,197,94,0.15); color: #22c55e; }
 .result-filename {
   font-size: 12px; color: var(--text-primary); font-weight: 500;
   flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -410,7 +474,56 @@ onMounted(async () => {
 .result-score { font-size: 12px; font-weight: 600; flex-shrink: 0; font-family: 'SF Mono', 'Fira Code', monospace; }
 .result-preview {
   font-size: 12px; color: var(--text-muted); line-height: 1.5;
-  white-space: pre-wrap; word-break: break-all;
+  white-space: pre-wrap; word-break: break-all; cursor: pointer;
+}
+.result-meta {
+  display: flex; gap: 10px; margin-bottom: 4px; flex-wrap: wrap;
+}
+.meta-item {
+  font-size: 11px; color: var(--text-muted); white-space: nowrap;
+}
+.result-actions {
+  margin-top: 6px; display: flex; gap: 6px;
+}
+.btn-view {
+  padding: 3px 10px; font-size: 11px; border-radius: var(--radius-sm);
+  background: var(--accent-soft); color: var(--accent); transition: all var(--transition);
+  cursor: pointer;
+}
+.btn-view:hover { background: var(--accent); color: var(--btn-text); }
+.btn-view:disabled { opacity: 0.5; cursor: not-allowed; }
+/* Content viewer modal */
+.content-modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1000;
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+.content-modal {
+  background: var(--bg-primary); border: 1px solid var(--border); border-radius: var(--radius);
+  width: 100%; max-width: 720px; max-height: 80vh; display: flex; flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+}
+.content-modal-header {
+  display: flex; align-items: center; gap: 8px; padding: 12px 16px;
+  border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.content-modal-title {
+  font-size: 13px; font-weight: 600; color: var(--text-primary);
+  flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.content-modal-scope {
+  font-size: 11px; color: var(--text-muted); font-family: 'SF Mono', 'Fira Code', monospace;
+  flex-shrink: 0;
+}
+.content-modal-close {
+  width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-sm); color: var(--text-muted); transition: all var(--transition);
+  flex-shrink: 0; cursor: pointer;
+}
+.content-modal-close:hover { background: var(--bg-hover); color: var(--text-primary); }
+.content-modal-body {
+  flex: 1; overflow-y: auto; padding: 16px; font-size: 13px; line-height: 1.6;
+  font-family: 'SF Mono', 'Fira Code', monospace; color: var(--text-primary);
+  white-space: pre-wrap; word-break: break-word; margin: 0;
 }
 /* Mobile */
 @media (max-width: 768px) {
