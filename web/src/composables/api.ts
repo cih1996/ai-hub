@@ -170,6 +170,8 @@ export interface SkillItem {
   enabled: boolean
 }
 export const listSkills = () => request<SkillItem[]>('/skills')
+export const getSkillContent = (name: string) =>
+  request<{ name: string; dir: string; content: string }>(`/skills/${encodeURIComponent(name)}`)
 export const toggleSkill = (name: string, source: string, enable: boolean) =>
   request<{ ok: boolean }>('/skills/toggle', {
     method: 'POST',

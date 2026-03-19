@@ -162,6 +162,8 @@ func Run(args []string) int {
 		return commands.RunDaemon(c, commandArgs)
 	case "reload":
 		return commands.RunReload(c, commandArgs)
+	case "skills":
+		return commands.RunSkills(c, commandArgs)
 	case "mount":
 		return commands.RunMount(c, commandArgs)
 	case "transfer":
@@ -266,6 +268,13 @@ Services:
   services start/stop/restart <id>
   services logs <id> View service logs
   services delete <id>
+
+Skills:
+  skills             List all skills (default)
+  skills read <name> Read skill full content
+  skills create <name> --content "..."  Create a new skill
+  skills update <name> --content "..."  Update skill content
+  skills delete <name>                  Delete a skill
 
 System:
   rules              Manage session rules (get/set/delete)

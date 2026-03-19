@@ -241,6 +241,177 @@ func ToggleSkill(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
+// resolveSkillDirName finds the directory name for a skill by its display name.
+// Display name (from frontmatter) may differ from directory name.
+func resolveSkillDirName(displayName string) string {
+	dir := filepath.Join(core.GetDataDir(), "skills")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		skillFile := filepath.Join(dir, e.Name(), "SKILL.md")
+		name, _ := parseSkillFrontmatter(skillFile)
+		if name == displayName || e.Name() == displayName {
+			return e.Name()
+		}
+	}
+	return ""
+}
+
+// GetSkillContent reads the full SKILL.md content for a skill
+func GetSkillContent(c *gin.Context) {
+	name := c.Param("name")
+	if name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
+		return
+	}
+
+	// Try to resolve display name to dir name
+	dirName := resolveSkillDirName(name)
+	if dirName == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "skill not found"})
+		return
+	}
+
+	skillFile := filepath.Join(core.GetDataDir(), "skills", dirName, "SKILL.md")
+	data, err := os.ReadFile(skillFile)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "skill file not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"name":    name,
+		"dir":     dirName,
+		"content": string(data),
+	})
+}
+
+// CreateSkillRequest is the request body for creating a skill
+type CreateSkillRequest struct {
+	Name    string `json:"name" binding:"required"`
+	Content string `json:"content" binding:"required"`
+}
+
+// CreateSkill creates a new user skill
+func CreateSkill(c *gin.Context) {
+	var req CreateSkillRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Sanitize name: use as directory name
+	dirName := sanitizeSkillName(req.Name)
+	if dirName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid skill name"})
+		return
+	}
+
+	skillDir := filepath.Join(core.GetDataDir(), "skills", dirName)
+	if _, err := os.Stat(skillDir); err == nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "skill already exists"})
+		return
+	}
+
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create skill directory"})
+		return
+	}
+
+	skillFile := filepath.Join(skillDir, "SKILL.md")
+	if err := os.WriteFile(skillFile, []byte(req.Content), 0644); err != nil {
+		os.RemoveAll(skillDir)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write skill file"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"ok": true, "dir": dirName})
+}
+
+// UpdateSkillRequest is the request body for updating a skill
+type UpdateSkillRequest struct {
+	Content string `json:"content" binding:"required"`
+}
+
+// UpdateSkill updates an existing user skill's SKILL.md
+func UpdateSkill(c *gin.Context) {
+	name := c.Param("name")
+	if name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
+		return
+	}
+
+	var req UpdateSkillRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	dirName := resolveSkillDirName(name)
+	if dirName == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "skill not found"})
+		return
+	}
+
+	skillFile := filepath.Join(core.GetDataDir(), "skills", dirName, "SKILL.md")
+	if err := os.WriteFile(skillFile, []byte(req.Content), 0644); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write skill file"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// DeleteSkill deletes a user skill directory
+func DeleteSkill(c *gin.Context) {
+	name := c.Param("name")
+	if name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
+		return
+	}
+
+	dirName := resolveSkillDirName(name)
+	if dirName == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "skill not found"})
+		return
+	}
+
+	skillDir := filepath.Join(core.GetDataDir(), "skills", dirName)
+	if err := os.RemoveAll(skillDir); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete skill"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// sanitizeSkillName converts a skill name to a safe directory name
+func sanitizeSkillName(name string) string {
+	// Replace spaces and special chars with hyphens
+	name = strings.ToLower(strings.TrimSpace(name))
+	var result []byte
+	for _, ch := range []byte(name) {
+		if (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' {
+			result = append(result, ch)
+		} else if ch == ' ' {
+			result = append(result, '-')
+		}
+		// skip other chars (including multi-byte UTF-8 leading bytes for CJK)
+	}
+	// For CJK names, allow the original name if ASCII sanitization produces empty
+	s := strings.Trim(string(result), "-")
+	if s == "" {
+		// Fallback: use original trimmed name as-is (supports CJK directory names)
+		return strings.TrimSpace(name)
+	}
+	return s
+}
+
 func findPluginSkillDir(name string) string {
 	home, _ := os.UserHomeDir()
 	base := filepath.Join(home, ".claude", "plugins", "marketplaces")

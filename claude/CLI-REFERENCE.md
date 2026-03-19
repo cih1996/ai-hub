@@ -49,6 +49,14 @@ ai-hub rules delete <filename.md> --level <global|team>  # 删除规则文件
 
 level 解析：team 需要 GROUP_NAME，global 无需。
 
+## 技能管理
+
+ai-hub skills                                        # 列出所有技能（默认）
+ai-hub skills read <name>                            # 读取技能全文（SKILL.md）
+ai-hub skills create <name> --content "内容"          # 创建新技能
+ai-hub skills update <name> --content "内容"          # 更新技能内容
+ai-hub skills delete <name>                          # 删除技能
+
 ## 笔记管理
 
 ai-hub notes list                        # 列出笔记

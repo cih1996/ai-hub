@@ -267,6 +267,10 @@ func main() {
 
 		// Skills
 		v1.GET("/skills", api.ListSkills)
+		v1.GET("/skills/:name", api.GetSkillContent)
+		v1.POST("/skills", api.CreateSkill)
+		v1.PUT("/skills/:name", api.UpdateSkill)
+		v1.DELETE("/skills/:name", api.DeleteSkill)
 		v1.POST("/skills/toggle", api.ToggleSkill)
 
 		// MCP
