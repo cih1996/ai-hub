@@ -367,6 +367,17 @@ func main() {
 		v1.GET("/transfer/download/:id", api.TransferDownload)
 		v1.DELETE("/transfer/delete/:id", api.TransferDelete)
 
+		// Injection router (Issue #210: structured memory injection)
+		v1.GET("/injection-router", api.ListInjectionRoutes)
+		v1.POST("/injection-router", api.CreateInjectionRoute)
+		v1.PUT("/injection-router/:id", api.UpdateInjectionRoute)
+		v1.DELETE("/injection-router/:id", api.DeleteInjectionRoute)
+
+		// Structured memory (Issue #210)
+		v1.GET("/structured-memory", api.ListStructuredMemory)
+		v1.GET("/structured-memory/:category", api.GetStructuredMemory)
+		v1.PUT("/structured-memory/:category", api.PutStructuredMemory)
+
 		// Anthropic API reverse proxy for precise token metering (Issue #72)
 		v1.Any("/proxy/s/:session_id/anthropic/*path", api.HandleAnthropicProxy)
 		v1.Any("/proxy/anthropic/*path", api.HandleAnthropicProxy) // legacy compat

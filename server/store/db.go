@@ -208,6 +208,9 @@ func migrate() error {
 	// Schemas: add writers column (write permission isolation)
 	DB.Exec(`ALTER TABLE schemas ADD COLUMN writers TEXT NOT NULL DEFAULT ''`)
 
+	// Injection router table (Issue #210: structured memory injection)
+	InitInjectionRouterTable()
+
 	return nil
 }
 

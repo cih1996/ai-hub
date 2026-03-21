@@ -639,6 +639,31 @@ func runtimeTemplateVars(sessID int64, groupName string) map[string]string {
 	return vars
 }
 
+// buildStructuredMemoryInjection builds the structured memory block for system prompt.
+// It loads injection routes from the database, matches the query against them,
+// and assembles the fixed + conditionally-matched memory categories.
+// Returns empty string if no structured memory content is available.
+func buildStructuredMemoryInjection(query string) string {
+	// Load injection routes from DB
+	dbRoutes, err := store.ListInjectionRoutes()
+	if err != nil {
+		log.Printf("[injection] failed to load routes: %v", err)
+		dbRoutes = nil
+	}
+	// Convert store routes to core routes for matching
+	var coreRoutes []core.InjectionRoute
+	for _, r := range dbRoutes {
+		coreRoutes = append(coreRoutes, core.InjectionRoute{
+			Keywords:         r.Keywords,
+			InjectCategories: r.InjectCategories,
+		})
+	}
+	// Match query against routes
+	matchedConditional := core.MatchInjectionRoutes(query, coreRoutes)
+	// Build the injection block
+	return core.BuildStructuredMemoryBlock(matchedConditional)
+}
+
 // buildTeamMembersList generates a markdown table of team members for injection into system prompt
 func buildTeamMembersList(groupName string, currentSessionID int64) string {
 	if groupName == "" {
@@ -707,6 +732,10 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 	}
 	if rules, err := ReadSessionRules(sessID); err == nil && rules != "" {
 		promptParts = append(promptParts, core.RenderTemplateWithVars(rules, tplVars))
+	}
+	// Structured memory injection (Issue #210): append memory block after all rules
+	if memBlock := buildStructuredMemoryInjection(query); memBlock != "" {
+		promptParts = append(promptParts, memBlock)
 	}
 	if len(promptParts) > 0 {
 		req.SystemPrompt = strings.Join(promptParts, "\n\n---\n\n")
@@ -1597,6 +1626,10 @@ func runShadowStream(ctx context.Context, shadowSession *model.Session, query st
 	if rules, err := ReadSessionRules(broadcastAsID); err == nil && rules != "" {
 		promptParts = append(promptParts, core.RenderTemplateWithVars(rules, tplVars))
 	}
+	// Structured memory injection (Issue #210)
+	if memBlock := buildStructuredMemoryInjection(query); memBlock != "" {
+		promptParts = append(promptParts, memBlock)
+	}
 
 	req := core.ClaudeCodeRequest{
 		Query:        query,
@@ -1803,6 +1836,10 @@ func runSilentStream(ctx context.Context, session *model.Session, query string, 
 		if membersList := buildTeamMembersList(session.GroupName, session.ID); membersList != "" {
 			promptParts = append(promptParts, membersList)
 		}
+	}
+	// Structured memory injection (Issue #210)
+	if memBlock := buildStructuredMemoryInjection(query); memBlock != "" {
+		promptParts = append(promptParts, memBlock)
 	}
 
 	req := core.ClaudeCodeRequest{

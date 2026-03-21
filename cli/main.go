@@ -170,6 +170,8 @@ func Run(args []string) int {
 		return commands.RunMount(c, commandArgs)
 	case "transfer":
 		return commands.RunTransfer(c, commandArgs)
+	case "injection-router":
+		return commands.RunInjectionRouter(c, commandArgs)
 	case "mem":
 		return runMem(c, globalFlags.GroupName, commandArgs)
 	default:
@@ -315,6 +317,11 @@ File Transfer:
   transfer list     List transfer records (--remote <url>)
   transfer status   Check transfer status (<id> --remote <url>)
   transfer delete   Delete transfer record (<id> --remote <url>)
+
+Injection Router:
+  injection-router list                                        List injection rules
+  injection-router set --keywords "kw" --inject "categories"   Create injection rule
+  injection-router delete <id>                                 Delete injection rule
 
 Use "ai-hub <command> --help" for more information about a command.`)
 }
