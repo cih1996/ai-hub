@@ -241,6 +241,19 @@ export const useChatStore = defineStore('chat', () => {
         return
       }
 
+      // context_reset: reload messages after context reset (manual or auto)
+      if (msg.type === 'context_reset') {
+        if (msg.session_id === currentSessionId.value) {
+          streaming.value = false
+          streamingContent.value = ''
+          api.getMessagesPaginated(msg.session_id, 50).then((resp) => {
+            messages.value = resp.messages
+            hasMoreMessages.value = resp.has_more
+          })
+        }
+        return
+      }
+
       // FIX #112: suppress streaming events for a session being reloaded.
       // During the async getMessages window in selectSession, the server may still
       // send this session's chunks (old subscription). Allowing them to accumulate
@@ -606,6 +619,24 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  async function resetContext(keepLast = 0) {
+    if (!currentSessionId.value || streaming.value) return
+    try {
+      const result = await api.resetSession(currentSessionId.value, keepLast)
+      await selectSession(currentSessionId.value)
+      await loadSessions()
+      return result
+    } catch (e: any) {
+      messages.value.push({
+        id: Date.now(),
+        session_id: currentSessionId.value,
+        role: 'assistant',
+        content: `重置失败: ${e.message}`,
+        created_at: new Date().toISOString(),
+      })
+    }
+  }
+
   const currentProvider = computed(() => {
     const s = currentSession.value
     if (!s) return defaultProvider.value
@@ -666,6 +697,7 @@ export const useChatStore = defineStore('chat', () => {
     sendMessage,
     stopStreaming,
     compressContext,
+    resetContext,
     currentProvider,
     switchProviderForSession,
     providerSwitching,

@@ -56,6 +56,11 @@ func RunSessions(c *client.Client, args []string) int {
 		return sessionHealth(c, id, args[2:])
 	}
 
+	// Check for "reset" subcommand
+	if len(args) > 1 && args[1] == "reset" {
+		return sessionReset(c, id, args[2:])
+	}
+
 	return sessionDetail(c, id)
 }
 
@@ -541,4 +546,95 @@ func colorScore(score string) string {
 	default:
 		return score
 	}
+}
+
+// sessionReset handles the "sessions <id> reset" subcommand
+// Usage:
+//
+//	ai-hub sessions <id> reset [--keep-last N] [--auto-threshold N] [--yes]
+func sessionReset(c *client.Client, id int64, args []string) int {
+	var keepLast int
+	var autoThreshold int
+	var hasAutoThreshold bool
+	var confirmed bool
+
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--keep-last":
+			if i+1 < len(args) {
+				i++
+				fmt.Sscanf(args[i], "%d", &keepLast)
+			}
+		case "--auto-threshold":
+			if i+1 < len(args) {
+				i++
+				hasAutoThreshold = true
+				fmt.Sscanf(args[i], "%d", &autoThreshold)
+			}
+		case "--yes", "-y":
+			confirmed = true
+		}
+	}
+
+	// If only setting auto-threshold (not doing a reset)
+	if hasAutoThreshold && !confirmed {
+		body := map[string]interface{}{"auto_reset_threshold": autoThreshold}
+		_, err := c.PUT(fmt.Sprintf("/sessions/%d", id), body)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return 1
+		}
+		if autoThreshold > 0 {
+			fmt.Printf("Session #%d: auto-reset threshold set to %d messages\n", id, autoThreshold)
+		} else {
+			fmt.Printf("Session #%d: auto-reset disabled\n", id)
+		}
+		return 0
+	}
+
+	// Performing a reset
+	if !confirmed {
+		fmt.Printf("WARNING: This will delete all messages from session #%d (irreversible).\n", id)
+		if keepLast > 0 {
+			fmt.Printf("  Keeping last %d messages.\n", keepLast)
+		}
+		fmt.Print("Add --yes to confirm: ai-hub sessions ")
+		fmt.Printf("%d reset --yes\n", id)
+		return 1
+	}
+
+	// Call reset API
+	body := map[string]interface{}{
+		"confirm":   true,
+		"keep_last": keepLast,
+	}
+	respData, err := c.POST(fmt.Sprintf("/sessions/%d/reset", id), body)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return 1
+	}
+
+	var resp struct {
+		OK           bool  `json:"ok"`
+		DeletedCount int64 `json:"deleted_count"`
+		KeptCount    int   `json:"kept_count"`
+	}
+	json.Unmarshal(respData, &resp)
+
+	fmt.Printf("Session #%d reset complete:\n", id)
+	fmt.Printf("  Deleted: %d messages\n", resp.DeletedCount)
+	if resp.KeptCount > 0 {
+		fmt.Printf("  Kept: %d messages\n", resp.KeptCount)
+	}
+
+	// Also set auto-threshold if provided alongside --yes
+	if hasAutoThreshold {
+		threshBody := map[string]interface{}{"auto_reset_threshold": autoThreshold}
+		c.PUT(fmt.Sprintf("/sessions/%d", id), threshBody)
+		if autoThreshold > 0 {
+			fmt.Printf("  Auto-reset threshold: %d messages\n", autoThreshold)
+		}
+	}
+
+	return 0
 }

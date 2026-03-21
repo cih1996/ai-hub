@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -745,4 +746,144 @@ func UpdateAttentionRules(c *gin.Context) {
 		"activation_custom": body.ActivationCustom,
 		"review_custom":     body.ReviewCustom,
 	})
+}
+
+// ResetSession handles POST /api/v1/sessions/:id/reset
+// Deletes all messages from a session but preserves the session itself (rules, team, triggers, health).
+// Optionally keeps the last N messages with keep_last parameter.
+// Requires confirm:true in body for safety.
+func ResetSession(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid session id"})
+		return
+	}
+
+	var body struct {
+		Confirm  bool `json:"confirm"`
+		KeepLast int  `json:"keep_last"` // 保留最近N条消息，默认0=全清
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if !body.Confirm {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "reset requires confirm:true (this operation is irreversible)"})
+		return
+	}
+
+	// Check session exists
+	session, err := store.GetSession(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return
+	}
+
+	// Check not streaming
+	if IsSessionStreaming(id) {
+		c.JSON(http.StatusConflict, gin.H{"error": "session is currently streaming, cannot reset"})
+		return
+	}
+
+	// Get message count before reset for logging
+	totalBefore, _ := store.GetMessagesCount(id)
+
+	// Execute reset
+	deleted, err := store.ResetSessionMessages(id, body.KeepLast)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to reset: %v", err)})
+		return
+	}
+
+	log.Printf("[reset] session %d: deleted %d messages (keep_last=%d, total_before=%d)", id, deleted, body.KeepLast, totalBefore)
+
+	// Kill the Claude CLI process and reset the session UUID
+	core.Pool.Kill(id)
+	newUUID := uuid.New().String()
+	store.UpdateClaudeSessionID(id, newUUID)
+	markForceFreshRun(id)
+	// Reset compress tracking
+	store.UpdateLastCompressMsgID(id, 0)
+
+	// Broadcast context reset to WS clients
+	broadcast(WSMessage{Type: "context_reset", SessionID: id, Content: fmt.Sprintf("deleted:%d", deleted)})
+
+	c.JSON(http.StatusOK, gin.H{
+		"ok":            true,
+		"session_id":    session.ID,
+		"deleted_count": deleted,
+		"kept_count":    body.KeepLast,
+	})
+}
+
+// maybeAutoReset checks if a session's message count exceeds auto_reset_threshold
+// and triggers a reset if so. Called after each successful message processing.
+func maybeAutoReset(session *model.Session) {
+	if session.AutoResetThreshold <= 0 {
+		return
+	}
+
+	count, err := store.GetMessagesCount(session.ID)
+	if err != nil || count <= int64(session.AutoResetThreshold) {
+		return
+	}
+
+	// Don't reset if currently streaming
+	if IsSessionStreaming(session.ID) {
+		return
+	}
+
+	log.Printf("[auto-reset] session %d: message count %d exceeds threshold %d, triggering reset",
+		session.ID, count, session.AutoResetThreshold)
+
+	// Step 1: Send a notification to save state
+	saveMsg := &model.Message{
+		SessionID: session.ID,
+		Role:      "user",
+		Content:   "【系统】你的上下文即将重置（消息数已达阈值），请将重要工作状态写入记忆库。",
+	}
+	store.AddMessage(saveMsg)
+
+	// Step 2: Wait briefly for AI to process (handled via goroutine in chat.go)
+	// For now, we proceed with the reset directly since the save message
+	// will be picked up and processed by the trigger/chat system.
+	// The actual reset happens after a short delay.
+	go func() {
+		// Wait up to 30 seconds for the AI to potentially save state
+		maxWait := 30 // seconds
+		for i := 0; i < maxWait; i++ {
+			if !IsSessionStreaming(session.ID) && i > 5 {
+				break
+			}
+			time.Sleep(1 * time.Second)
+		}
+
+		// Execute reset (keep last 2 messages: the system save notification + potential AI reply)
+		deleted, err := store.ResetSessionMessages(session.ID, 2)
+		if err != nil {
+			log.Printf("[auto-reset] session %d: reset failed: %v", session.ID, err)
+			return
+		}
+
+		log.Printf("[auto-reset] session %d: deleted %d messages", session.ID, deleted)
+
+		// Kill process and reset UUID
+		core.Pool.Kill(session.ID)
+		newUUID := uuid.New().String()
+		store.UpdateClaudeSessionID(session.ID, newUUID)
+		markForceFreshRun(session.ID)
+		store.UpdateLastCompressMsgID(session.ID, 0)
+
+		// Send initialization message
+		initMsg := &model.Message{
+			SessionID: session.ID,
+			Role:      "user",
+			Content:   "【系统】上下文已重置（消息数超过自动重置阈值），请从记忆库读取工作状态继续。",
+		}
+		store.AddMessage(initMsg)
+
+		// Broadcast to WS
+		broadcast(WSMessage{Type: "context_reset", SessionID: session.ID, Content: fmt.Sprintf("auto_reset:deleted:%d", deleted)})
+	}()
 }

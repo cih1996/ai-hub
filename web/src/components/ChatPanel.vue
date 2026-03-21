@@ -131,6 +131,8 @@ const sessionRulesLoading = ref(false)
 const groupsList = ref<api.Group[]>([])
 const selectedGroupName = ref('')
 const groupSaving = ref(false)
+// Auto reset threshold
+const autoResetThreshold = ref(0)
 
 // Memory modal state
 const showMemoryModal = ref(false)
@@ -764,6 +766,20 @@ function autoResize() {
   el.style.height = Math.min(el.scrollHeight, 200) + 'px'
 }
 
+// Reset context with confirmation dialog
+const showResetConfirm = ref(false)
+const resetKeepLast = ref(0)
+
+function confirmResetContext() {
+  showResetConfirm.value = true
+  resetKeepLast.value = 0
+}
+
+async function executeReset() {
+  showResetConfirm.value = false
+  await store.resetContext(resetKeepLast.value)
+}
+
 // Session rules functions
 async function openSessionRulesModal() {
   const sid = store.currentSession?.id
@@ -772,6 +788,7 @@ async function openSessionRulesModal() {
   sessionRulesLoading.value = true
   // Load current group name
   selectedGroupName.value = store.currentSession?.group_name || ''
+  autoResetThreshold.value = store.currentSession?.auto_reset_threshold || 0
   try {
     // Load session rules and groups list in parallel
     const [rulesRes, groupsRes] = await Promise.all([
@@ -826,6 +843,20 @@ async function deleteSessionRules() {
   if (!sid) return
   await api.deleteSessionRules(sid)
   sessionRulesContent.value = ''
+}
+
+async function saveAutoResetThreshold() {
+  const sid = store.currentSession?.id
+  if (!sid) return
+  try {
+    await api.updateSession(sid, { auto_reset_threshold: autoResetThreshold.value })
+    if (store.currentSession) {
+      store.currentSession.auto_reset_threshold = autoResetThreshold.value
+    }
+    showToast('自动重置阈值已保存')
+  } catch (e: any) {
+    showToast('保存失败: ' + (e.message || '未知错误'), 'error')
+  }
 }
 
 async function updateSessionIcon(icon: string) {
@@ -1080,6 +1111,18 @@ function formatToolInput(raw: string): string {
           压缩
         </button>
         <button
+          class="btn-compress btn-reset"
+          @click="confirmResetContext"
+          :disabled="store.streaming"
+          title="重置上下文（清空所有消息，保留会话配置）"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+            <path d="M3 3v5h5"/>
+          </svg>
+          重置
+        </button>
+        <button
           class="btn-rules"
           @click="openSessionRulesModal"
           title="会话规则（角色设定）"
@@ -1116,6 +1159,7 @@ function formatToolInput(raw: string): string {
           </button>
           <div v-if="moreMenuOpen" class="more-menu" @click="moreMenuOpen = false">
             <button @click="store.compressContext()" :disabled="store.streaming">压缩上下文</button>
+            <button @click="confirmResetContext" :disabled="store.streaming">重置上下文</button>
             <button @click="openSessionRulesModal">会话角色</button>
             <button @click="openMemoryModal">记忆库</button>
             <div class="more-menu-divider"></div>
@@ -1516,6 +1560,22 @@ function formatToolInput(raw: string): string {
                   {{ sessionRulesSaving ? '保存中...' : '保存' }}
                 </button>
               </div>
+
+              <!-- Auto reset threshold -->
+              <label class="group-label" style="margin-top: 16px;">自动重置阈值</label>
+              <div class="auto-reset-row">
+                <input
+                  type="number"
+                  v-model.number="autoResetThreshold"
+                  min="0"
+                  max="1000"
+                  placeholder="0 = 不自动重置"
+                  class="reset-input"
+                  style="width: 120px;"
+                />
+                <span class="reset-hint" style="margin-left: 8px;">消息数超过该值时自动重置（0=关闭）</span>
+                <button class="btn-save-rule" style="margin-left: auto;" @click="saveAutoResetThreshold">保存</button>
+              </div>
             </template>
           </div>
         </div>
@@ -1750,6 +1810,41 @@ function formatToolInput(raw: string): string {
                 <pre class="raw-req-pre">{{ rawRequestTab === 'system' ? rawRequestData.system_prompt : rawRequestData.query }}</pre>
               </template>            </div>
           </template>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Reset Confirm Modal -->
+    <Teleport to="body">
+      <div v-if="showResetConfirm" class="modal-overlay" @click="showResetConfirm = false">
+        <div class="reset-confirm-modal" @click.stop>
+          <div class="rules-modal-header">
+            <span class="rules-modal-title">重置上下文</span>
+            <button class="rules-modal-close" @click="showResetConfirm = false">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 6L6 18M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+          <div class="reset-confirm-body">
+            <p class="reset-warning">此操作将清空当前会话的所有消息记录，但保留会话配置（规则、团队、定时器等）。操作不可逆。</p>
+            <div class="reset-option">
+              <label>保留最近消息数</label>
+              <input
+                type="number"
+                v-model.number="resetKeepLast"
+                min="0"
+                max="100"
+                placeholder="0 = 全部清空"
+                class="reset-input"
+              />
+              <span class="reset-hint">设为 0 表示清空所有消息</span>
+            </div>
+          </div>
+          <div class="reset-confirm-actions">
+            <button class="btn-cancel" @click="showResetConfirm = false">取消</button>
+            <button class="btn-danger" @click="executeReset">确认重置</button>
+          </div>
         </div>
       </div>
     </Teleport>
@@ -2196,6 +2291,91 @@ function formatToolInput(raw: string): string {
 .btn-compress:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+.btn-reset:hover:not(:disabled) {
+  background: rgba(234, 67, 53, 0.1);
+  color: #d93025;
+}
+
+/* Reset confirm modal */
+.reset-confirm-modal {
+  background: var(--bg-primary);
+  border-radius: var(--radius-lg);
+  width: 440px;
+  max-width: 95vw;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  overflow: hidden;
+}
+.reset-confirm-body {
+  padding: 20px 24px;
+}
+.reset-warning {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  background: rgba(234, 67, 53, 0.06);
+  border-radius: var(--radius);
+  border-left: 3px solid #d93025;
+}
+.reset-option {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.reset-option label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.reset-input {
+  width: 120px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+.reset-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.reset-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 24px;
+  border-top: 1px solid var(--border);
+}
+.btn-cancel {
+  padding: 6px 16px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  transition: all var(--transition);
+}
+.btn-cancel:hover {
+  background: var(--bg-hover);
+}
+.btn-danger {
+  padding: 6px 16px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  background: #d93025;
+  color: #fff;
+  transition: all var(--transition);
+}
+.btn-danger:hover {
+  background: #c62828;
+}
+.auto-reset-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
 }
 .messages {
   flex: 1;

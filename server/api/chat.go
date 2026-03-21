@@ -573,6 +573,8 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 		if usageInput > 0 {
 			go maybeAutoCompress(session, usageInput)
 		}
+		// Auto-reset check: message count threshold (Issue #214)
+		go maybeAutoReset(session)
 		// Attention system: check for _attention_trigger and run review if found
 		// This is a universal mechanism that works regardless of attention_enabled flag
 		maybeRunAttentionReview(session, fullResponse, provider)
