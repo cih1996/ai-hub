@@ -542,3 +542,52 @@ export const getChangelog = (fileName: string, scope = 'memory', limit = 20) =>
   request<{ changelog: ChangelogEntry[]; file_name: string; scope: string }>(
     `/changelog?file_name=${encodeURIComponent(fileName)}&scope=${encodeURIComponent(scope)}&limit=${limit}`
   )
+
+// Changelog Rollback
+export const rollbackChangelog = (fileName: string, scope: string, version: number) =>
+  request<{ ok: boolean; rolled_back_to: number; new_version: number }>('/changelog/rollback', {
+    method: 'POST',
+    body: JSON.stringify({ file_name: fileName, scope, version }),
+  })
+
+// Hooks (Event Hooks)
+export interface Hook {
+  id: number
+  event: string
+  condition: string
+  target_session: number
+  payload: string
+  enabled: boolean
+  fired_count: number
+  created_at: string
+  updated_at: string
+}
+export const listHooks = () => request<Hook[]>('/hooks')
+export const getHook = (id: number) => request<Hook>(`/hooks/${id}`)
+export const createHook = (h: Partial<Hook>) =>
+  request<Hook>('/hooks', { method: 'POST', body: JSON.stringify(h) })
+export const updateHook = (id: number, h: Partial<Hook>) =>
+  request<Hook>(`/hooks/${id}`, { method: 'PUT', body: JSON.stringify(h) })
+export const deleteHook = (id: number) =>
+  request<{ ok: boolean }>(`/hooks/${id}`, { method: 'DELETE' })
+export const enableHook = (id: number) =>
+  request<{ ok: boolean }>(`/hooks/${id}/enable`, { method: 'POST' })
+export const disableHook = (id: number) =>
+  request<{ ok: boolean }>(`/hooks/${id}/disable`, { method: 'POST' })
+
+// Injection Router
+export interface InjectionRoute {
+  id: number
+  keywords: string
+  inject_categories: string
+  created_at: string
+  updated_at: string
+}
+export const listInjectionRoutes = () =>
+  request<{ routes: InjectionRoute[]; categories: string[]; fixed: string[]; conditional: string[] }>('/injection-router')
+export const createInjectionRoute = (keywords: string, inject_categories: string) =>
+  request<InjectionRoute>('/injection-router', { method: 'POST', body: JSON.stringify({ keywords, inject_categories }) })
+export const updateInjectionRoute = (id: number, data: Partial<InjectionRoute>) =>
+  request<{ ok: boolean }>(`/injection-router/${id}`, { method: 'PUT', body: JSON.stringify(data) })
+export const deleteInjectionRoute = (id: number) =>
+  request<{ ok: boolean }>(`/injection-router/${id}`, { method: 'DELETE' })

@@ -473,6 +473,11 @@ function cancelEditTitle() {
   editingTitle.value = false
 }
 
+function healthBadgeLabel(score: string): string {
+  const map: Record<string, string> = { green: '健康', yellow: '注意', red: '异常' }
+  return map[score] || score
+}
+
 marked.setOptions({ breaks: true, gfm: true })
 
 // Strip <!--error:xxx--> and <!--warning:xxx--> tags before rendering
@@ -1057,7 +1062,15 @@ function formatToolInput(raw: string): string {
             @keydown.esc="cancelEditTitle"
             @blur="saveTitle"
           />
-          <div v-else class="header-title" @click="startEditTitle" title="点击编辑标题">{{ store.currentSession.title }}</div>
+          <div v-else class="header-title" @click="startEditTitle" title="点击编辑标题">
+            {{ store.currentSession.title }}
+            <span
+              v-if="store.currentSession.health_score"
+              class="health-badge"
+              :class="'health-' + store.currentSession.health_score"
+              :title="'健康度: ' + healthBadgeLabel(store.currentSession.health_score)"
+            >{{ healthBadgeLabel(store.currentSession.health_score) }}</span>
+          </div>
           <div class="header-sub-row">
             <span v-if="store.currentSession.group_name" class="header-team-badge" :title="'团队: ' + store.currentSession.group_name">
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1983,10 +1996,24 @@ function formatToolInput(raw: string): string {
   border-radius: var(--radius-sm);
   padding: 2px 4px;
   margin: -2px -4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 .header-title:hover {
   background: var(--bg-hover);
 }
+.health-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  font-weight: 600;
+  flex-shrink: 0;
+  line-height: 1.4;
+}
+.health-green { background: rgba(34,197,94,0.15); color: #22c55e; }
+.health-yellow { background: rgba(234,179,8,0.15); color: #eab308; }
+.health-red { background: rgba(239,68,68,0.15); color: #ef4444; }
 .header-title-input {
   font-size: 14px;
   font-weight: 600;

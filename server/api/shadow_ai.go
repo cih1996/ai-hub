@@ -168,7 +168,22 @@ func EnableShadowAI(c *gin.Context) {
 	// Step 6: Initialize shadow AI self-management memory files
 	initShadowMemoryFiles(session.ID, now, reqConfig)
 
-	// Step 7: Save config to settings
+	// Step 7: Create default injection routes
+	defaultRoutes := []struct {
+		keywords   string
+		categories string
+	}{
+		{"开发|编程|代码|bug|fix|功能|feature", "domain,lessons,active"},
+		{"部署|上线|发布|运维|服务器", "domain,lessons,decisions"},
+		{"设计|架构|方案|评审|选型", "domain,decisions"},
+		{"错误|失败|问题|异常|报错", "lessons,error-genome"},
+	}
+	for _, dr := range defaultRoutes {
+		store.CreateInjectionRoute(dr.keywords, dr.categories)
+	}
+	log.Printf("[shadow-ai] created %d default injection routes", len(defaultRoutes))
+
+	// Step 8: Save config to settings
 	saveShadowSettings(true, session.ID, reqConfig)
 
 	log.Printf("[shadow-ai] enabled: session=%d, triggers=%v", session.ID, triggerIDs)
@@ -440,6 +455,49 @@ func generateShadowRules(sessionID int64) string {
 - 一次性查询
 - 已过时的信息
 
+## 结构化记忆管理
+你的核心职责之一是维护7大结构化记忆分类：
+
+### 固定分类（始终注入每个会话的 system prompt）
+- **identity**（用户身份画像）：用户名、角色、公司、时区、语言等
+- **preferences**（用户偏好习惯）：编码风格、交互偏好、工具偏好等
+- **error-genome**（AI常犯错误模式库）：被纠正的错误、典型失败模式
+
+### 条件分类（按关键词匹配注入）
+- **domain**（用户领域知识）：专业领域的术语、概念、架构
+- **lessons**（踩过的坑和教训）：历史踩坑记录
+- **active**（当前进行中的事项）：正在做的项目和任务
+- **decisions**（重要决策记录）：架构决策、技术选型等
+
+### 写入方法
+通过 HTTP API 写入（比 CLI 更可靠）：
+` + "`" + `curl -X PUT http://localhost:{{AI_HUB_PORT}}/api/v1/structured-memory/<category> \
+  -H 'Content-Type: application/json' \
+  -d '{"content": "内容"}'` + "`" + `
+
+### 提炼规则
+每次【定时提炼】被触发时：
+1. 用 ` + "`" + `ai-hub sessions` + "`" + ` 列出活跃会话
+2. 用 ` + "`" + `ai-hub sessions <id> messages` + "`" + ` 读取最近消息
+3. 提取以下信息写入对应分类：
+   - 用户被纠正的内容 → error-genome
+   - 用户表达的偏好 → preferences
+   - 用户身份信息 → identity
+   - 专业知识点 → domain
+   - 踩坑教训 → lessons
+   - 正在进行的项目 → active
+   - 做出的重要决策 → decisions
+4. 写入时保持**追加合并**而非覆盖：先读取现有内容，合并后写回
+5. 写入后用 ` + "`" + `ai-hub search` + "`" + ` 验证写入成功
+
+### 注入路由管理
+你也负责维护注入路由。通过 API 创建关键词→分类映射：
+` + "`" + `curl -X POST http://localhost:{{AI_HUB_PORT}}/api/v1/injection-router \
+  -H 'Content-Type: application/json' \
+  -d '{"keywords": "开发|编程|代码", "inject_categories": "domain,lessons"}'` + "`" + `
+
+首次启动时，应创建默认注入路由。
+
 ## 干预分级
 - 🟢 记录：静默写入记忆库，不打扰任何会话
 - 🟡 提醒：发消息到异常会话提醒注意
@@ -449,6 +507,8 @@ func generateShadowRules(sessionID int64) string {
 - 可以读取其他会话的消息（GET /sessions/:id/messages）
 - 可以读写记忆库（ai-hub search/write/read）
 - 可以设置健康度（PUT /sessions/:id/health）
+- 可以写入结构化记忆（PUT /structured-memory/:category）
+- 可以管理注入路由（POST/PUT/DELETE /injection-router）
 - **禁止**修改其他会话的规则
 - **禁止**删除其他会话的消息
 
