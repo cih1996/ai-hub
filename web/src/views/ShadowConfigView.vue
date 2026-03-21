@@ -45,13 +45,35 @@ const rules = {
   context_reset_threshold: { min: 10, max: 200, message: '上下文重置阈值必须在 10-200 之间' },
 }
 
+// 解析后端返回的时间字符串（如 "10m", "1h", "24h"）为分钟数
+function parseDuration(str: string): number {
+  if (!str) return 0
+  if (str.endsWith('m')) return parseInt(str)
+  if (str.endsWith('h')) return parseInt(str) * 60
+  if (str.endsWith('d')) return parseInt(str) * 1440
+  return parseInt(str)
+}
+
+// 将分钟数转换为后端期望的时间字符串格式
+function toDurationString(minutes: number): string {
+  if (minutes < 60) return `${minutes}m`
+  if (minutes % 60 === 0) return `${minutes / 60}h`
+  return `${minutes}m`
+}
+
 async function loadStatus() {
   loading.value = true
   try {
     const res = await fetch('/api/v1/shadow-ai/status')
     status.value = await res.json()
     if (status.value) {
-      config.value = { ...status.value.config }
+      config.value = {
+        patrol_interval: parseDuration(status.value.config.patrol_interval as any),
+        extract_interval: parseDuration(status.value.config.extract_interval as any),
+        deep_scan_interval: parseDuration(status.value.config.deep_scan_interval as any),
+        self_clean_interval: parseDuration(status.value.config.self_clean_interval as any),
+        context_reset_threshold: status.value.config.context_reset_threshold,
+      }
     }
   } catch (err) {
     console.error('Failed to load status:', err)
@@ -72,10 +94,18 @@ async function saveConfig() {
 
   saving.value = true
   try {
+    const payload = {
+      patrol_interval: toDurationString(config.value.patrol_interval),
+      extract_interval: toDurationString(config.value.extract_interval),
+      deep_scan_interval: toDurationString(config.value.deep_scan_interval),
+      self_clean_interval: toDurationString(config.value.self_clean_interval),
+      context_reset_threshold: config.value.context_reset_threshold,
+    }
+
     await fetch('/api/v1/shadow-ai/config', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(config.value),
+      body: JSON.stringify(payload),
     })
     await loadStatus()
     alert('配置已保存')
