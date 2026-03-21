@@ -396,6 +396,13 @@ func main() {
 		v1.GET("/changelog", api.GetChangelog)
 		v1.POST("/changelog/rollback", api.RollbackChangelog)
 
+		// Shadow AI (Issue #215)
+		v1.GET("/shadow-ai/status", api.GetShadowAIStatus)
+		v1.POST("/shadow-ai/enable", api.EnableShadowAI)
+		v1.POST("/shadow-ai/disable", api.DisableShadowAI)
+		v1.PUT("/shadow-ai/config", api.UpdateShadowAIConfig)
+		v1.GET("/shadow-ai/logs", api.GetShadowAILogs)
+
 		// Anthropic API reverse proxy for precise token metering (Issue #72)
 		v1.Any("/proxy/s/:session_id/anthropic/*path", api.HandleAnthropicProxy)
 		v1.Any("/proxy/anthropic/*path", api.HandleAnthropicProxy) // legacy compat
