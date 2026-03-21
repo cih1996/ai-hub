@@ -373,6 +373,142 @@ func GetShadowAILogs(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"content": content, "exists": true})
 }
 
+// GetShadowAIMetrics handles GET /api/v1/shadow-ai/metrics
+func GetShadowAIMetrics(c *gin.Context) {
+	// Count structured memory categories with data
+	memoryCount := 0
+	categories := []string{"identity", "preferences", "error-genome", "domain", "lessons", "active", "decisions"}
+	for _, cat := range categories {
+		content := core.ReadStructuredMemory(cat)
+		if content != "" {
+			memoryCount++
+		}
+	}
+
+	// Count injection router rules
+	routes, _ := store.ListInjectionRoutes()
+	routerCount := len(routes)
+
+	// Count session health
+	sessions, _ := store.ListSessions()
+	healthy, warning, errorCount := 0, 0, 0
+	for _, s := range sessions {
+		if s.HealthScore == "green" {
+			healthy++
+		} else if s.HealthScore == "yellow" {
+			warning++
+		} else if s.HealthScore == "red" {
+			errorCount++
+		}
+	}
+
+	// Get last patrol time from shadow_activities
+	var lastPatrol string
+	row := store.DB.QueryRow("SELECT timestamp FROM shadow_activities WHERE type = 'patrol' ORDER BY timestamp DESC LIMIT 1")
+	row.Scan(&lastPatrol)
+
+	c.JSON(http.StatusOK, gin.H{
+		"memory_count": memoryCount,
+		"router_count": routerCount,
+		"session_health": gin.H{
+			"healthy": healthy,
+			"warning": warning,
+			"error":   errorCount,
+		},
+		"last_patrol": lastPatrol,
+	})
+}
+
+// GetShadowAIActivities handles GET /api/v1/shadow-ai/activities
+func GetShadowAIActivities(c *gin.Context) {
+	limit := 10
+	offset := 0
+
+	if l := c.Query("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	if o := c.Query("offset"); o != "" {
+		if parsed, err := strconv.Atoi(o); err == nil && parsed >= 0 {
+			offset = parsed
+		}
+	}
+
+	// Query activities
+	rows, err := store.DB.Query("SELECT timestamp, type, summary, details FROM shadow_activities ORDER BY timestamp DESC LIMIT ? OFFSET ?", limit, offset)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	defer rows.Close()
+
+	activities := []map[string]interface{}{}
+	for rows.Next() {
+		var timestamp, actType, summary string
+		var details *string
+		rows.Scan(&timestamp, &actType, &summary, &details)
+
+		activity := map[string]interface{}{
+			"timestamp": timestamp,
+			"type":      actType,
+			"summary":   summary,
+		}
+		if details != nil {
+			activity["details"] = *details
+		}
+		activities = append(activities, activity)
+	}
+
+	// Count total
+	var total int
+	store.DB.QueryRow("SELECT COUNT(*) FROM shadow_activities").Scan(&total)
+
+	c.JSON(http.StatusOK, gin.H{
+		"activities": activities,
+		"total":      total,
+	})
+}
+
+// CreateShadowAIActivity handles POST /api/v1/shadow-ai/activity
+func CreateShadowAIActivity(c *gin.Context) {
+	var req struct {
+		Type    string `json:"type" binding:"required"`
+		Summary string `json:"summary" binding:"required"`
+		Details string `json:"details"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json: " + err.Error()})
+		return
+	}
+
+	// Validate type
+	validTypes := []string{"patrol", "extract", "deep_scan", "self_clean"}
+	valid := false
+	for _, t := range validTypes {
+		if req.Type == t {
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid type"})
+		return
+	}
+
+	// Insert activity
+	timestamp := time.Now().Format(time.RFC3339)
+	_, err := store.DB.Exec("INSERT INTO shadow_activities (timestamp, type, summary, details, created_at) VALUES (?, ?, ?, ?, ?)",
+		timestamp, req.Type, req.Summary, req.Details, timestamp)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
 // loadShadowStatus reads the shadow AI state from settings
 func loadShadowStatus() ShadowAIStatus {
 	status := ShadowAIStatus{
@@ -779,6 +915,32 @@ curl -X PUT http://localhost:{{AI_HUB_PORT}}/api/v1/files/content \
 - 上下文阈值已设置为自动重置
 - 你的会话ID是 %d
 
+## 活动记录（重要：每次任务完成后必须记录）
+
+每次执行巡检、提炼、深度扫描、自清理任务后，必须调用活动记录接口：
+
+` + "`" + `bash
+curl -X POST http://localhost:{{AI_HUB_PORT}}/api/v1/shadow-ai/activity \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "type": "patrol",
+    "summary": "巡检完成：发现 3 个新增错误",
+    "details": "详细信息（可选）"
+  }'
+` + "`" + `
+
+**活动类型（type）：**
+- ` + "`" + `patrol` + "`" + ` — 定时巡检
+- ` + "`" + `extract` + "`" + ` — 定时提炼
+- ` + "`" + `deep_scan` + "`" + ` — 深度巡检
+- ` + "`" + `self_clean` + "`" + ` — 自我清理
+
+**summary 格式建议：**
+- 巡检：` + "`" + `巡检 #8：发现 3 个新增错误，2 个警告` + "`" + `
+- 提炼：` + "`" + `提炼 #2：从 5 个会话提取记忆，更新 domain/lessons` + "`" + `
+- 深扫：` + "`" + `深扫 #1：检查 50 个会话，3 个健康度低于 0.7` + "`" + `
+- 清理：` + "`" + `清理 #1：归档日志 500 行，清理临时数据` + "`" + `
+
 ## 工作流程清单
 
 ### 【定时巡检】触发时（每10分钟）
@@ -790,6 +952,7 @@ curl -X PUT http://localhost:{{AI_HUB_PORT}}/api/v1/files/content \
 5. 更新 memory/shadow/patrol-result.md（最新巡检结果）
 6. 更新 memory/shadow/status.md（更新"最后巡检"时间和基线数据）
 7. 追加一条到 memory/shadow/work-log.md
+8. 记录活动：` + "`" + `POST /shadow-ai/activity` + "`" + ` type=patrol，summary 包含巡检次数和发现
 
 ### 【定时提炼】触发时（每1小时）
 
@@ -800,6 +963,7 @@ curl -X PUT http://localhost:{{AI_HUB_PORT}}/api/v1/files/content \
 5. 对每个分类执行：读取→合并→写回（参考"写入方法"）
 6. 更新 memory/shadow/status.md（更新"最后提炼"时间）
 7. 追加一条到 memory/shadow/work-log.md（记录提炼了哪些分类）
+8. 记录活动：` + "`" + `POST /shadow-ai/activity` + "`" + ` type=extract，summary 包含提炼次数和更新的分类
 
 ### 【深度巡检】触发时（每6小时）
 
@@ -809,6 +973,7 @@ curl -X PUT http://localhost:{{AI_HUB_PORT}}/api/v1/files/content \
 4. 评估是否需要新增 Schema 或调整路由
 5. 更新 memory/shadow/status.md（更新"最后深扫"时间）
 6. 追加一条到 memory/shadow/work-log.md
+7. 记录活动：` + "`" + `POST /shadow-ai/activity` + "`" + ` type=deep_scan，summary 包含检查结果
 
 ### 【自我清理】触发时（每24小时）
 
@@ -817,6 +982,7 @@ curl -X PUT http://localhost:{{AI_HUB_PORT}}/api/v1/files/content \
 3. 生成日报（总结过去24小时的工作）
 4. 更新 memory/shadow/status.md（更新"最后清理"时间）
 5. 追加一条到 memory/shadow/work-log.md
+6. 记录活动：` + "`" + `POST /shadow-ai/activity` + "`" + ` type=self_clean，summary 包含清理内容
 
 ## CLI 速查
 - ai-hub sessions --with-errors  # 查看有错误的会话

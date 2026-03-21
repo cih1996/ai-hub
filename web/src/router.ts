@@ -35,6 +35,19 @@ const router = createRouter({
         { path: 'triggers', name: 'settings-triggers', component: () => import('./views/AutomationView.vue'), props: { defaultTab: 'triggers' } },
       ],
     },
+    {
+      path: '/shadow-ai',
+      component: () => import('./views/ShadowAILayout.vue'),
+      children: [
+        { path: '', redirect: '/shadow-ai/overview' },
+        { path: 'overview', name: 'shadow-overview', component: () => import('./views/ShadowOverviewView.vue') },
+        { path: 'config', name: 'shadow-config', component: () => import('./views/ShadowConfigView.vue') },
+        { path: 'logs', name: 'shadow-logs', component: () => import('./views/ShadowLogsView.vue') },
+        { path: 'memory', name: 'shadow-memory', component: () => import('./views/ShadowMemoryView.vue') },
+        { path: 'patrol', name: 'shadow-patrol', component: () => import('./views/ShadowPatrolView.vue') },
+        { path: 'router', name: 'shadow-router', component: () => import('./views/ShadowRouterView.vue') },
+      ],
+    },
   ],
 })
 
