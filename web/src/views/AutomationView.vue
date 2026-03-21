@@ -3,6 +3,7 @@ import { ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import TriggersView from './TriggersView.vue'
 import ChannelsView from './ChannelsView.vue'
+import HooksView from './HooksView.vue'
 
 const props = defineProps<{
   defaultTab?: string
@@ -14,6 +15,7 @@ const router = useRouter()
 const tabs = [
   { key: 'triggers', label: '定时' },
   { key: 'channels', label: '通讯' },
+  { key: 'hooks', label: '事件钩子' },
 ]
 
 const activeTab = ref((route.query.tab as string) || props.defaultTab || 'triggers')
@@ -42,6 +44,7 @@ function switchTab(key: string) {
     <div class="tab-body">
       <TriggersView v-if="activeTab === 'triggers'" />
       <ChannelsView v-if="activeTab === 'channels'" />
+      <HooksView v-if="activeTab === 'hooks'" />
     </div>
   </div>
 </template>

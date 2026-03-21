@@ -2,9 +2,10 @@
 import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { listFiles, readFileContent, writeFileContent, createFileApi, deleteFileApi, getTemplateVars, getDefaultFile, searchMemory } from '../composables/api'
 import { listSchemas, createSchemaApi, updateSchemaApi, deleteSchemaApi } from '../composables/api'
-import { listStructuredMemory, getStructuredMemory, putStructuredMemory, getChangelog, listSessions } from '../composables/api'
+import { listStructuredMemory, getStructuredMemory, putStructuredMemory, getChangelog, rollbackChangelog, listSessions } from '../composables/api'
 import type { TemplateVar, MemorySearchResult, SchemaItem, StructuredCategory, ChangelogEntry } from '../composables/api'
 import type { Session } from '../types'
+import InjectionRouterView from './InjectionRouterView.vue'
 
 interface FileItem {
   name: string
@@ -25,9 +26,10 @@ const tabs: { key: string; label: string; desc: string }[] = [
   { key: 'schemas', label: 'Schema', desc: 'JSON Schema 校验定义' },
   { key: 'structured', label: '结构化记忆', desc: '影子AI管理的结构化记忆（7大分类）' },
   { key: 'health', label: '健康度', desc: '所有会话健康状态概览' },
+  { key: 'injection', label: '注入路由', desc: '关键词→记忆分类的注入映射' },
 ]
 
-type Scope = 'rules' | 'memory' | 'notes' | 'schemas' | 'structured' | 'health'
+type Scope = 'rules' | 'memory' | 'notes' | 'schemas' | 'structured' | 'health' | 'injection'
 
 const activeTab = ref<Scope>('rules')
 const activeTabDesc = ref('~/.ai-hub/rules/')
@@ -58,7 +60,8 @@ const schemaJsonError = ref('')
 const isSchemaTab = () => activeTab.value === 'schemas'
 const isStructuredTab = () => activeTab.value === 'structured'
 const isHealthTab = () => activeTab.value === 'health'
-const isFileTab = () => !isSchemaTab() && !isStructuredTab() && !isHealthTab()
+const isInjectionTab = () => activeTab.value === 'injection'
+const isFileTab = () => !isSchemaTab() && !isStructuredTab() && !isHealthTab() && !isInjectionTab()
 
 // Validate JSON and update error message
 function validateSchemaJson(json: string): boolean {
@@ -428,6 +431,24 @@ function formatChangeTime(t: string): string {
   } catch { return t }
 }
 
+const rollingBack = ref(false)
+async function onRollback(entry: ChangelogEntry) {
+  if (!structActiveCategory.value || rollingBack.value) return
+  rollingBack.value = true
+  try {
+    // Structured memory uses structured_memory scope with category.md as file name
+    await rollbackChangelog(structActiveCategory.value + '.md', 'structured-memory', entry.version)
+    // Reload the content and history
+    await loadStructuredContent(structActiveCategory.value)
+    if (structShowHistory.value) {
+      await loadStructuredHistory()
+    }
+  } catch (e: any) {
+    console.error('Rollback failed:', e)
+  }
+  rollingBack.value = false
+}
+
 // ---- Health Overview ----
 const healthSessions = ref<Session[]>([])
 const healthLoading = ref(false)
@@ -726,6 +747,12 @@ onBeforeUnmount(() => {
                     <span class="history-type" :class="entry.change_type">{{ entry.change_type }}</span>
                     <span class="history-time">{{ formatChangeTime(entry.created_at) }}</span>
                     <span v-if="entry.session_id" class="history-session">#{{ entry.session_id }}</span>
+                    <button
+                      class="btn-rollback"
+                      @click="onRollback(entry)"
+                      :disabled="rollingBack"
+                      title="回滚到此版本"
+                    >回滚</button>
                   </div>
                   <div v-if="entry.diff" class="history-diff">{{ entry.diff }}</div>
                 </div>
@@ -797,6 +824,11 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </template>
+
+      <!-- Injection Router mode -->
+      <template v-if="isInjectionTab()">
+        <InjectionRouterView />
+      </template>
     </div>
   </div>
 </template>
@@ -814,7 +846,7 @@ onBeforeUnmount(() => {
 .tab-desc { font-size: 11px; color: var(--text-muted); margin-top: 6px; font-family: 'SF Mono', 'Fira Code', monospace; }
 .manage-body { flex: 1; display: flex; min-height: 0; }
 .file-list {
-  width: 220px; min-width: 220px; border-right: 1px solid var(--border);
+  width: 260px; min-width: 260px; border-right: 1px solid var(--border);
   display: flex; flex-direction: column; overflow-y: auto;
 }
 .file-list-header {
@@ -1018,7 +1050,7 @@ onBeforeUnmount(() => {
   .search-inputs { flex-wrap: wrap; }
   .search-input { min-width: 0; }
   .manage-body { flex-direction: column; }
-  .file-list { width: 100%; min-width: 0; border-right: none; border-bottom: 1px solid var(--border); max-height: 180px; }
+  .file-list { width: 100%; min-width: 0; border-right: none; border-bottom: 1px solid var(--border); max-height: 200px; }
   .editor-toolbar { flex-wrap: wrap; gap: 6px; padding: 8px 12px; }
   .editor-filename { font-size: 11px; width: 100%; }
   .editor-actions { width: 100%; justify-content: flex-end; }
@@ -1071,6 +1103,13 @@ onBeforeUnmount(() => {
 .history-type.delete { background: rgba(239,68,68,0.15); color: #ef4444; }
 .history-time { font-size: 11px; color: var(--text-muted); }
 .history-session { font-size: 11px; color: var(--text-muted); }
+.btn-rollback {
+  font-size: 10px; padding: 1px 8px; border-radius: 3px;
+  background: var(--bg-hover); color: var(--text-secondary); cursor: pointer;
+  transition: all var(--transition); margin-left: auto; border: 1px solid var(--border);
+}
+.btn-rollback:hover { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.btn-rollback:disabled { opacity: 0.5; cursor: not-allowed; }
 .history-diff {
   font-size: 11px; color: var(--text-secondary); line-height: 1.4;
   white-space: pre-wrap; word-break: break-word;
