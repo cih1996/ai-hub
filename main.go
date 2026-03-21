@@ -402,6 +402,9 @@ func main() {
 		v1.POST("/shadow-ai/disable", api.DisableShadowAI)
 		v1.PUT("/shadow-ai/config", api.UpdateShadowAIConfig)
 		v1.GET("/shadow-ai/logs", api.GetShadowAILogs)
+		v1.GET("/shadow-ai/metrics", api.GetShadowAIMetrics)
+		v1.GET("/shadow-ai/activities", api.GetShadowAIActivities)
+		v1.POST("/shadow-ai/activity", api.CreateShadowAIActivity)
 
 		// Anthropic API reverse proxy for precise token metering (Issue #72)
 		v1.Any("/proxy/s/:session_id/anthropic/*path", api.HandleAnthropicProxy)

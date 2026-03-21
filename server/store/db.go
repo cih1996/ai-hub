@@ -226,6 +226,18 @@ func migrate() error {
 	// Sessions: add auto_reset_threshold column (Issue #214: context reset)
 	DB.Exec(`ALTER TABLE sessions ADD COLUMN auto_reset_threshold INTEGER NOT NULL DEFAULT 0`)
 
+	// Shadow AI activities table (Issue #215: shadow AI frontend refactor)
+	DB.Exec(`CREATE TABLE IF NOT EXISTS shadow_activities (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		timestamp TEXT NOT NULL,
+		type TEXT NOT NULL,
+		summary TEXT NOT NULL,
+		details TEXT,
+		created_at TEXT NOT NULL DEFAULT (datetime('now'))
+	)`)
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_shadow_activities_timestamp ON shadow_activities(timestamp DESC)`)
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_shadow_activities_type ON shadow_activities(type)`)
+
 	return nil
 }
 
