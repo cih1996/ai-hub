@@ -117,6 +117,9 @@ function maskKey(key: string): string {
 onMounted(() => {
   store.loadProviders()
   loadCompressSettings()
+  loadShadowStatus().then(() => {
+    if (shadowStatus.value?.enabled) loadShadowLogs()
+  })
 })
 
 // ---- Auto Compress Settings ----
@@ -149,6 +152,85 @@ async function saveCompressSettings() {
   } catch (e: unknown) {
     compressSaveErr.value = e instanceof Error ? e.message : '保存失败'
   }
+}
+
+// ---- Shadow AI Settings ----
+const shadowStatus = ref<api.ShadowAIStatus | null>(null)
+const shadowLoading = ref(false)
+const shadowToggling = ref(false)
+const shadowConfigEditing = ref(false)
+const shadowConfigSaving = ref(false)
+const shadowConfigSaveOk = ref(false)
+const shadowLogs = ref('')
+const shadowLogsLoading = ref(false)
+
+const shadowConfigForm = reactive<api.ShadowAIConfig>({
+  patrol_interval: '10m',
+  extract_interval: '1h',
+  deep_scan_interval: '6h',
+  self_clean_interval: '24h',
+  context_reset_threshold: 50,
+})
+
+async function loadShadowStatus() {
+  shadowLoading.value = true
+  try {
+    shadowStatus.value = await api.getShadowAIStatus()
+    if (shadowStatus.value?.config) {
+      Object.assign(shadowConfigForm, shadowStatus.value.config)
+    }
+  } catch { shadowStatus.value = null }
+  finally { shadowLoading.value = false }
+}
+
+async function toggleShadowAI() {
+  shadowToggling.value = true
+  try {
+    if (shadowStatus.value?.enabled) {
+      await api.disableShadowAI()
+    } else {
+      await api.enableShadowAI()
+    }
+    await loadShadowStatus()
+    if (shadowStatus.value?.enabled) await loadShadowLogs()
+  } catch (e: unknown) {
+    console.error('Shadow AI toggle failed:', e)
+  } finally {
+    shadowToggling.value = false
+  }
+}
+
+async function saveShadowConfig() {
+  shadowConfigSaving.value = true
+  shadowConfigSaveOk.value = false
+  try {
+    const res = await api.updateShadowAIConfig({ ...shadowConfigForm })
+    if (res.config) Object.assign(shadowConfigForm, res.config)
+    shadowConfigSaveOk.value = true
+    shadowConfigEditing.value = false
+    await loadShadowStatus()
+    setTimeout(() => { shadowConfigSaveOk.value = false }, 3000)
+  } catch (e: unknown) {
+    console.error('Shadow AI config save failed:', e)
+  } finally {
+    shadowConfigSaving.value = false
+  }
+}
+
+function cancelShadowConfigEdit() {
+  if (shadowStatus.value?.config) {
+    Object.assign(shadowConfigForm, shadowStatus.value.config)
+  }
+  shadowConfigEditing.value = false
+}
+
+async function loadShadowLogs() {
+  shadowLogsLoading.value = true
+  try {
+    const res = await api.getShadowAILogs(10)
+    shadowLogs.value = res.content || ''
+  } catch { shadowLogs.value = '' }
+  finally { shadowLogsLoading.value = false }
 }
 </script>
 
@@ -357,6 +439,119 @@ async function saveCompressSettings() {
           </div>
         </div>
       </section>
+
+      <!-- Shadow AI Settings -->
+      <section class="section">
+        <div class="section-header">
+          <div>
+            <h2>影子AI</h2>
+            <p class="section-desc">全局记忆管理者 & 会话健康守护者，自动巡检、记忆提炼、健康评估。</p>
+          </div>
+        </div>
+
+        <div class="shadow-settings">
+          <div v-if="shadowLoading" class="shadow-loading">加载中...</div>
+          <template v-else>
+            <div class="shadow-toggle-row">
+              <div class="shadow-info">
+                <span class="shadow-status-badge" :class="shadowStatus?.status || 'uninitialized'">
+                  {{ shadowStatus?.status === 'running' ? '运行中' : shadowStatus?.status === 'paused' ? '已暂停' : '未初始化' }}
+                </span>
+                <span v-if="shadowStatus?.session_id" class="shadow-session">
+                  会话 #{{ shadowStatus.session_id }}
+                </span>
+              </div>
+              <button
+                class="btn-shadow-toggle"
+                :class="{ enabled: shadowStatus?.enabled }"
+                :disabled="shadowToggling"
+                @click="toggleShadowAI"
+              >
+                {{ shadowToggling ? '切换中...' : (shadowStatus?.enabled ? '关闭' : '开启') }}
+              </button>
+            </div>
+
+            <template v-if="shadowStatus?.enabled && shadowStatus.config">
+              <div class="shadow-config">
+                <template v-if="shadowConfigEditing">
+                  <div class="config-edit-item">
+                    <span class="config-label">快速巡检</span>
+                    <input v-model="shadowConfigForm.patrol_interval" class="config-input" placeholder="10m" />
+                  </div>
+                  <div class="config-edit-item">
+                    <span class="config-label">记忆提炼</span>
+                    <input v-model="shadowConfigForm.extract_interval" class="config-input" placeholder="1h" />
+                  </div>
+                  <div class="config-edit-item">
+                    <span class="config-label">深度巡检</span>
+                    <input v-model="shadowConfigForm.deep_scan_interval" class="config-input" placeholder="6h" />
+                  </div>
+                  <div class="config-edit-item">
+                    <span class="config-label">自我清理</span>
+                    <input v-model="shadowConfigForm.self_clean_interval" class="config-input" placeholder="24h" />
+                  </div>
+                  <div class="config-edit-item">
+                    <span class="config-label">重置阈值</span>
+                    <input v-model.number="shadowConfigForm.context_reset_threshold" type="number" min="10" class="config-input" />
+                  </div>
+                </template>
+                <template v-else>
+                  <div class="config-item">
+                    <span class="config-label">快速巡检</span>
+                    <span class="config-value">{{ shadowStatus.config.patrol_interval }}</span>
+                  </div>
+                  <div class="config-item">
+                    <span class="config-label">记忆提炼</span>
+                    <span class="config-value">{{ shadowStatus.config.extract_interval }}</span>
+                  </div>
+                  <div class="config-item">
+                    <span class="config-label">深度巡检</span>
+                    <span class="config-value">{{ shadowStatus.config.deep_scan_interval }}</span>
+                  </div>
+                  <div class="config-item">
+                    <span class="config-label">自我清理</span>
+                    <span class="config-value">{{ shadowStatus.config.self_clean_interval }}</span>
+                  </div>
+                  <div class="config-item">
+                    <span class="config-label">重置阈值</span>
+                    <span class="config-value">{{ shadowStatus.config.context_reset_threshold }} 条消息</span>
+                  </div>
+                </template>
+              </div>
+              <div class="shadow-config-actions">
+                <template v-if="shadowConfigEditing">
+                  <button class="btn-sm" @click="cancelShadowConfigEdit">取消</button>
+                  <button class="btn-save btn-sm" @click="saveShadowConfig" :disabled="shadowConfigSaving">
+                    {{ shadowConfigSaving ? '保存中...' : '保存配置' }}
+                  </button>
+                </template>
+                <template v-else>
+                  <button class="btn-sm" @click="shadowConfigEditing = true">编辑配置</button>
+                  <span v-if="shadowConfigSaveOk" class="save-ok">✓ 已保存</span>
+                </template>
+              </div>
+
+              <div v-if="shadowStatus.triggers?.length" class="shadow-triggers">
+                <h4>定时器 ({{ shadowStatus.triggers.length }})</h4>
+                <div v-for="t in shadowStatus.triggers" :key="t.id" class="trigger-item">
+                  <span class="trigger-status" :class="t.enabled ? 'active' : 'disabled'">
+                    {{ t.enabled ? '●' : '○' }}
+                  </span>
+                  <span class="trigger-content">{{ t.content.substring(0, 30) }}...</span>
+                  <span class="trigger-meta">{{ t.trigger_time }} · {{ t.fired_count }}次</span>
+                </div>
+              </div>
+
+              <div class="shadow-logs-section">
+                <h4>最近工作日志</h4>
+                <div v-if="shadowLogsLoading" class="shadow-logs-loading">加载中...</div>
+                <pre v-else-if="shadowLogs" class="shadow-logs-content">{{ shadowLogs }}</pre>
+                <div v-else class="shadow-logs-empty">暂无日志记录</div>
+              </div>
+            </template>
+          </template>
+        </div>
+      </section>
     </div>
   </div>
 </template>
@@ -483,6 +678,76 @@ async function saveCompressSettings() {
 .threshold-label { font-size: 13px; color: var(--text-secondary); }
 .save-ok { font-size: 13px; color: var(--accent); margin-left: 10px; }
 .save-err { font-size: 13px; color: #e74c3c; margin-left: 10px; }
+
+/* ---- Shadow AI Settings ---- */
+.shadow-settings { display: flex; flex-direction: column; gap: 16px; }
+.shadow-loading { text-align: center; color: var(--text-muted); padding: 20px; font-size: 13px; }
+
+.shadow-toggle-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px; background: var(--bg-secondary);
+  border: 1px solid var(--border); border-radius: var(--radius);
+}
+.shadow-info { display: flex; align-items: center; gap: 12px; }
+.shadow-status-badge {
+  font-size: 11px; font-weight: 600; padding: 3px 10px;
+  border-radius: 99px; text-transform: uppercase;
+}
+.shadow-status-badge.running { background: rgba(34,197,94,0.15); color: #22c55e; }
+.shadow-status-badge.paused { background: rgba(251,191,36,0.15); color: #f59e0b; }
+.shadow-status-badge.uninitialized { background: var(--bg-tertiary); color: var(--text-muted); }
+.shadow-session { font-size: 12px; color: var(--text-muted); }
+
+.btn-shadow-toggle {
+  padding: 6px 16px; border-radius: var(--radius); font-size: 13px; font-weight: 500;
+  background: var(--accent); color: var(--btn-text); transition: all var(--transition);
+}
+.btn-shadow-toggle:hover:not(:disabled) { background: var(--accent-hover); }
+.btn-shadow-toggle.enabled { background: rgba(239,68,68,0.12); color: #ef4444; }
+.btn-shadow-toggle.enabled:hover:not(:disabled) { background: rgba(239,68,68,0.2); }
+.btn-shadow-toggle:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.shadow-config {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px;
+  padding: 12px 16px; background: var(--bg-secondary);
+  border: 1px solid var(--border); border-radius: var(--radius);
+}
+.config-item { display: flex; justify-content: space-between; align-items: center; }
+.config-label { font-size: 12px; color: var(--text-secondary); }
+.config-value { font-size: 12px; font-weight: 600; color: var(--text-primary); }
+.config-edit-item { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.config-input {
+  width: 100px; padding: 4px 8px; font-size: 12px; font-weight: 600;
+  background: var(--bg-tertiary); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); color: var(--text-primary); text-align: right;
+}
+.config-input:focus { border-color: var(--accent); outline: none; }
+
+.shadow-config-actions {
+  display: flex; align-items: center; gap: 8px; justify-content: flex-end;
+}
+
+.shadow-triggers h4 { font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--text-secondary); }
+.trigger-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 0; font-size: 12px; border-bottom: 1px solid var(--border);
+}
+.trigger-item:last-child { border-bottom: none; }
+.trigger-status.active { color: #22c55e; }
+.trigger-status.disabled { color: var(--text-muted); }
+.trigger-content { flex: 1; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trigger-meta { color: var(--text-muted); white-space: nowrap; }
+
+.shadow-logs-section h4 { font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--text-secondary); }
+.shadow-logs-content {
+  font-size: 11px; line-height: 1.5; color: var(--text-secondary);
+  background: var(--bg-tertiary); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 12px; margin: 0;
+  max-height: 160px; overflow-y: auto; white-space: pre-wrap; word-break: break-word;
+  font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+}
+.shadow-logs-loading { font-size: 12px; color: var(--text-muted); padding: 12px; }
+.shadow-logs-empty { font-size: 12px; color: var(--text-muted); padding: 12px; text-align: center; }
 
 @media (max-width: 768px) {
   .settings-container { padding: 16px 12px; }

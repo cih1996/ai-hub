@@ -2,7 +2,9 @@
 import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { listFiles, readFileContent, writeFileContent, createFileApi, deleteFileApi, getTemplateVars, getDefaultFile, searchMemory } from '../composables/api'
 import { listSchemas, createSchemaApi, updateSchemaApi, deleteSchemaApi } from '../composables/api'
-import type { TemplateVar, MemorySearchResult, SchemaItem } from '../composables/api'
+import { listStructuredMemory, getStructuredMemory, putStructuredMemory, getChangelog, listSessions } from '../composables/api'
+import type { TemplateVar, MemorySearchResult, SchemaItem, StructuredCategory, ChangelogEntry } from '../composables/api'
+import type { Session } from '../types'
 
 interface FileItem {
   name: string
@@ -21,9 +23,11 @@ const tabs: { key: string; label: string; desc: string }[] = [
   { key: 'memory', label: '记忆', desc: '~/.ai-hub/memory/' },
   { key: 'notes', label: '笔记', desc: '~/.ai-hub/notes/' },
   { key: 'schemas', label: 'Schema', desc: 'JSON Schema 校验定义' },
+  { key: 'structured', label: '结构化记忆', desc: '影子AI管理的结构化记忆（7大分类）' },
+  { key: 'health', label: '健康度', desc: '所有会话健康状态概览' },
 ]
 
-type Scope = 'rules' | 'memory' | 'notes' | 'schemas'
+type Scope = 'rules' | 'memory' | 'notes' | 'schemas' | 'structured' | 'health'
 
 const activeTab = ref<Scope>('rules')
 const activeTabDesc = ref('~/.ai-hub/rules/')
@@ -52,6 +56,9 @@ const newSchemaWriters = ref('')
 const schemaJsonError = ref('')
 
 const isSchemaTab = () => activeTab.value === 'schemas'
+const isStructuredTab = () => activeTab.value === 'structured'
+const isHealthTab = () => activeTab.value === 'health'
+const isFileTab = () => !isSchemaTab() && !isStructuredTab() && !isHealthTab()
 
 // Validate JSON and update error message
 function validateSchemaJson(json: string): boolean {
@@ -347,6 +354,111 @@ function insertVar(name: string) {
   content.value += `{{${name}}}`
 }
 
+// ---- Structured Memory ----
+const structCategories = ref<StructuredCategory[]>([])
+const structActiveCategory = ref('')
+const structContent = ref('')
+const structLoading = ref(false)
+const structSaving = ref(false)
+const structSaveOk = ref(false)
+const structChangelog = ref<ChangelogEntry[]>([])
+const structShowHistory = ref(false)
+const structHistoryLoading = ref(false)
+
+async function loadStructuredCategories() {
+  structLoading.value = true
+  try {
+    structCategories.value = await listStructuredMemory()
+    if (structCategories.value.length > 0 && !structActiveCategory.value) {
+      const first = structCategories.value[0]!
+      structActiveCategory.value = first.category
+      await loadStructuredContent(structActiveCategory.value)
+    }
+  } catch { structCategories.value = [] }
+  finally { structLoading.value = false }
+}
+
+async function loadStructuredContent(category: string) {
+  structActiveCategory.value = category
+  structShowHistory.value = false
+  try {
+    const res = await getStructuredMemory(category)
+    structContent.value = res.content || ''
+  } catch { structContent.value = '' }
+}
+
+async function saveStructuredContent() {
+  if (!structActiveCategory.value) return
+  structSaving.value = true
+  structSaveOk.value = false
+  try {
+    await putStructuredMemory(structActiveCategory.value, structContent.value)
+    structSaveOk.value = true
+    await loadStructuredCategories()
+    setTimeout(() => { structSaveOk.value = false }, 3000)
+  } catch (e: any) {
+    alert('保存失败: ' + e.message)
+  }
+  structSaving.value = false
+}
+
+async function loadStructuredHistory() {
+  if (!structActiveCategory.value) return
+  structHistoryLoading.value = true
+  structShowHistory.value = true
+  try {
+    const fileName = structActiveCategory.value + '.md'
+    const res = await getChangelog(fileName, 'structured-memory', 20)
+    structChangelog.value = res.changelog || []
+  } catch { structChangelog.value = [] }
+  finally { structHistoryLoading.value = false }
+}
+
+function getCategoryLabel(cat: string): string {
+  const found = structCategories.value.find(c => c.category === cat)
+  return found?.label || cat
+}
+
+function formatChangeTime(t: string): string {
+  if (!t) return '-'
+  try {
+    const d = new Date(t)
+    return d.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }) + ' ' +
+           d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  } catch { return t }
+}
+
+// ---- Health Overview ----
+const healthSessions = ref<Session[]>([])
+const healthLoading = ref(false)
+
+async function loadHealthSessions() {
+  healthLoading.value = true
+  try {
+    const sessions = await listSessions()
+    healthSessions.value = sessions
+  } catch { healthSessions.value = [] }
+  finally { healthLoading.value = false }
+}
+
+function healthColor(score: string): string {
+  switch (score) {
+    case 'green': return '#22c55e'
+    case 'yellow': return '#eab308'
+    case 'red': return '#ef4444'
+    default: return 'var(--text-muted)'
+  }
+}
+
+function healthLabel(score: string): string {
+  switch (score) {
+    case 'green': return '健康'
+    case 'yellow': return '注意'
+    case 'red': return '异常'
+    default: return '未评估'
+  }
+}
+
 watch(activeTab, () => {
   selectedFile.value = null
   selectedSchema.value = null
@@ -355,6 +467,10 @@ watch(activeTab, () => {
   activeTabDesc.value = tabs.find(t => t.key === activeTab.value)?.desc ?? ''
   if (activeTab.value === 'schemas') {
     loadSchemas()
+  } else if (activeTab.value === 'structured') {
+    loadStructuredCategories()
+  } else if (activeTab.value === 'health') {
+    loadHealthSessions()
   } else {
     loadFiles()
   }
@@ -378,7 +494,7 @@ onBeforeUnmount(() => {
         >{{ tab.label }}</button>
       </div>
       <div class="tab-desc">{{ activeTabDesc }}</div>
-      <div v-if="!isSchemaTab()" class="search-bar" ref="searchBarRef">
+      <div v-if="isFileTab()" class="search-bar" ref="searchBarRef">
         <div class="search-inputs">
           <input
             v-model="searchQuery"
@@ -413,7 +529,7 @@ onBeforeUnmount(() => {
     </div>
     <div class="manage-body">
       <!-- File mode (rules / memory / notes) -->
-      <template v-if="!isSchemaTab()">
+      <template v-if="isFileTab()">
         <div class="file-list">
           <div class="file-list-header">
             <span class="file-list-title">文件</span>
@@ -556,6 +672,129 @@ onBeforeUnmount(() => {
             />
           </div>
           <div v-else class="editor-empty">选择一个 Schema 进行编辑</div>
+        </div>
+      </template>
+
+      <!-- Structured Memory mode -->
+      <template v-if="isStructuredTab()">
+        <div class="file-list">
+          <div class="file-list-header">
+            <span class="file-list-title">分类</span>
+          </div>
+          <div v-if="structLoading" class="file-list-empty">加载中...</div>
+          <div v-else-if="structCategories.length === 0" class="file-list-empty">暂无分类</div>
+          <div
+            v-for="cat in structCategories"
+            :key="cat.category"
+            class="file-item"
+            :class="{ active: structActiveCategory === cat.category }"
+            @click="loadStructuredContent(cat.category)"
+          >
+            <div class="file-info">
+              <span class="file-label">{{ cat.label }}</span>
+              <span class="file-subpath">
+                {{ cat.category }}
+                <span v-if="cat.has_data" class="struct-dot has-data" title="有内容">●</span>
+                <span v-else class="struct-dot no-data" title="无内容">○</span>
+                <span v-if="cat.fixed" class="struct-badge fixed">固定</span>
+                <span v-else class="struct-badge conditional">条件</span>
+              </span>
+            </div>
+          </div>
+        </div>
+        <div class="editor-panel">
+          <div v-if="structActiveCategory" class="editor-content">
+            <div class="editor-toolbar">
+              <span class="editor-filename">{{ getCategoryLabel(structActiveCategory) }} ({{ structActiveCategory }}.md)</span>
+              <div class="editor-actions">
+                <button class="btn-vars" @click="loadStructuredHistory">
+                  {{ structShowHistory ? '隐藏历史' : '变更历史' }}
+                </button>
+                <button class="btn-save" :disabled="structSaving" @click="saveStructuredContent">
+                  {{ structSaving ? '保存中...' : '保存' }}
+                </button>
+                <span v-if="structSaveOk" class="save-ok-inline">✓</span>
+              </div>
+            </div>
+            <div v-if="structShowHistory" class="history-panel">
+              <div v-if="structHistoryLoading" class="history-loading">加载中...</div>
+              <div v-else-if="structChangelog.length === 0" class="history-empty">暂无变更记录</div>
+              <div v-else class="history-timeline">
+                <div v-for="entry in structChangelog" :key="entry.id" class="history-item">
+                  <div class="history-meta">
+                    <span class="history-version">v{{ entry.version }}</span>
+                    <span class="history-type" :class="entry.change_type">{{ entry.change_type }}</span>
+                    <span class="history-time">{{ formatChangeTime(entry.created_at) }}</span>
+                    <span v-if="entry.session_id" class="history-session">#{{ entry.session_id }}</span>
+                  </div>
+                  <div v-if="entry.diff" class="history-diff">{{ entry.diff }}</div>
+                </div>
+              </div>
+            </div>
+            <textarea v-model="structContent" class="editor-textarea" spellcheck="false" />
+          </div>
+          <div v-else class="editor-empty">选择一个分类进行编辑</div>
+        </div>
+      </template>
+
+      <!-- Health Overview mode -->
+      <template v-if="isHealthTab()">
+        <div class="health-container">
+          <div v-if="healthLoading" class="health-loading">加载中...</div>
+          <div v-else-if="healthSessions.length === 0" class="health-empty">暂无会话</div>
+          <div v-else class="health-list">
+            <div class="health-summary">
+              <span class="health-stat">
+                <span class="health-dot" style="color: #22c55e">●</span>
+                {{ healthSessions.filter(s => s.health_score === 'green').length }} 健康
+              </span>
+              <span class="health-stat">
+                <span class="health-dot" style="color: #eab308">●</span>
+                {{ healthSessions.filter(s => s.health_score === 'yellow').length }} 注意
+              </span>
+              <span class="health-stat">
+                <span class="health-dot" style="color: #ef4444">●</span>
+                {{ healthSessions.filter(s => s.health_score === 'red').length }} 异常
+              </span>
+              <span class="health-stat">
+                <span class="health-dot" style="color: var(--text-muted)">●</span>
+                {{ healthSessions.filter(s => !s.health_score).length }} 未评估
+              </span>
+            </div>
+            <div
+              v-for="s in healthSessions"
+              :key="s.id"
+              class="health-card"
+            >
+              <div class="health-card-main">
+                <span class="health-score-dot" :style="{ color: healthColor(s.health_score) }">●</span>
+                <span class="health-card-title">#{{ s.id }} {{ s.title }}</span>
+                <span class="health-card-badge" :style="{ background: healthColor(s.health_score) + '22', color: healthColor(s.health_score) }">
+                  {{ healthLabel(s.health_score) }}
+                </span>
+              </div>
+              <div class="health-card-details">
+                <span class="health-detail" v-if="s.correction_count > 0">
+                  纠正 {{ s.correction_count }}
+                </span>
+                <span class="health-detail" v-if="s.drift_count > 0">
+                  偏离 {{ s.drift_count }}
+                </span>
+                <span class="health-detail" v-if="s.error_count > 0" style="color: #ef4444">
+                  错误 {{ s.error_count }}
+                </span>
+                <span class="health-detail" v-if="s.warning_count > 0" style="color: #eab308">
+                  警告 {{ s.warning_count }}
+                </span>
+                <span class="health-detail" v-if="s.health_updated_at">
+                  评估于 {{ formatTime(s.health_updated_at) }}
+                </span>
+                <span class="health-detail" v-if="s.group_name">
+                  {{ s.group_name }}
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
       </template>
     </div>
@@ -785,5 +1024,93 @@ onBeforeUnmount(() => {
   .editor-actions { width: 100%; justify-content: flex-end; }
   .editor-textarea { padding: 12px; font-size: 12px; }
   .vars-panel { padding: 6px 12px; }
+  .health-container { padding: 12px; }
+  .health-card { padding: 10px 12px; }
 }
+
+/* ---- Structured Memory ---- */
+.struct-dot { font-size: 10px; margin-left: 4px; }
+.struct-dot.has-data { color: #22c55e; }
+.struct-dot.no-data { color: var(--text-muted); }
+.struct-badge {
+  font-size: 9px; padding: 1px 5px; border-radius: 3px;
+  margin-left: 4px; font-weight: 600; text-transform: uppercase;
+}
+.struct-badge.fixed { background: rgba(59,130,246,0.15); color: #3b82f6; }
+.struct-badge.conditional { background: var(--bg-tertiary); color: var(--text-muted); }
+
+.save-ok-inline { color: #22c55e; font-size: 13px; }
+
+.history-panel {
+  max-height: 240px; overflow-y: auto;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary); padding: 12px 16px;
+}
+.history-loading, .history-empty {
+  font-size: 12px; color: var(--text-muted); text-align: center; padding: 16px;
+}
+.history-timeline { display: flex; flex-direction: column; gap: 8px; }
+.history-item {
+  padding: 8px 12px; border-radius: var(--radius-sm);
+  background: var(--bg-tertiary); border-left: 3px solid var(--accent);
+}
+.history-meta {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+.history-version {
+  font-size: 11px; font-weight: 700; color: var(--accent);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+.history-type {
+  font-size: 10px; padding: 1px 6px; border-radius: 3px;
+  font-weight: 600; text-transform: uppercase;
+}
+.history-type.create { background: rgba(34,197,94,0.15); color: #22c55e; }
+.history-type.update { background: rgba(59,130,246,0.15); color: #3b82f6; }
+.history-type.delete { background: rgba(239,68,68,0.15); color: #ef4444; }
+.history-time { font-size: 11px; color: var(--text-muted); }
+.history-session { font-size: 11px; color: var(--text-muted); }
+.history-diff {
+  font-size: 11px; color: var(--text-secondary); line-height: 1.4;
+  white-space: pre-wrap; word-break: break-word;
+}
+
+/* ---- Health Overview ---- */
+.health-container {
+  flex: 1; padding: 24px; overflow-y: auto;
+}
+.health-loading, .health-empty {
+  text-align: center; color: var(--text-muted); padding: 40px; font-size: 14px;
+}
+.health-list { display: flex; flex-direction: column; gap: 8px; max-width: 680px; margin: 0 auto; }
+.health-summary {
+  display: flex; gap: 20px; padding: 12px 16px;
+  background: var(--bg-secondary); border: 1px solid var(--border);
+  border-radius: var(--radius); margin-bottom: 8px;
+}
+.health-stat { font-size: 13px; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; }
+.health-dot { font-size: 16px; }
+.health-card {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 12px 16px; background: var(--bg-secondary);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  transition: background var(--transition);
+}
+.health-card:hover { background: var(--bg-hover); }
+.health-card-main { display: flex; align-items: center; gap: 10px; }
+.health-score-dot { font-size: 18px; flex-shrink: 0; }
+.health-card-title {
+  flex: 1; font-size: 14px; font-weight: 500; color: var(--text-primary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.health-card-badge {
+  font-size: 11px; padding: 2px 10px; border-radius: 99px;
+  font-weight: 600; flex-shrink: 0;
+}
+.health-card-details {
+  display: flex; gap: 12px; flex-wrap: wrap;
+  padding-left: 28px;
+}
+.health-detail { font-size: 12px; color: var(--text-muted); }
 </style>

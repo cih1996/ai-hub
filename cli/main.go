@@ -176,6 +176,8 @@ func Run(args []string) int {
 		return commands.RunHooks(c, commandArgs)
 	case "changelog":
 		return commands.RunChangelog(c, commandArgs)
+	case "shadow-ai":
+		return commands.RunShadowAI(c, commandArgs)
 	case "mem":
 		return runMem(c, globalFlags.GroupName, commandArgs)
 	default:
@@ -339,6 +341,14 @@ Hooks:
 Changelog:
   changelog <file> [--scope <scope>] [--limit N]          View memory change history
   changelog <file> [--scope <scope>] --rollback <version> Rollback to specific version
+
+Shadow AI:
+  shadow-ai              Show shadow AI status
+  shadow-ai enable       Enable shadow AI (creates session + triggers)
+  shadow-ai disable      Disable shadow AI (stops triggers, keeps data)
+  shadow-ai status       Show shadow AI status
+  shadow-ai config       Show current config (or set: key=value ...)
+  shadow-ai logs         Show work logs (--lines N)
 
 Use "ai-hub <command> --help" for more information about a command.`)
 }

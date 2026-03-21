@@ -105,3 +105,18 @@ func SessionsWithTriggers() (map[int64]bool, error) {
 	}
 	return m, nil
 }
+
+// UpdateTriggerEnabled toggles a trigger's enabled state.
+func UpdateTriggerEnabled(id int64, enabled bool) error {
+	val := 0
+	if enabled {
+		val = 1
+	}
+	status := "disabled"
+	if enabled {
+		status = "active"
+	}
+	_, err := DB.Exec(`UPDATE triggers SET enabled=?, status=?, updated_at=? WHERE id=?`,
+		val, status, now(), id)
+	return err
+}

@@ -469,3 +469,76 @@ export const updateSchemaApi = (name: string, definition: object, writers?: numb
   request<SchemaItem>('/schemas/' + encodeURIComponent(name), { method: 'PUT', body: JSON.stringify({ definition, ...(writers !== undefined ? { writers } : {}) }) })
 export const deleteSchemaApi = (name: string) =>
   request<{ ok: boolean }>('/schemas/' + encodeURIComponent(name), { method: 'DELETE' })
+
+// Shadow AI
+export interface ShadowAIConfig {
+  patrol_interval: string
+  extract_interval: string
+  deep_scan_interval: string
+  self_clean_interval: string
+  context_reset_threshold: number
+}
+export interface ShadowAIStatus {
+  enabled: boolean
+  session_id: number
+  status: string
+  config: ShadowAIConfig
+  triggers?: Array<{
+    id: number
+    content: string
+    trigger_time: string
+    enabled: boolean
+    status: string
+    fired_count: number
+  }>
+}
+export const getShadowAIStatus = () => request<ShadowAIStatus>('/shadow-ai/status')
+export const enableShadowAI = (config?: Partial<ShadowAIConfig>) =>
+  request<{ ok: boolean; session_id: number; triggers: number[] }>('/shadow-ai/enable', {
+    method: 'POST',
+    body: JSON.stringify(config || {}),
+  })
+export const disableShadowAI = () =>
+  request<{ ok: boolean; message: string }>('/shadow-ai/disable', { method: 'POST' })
+export const updateShadowAIConfig = (config: Partial<ShadowAIConfig>) =>
+  request<{ ok: boolean; config: ShadowAIConfig }>('/shadow-ai/config', {
+    method: 'PUT',
+    body: JSON.stringify(config),
+  })
+export const getShadowAILogs = (lines = 50) =>
+  request<{ content: string; exists: boolean }>(`/shadow-ai/logs?lines=${lines}`)
+
+// Structured Memory
+export interface StructuredCategory {
+  category: string
+  label: string
+  has_data: boolean
+  fixed: boolean
+}
+export const listStructuredMemory = () =>
+  request<StructuredCategory[]>('/structured-memory')
+export const getStructuredMemory = (category: string) =>
+  request<{ category: string; label: string; content: string }>(`/structured-memory/${encodeURIComponent(category)}`)
+export const putStructuredMemory = (category: string, content: string) =>
+  request<{ ok: boolean }>(`/structured-memory/${encodeURIComponent(category)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ content }),
+  })
+
+// Changelog
+export interface ChangelogEntry {
+  id: number
+  file_name: string
+  scope: string
+  change_type: string
+  session_id: number
+  diff: string
+  schema: string
+  version: number
+  content: string
+  created_at: string
+}
+export const getChangelog = (fileName: string, scope = 'memory', limit = 20) =>
+  request<{ changelog: ChangelogEntry[]; file_name: string; scope: string }>(
+    `/changelog?file_name=${encodeURIComponent(fileName)}&scope=${encodeURIComponent(scope)}&limit=${limit}`
+  )
