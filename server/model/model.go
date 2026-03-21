@@ -61,8 +61,9 @@ type Session struct {
 	// Health fields (Issue #213)
 	HealthScore     string `json:"health_score"`      // green | yellow | red (empty = unset)
 	HealthUpdatedAt string `json:"health_updated_at"` // 最后评估时间
-	CorrectionCount int    `json:"correction_count"`  // 用户纠正次数
-	DriftCount      int    `json:"drift_count"`       // 规则偏离次数
+	CorrectionCount     int    `json:"correction_count"`       // 用户纠正次数
+	DriftCount          int    `json:"drift_count"`            // 规则偏离次数
+	AutoResetThreshold  int    `json:"auto_reset_threshold"`   // 消息数超阈值自动重置（0=不自动重置）
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }

@@ -33,7 +33,7 @@ func CreateSession(s *model.Session) error {
 
 func ListSessions() ([]model.Session, error) {
 	// Exclude shadow sessions from normal listing
-	rows, err := DB.Query(`SELECT id, title, icon, provider_id, claude_session_id, work_dir, group_name, last_compress_msg_id, attention_enabled, attention_rules, is_shadow, parent_id, health_score, health_updated_at, correction_count, drift_count, created_at, updated_at FROM sessions WHERE is_shadow = 0 ORDER BY updated_at DESC`)
+	rows, err := DB.Query(`SELECT id, title, icon, provider_id, claude_session_id, work_dir, group_name, last_compress_msg_id, attention_enabled, attention_rules, is_shadow, parent_id, health_score, health_updated_at, correction_count, drift_count, auto_reset_threshold, created_at, updated_at FROM sessions WHERE is_shadow = 0 ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -41,7 +41,7 @@ func ListSessions() ([]model.Session, error) {
 	var list []model.Session
 	for rows.Next() {
 		var s model.Session
-		if err := rows.Scan(&s.ID, &s.Title, &s.Icon, &s.ProviderID, &s.ClaudeSessionID, &s.WorkDir, &s.GroupName, &s.LastCompressMsgID, &s.AttentionEnabled, &s.AttentionRules, &s.IsShadow, &s.ParentID, &s.HealthScore, &s.HealthUpdatedAt, &s.CorrectionCount, &s.DriftCount, &s.CreatedAt, &s.UpdatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.Title, &s.Icon, &s.ProviderID, &s.ClaudeSessionID, &s.WorkDir, &s.GroupName, &s.LastCompressMsgID, &s.AttentionEnabled, &s.AttentionRules, &s.IsShadow, &s.ParentID, &s.HealthScore, &s.HealthUpdatedAt, &s.CorrectionCount, &s.DriftCount, &s.AutoResetThreshold, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			return nil, err
 		}
 		list = append(list, s)
@@ -52,8 +52,8 @@ func ListSessions() ([]model.Session, error) {
 func GetSession(id int64) (*model.Session, error) {
 	var s model.Session
 	err := DB.QueryRow(
-		`SELECT id, title, icon, provider_id, claude_session_id, work_dir, group_name, last_compress_msg_id, attention_enabled, attention_rules, is_shadow, parent_id, health_score, health_updated_at, correction_count, drift_count, created_at, updated_at FROM sessions WHERE id = ?`, id,
-	).Scan(&s.ID, &s.Title, &s.Icon, &s.ProviderID, &s.ClaudeSessionID, &s.WorkDir, &s.GroupName, &s.LastCompressMsgID, &s.AttentionEnabled, &s.AttentionRules, &s.IsShadow, &s.ParentID, &s.HealthScore, &s.HealthUpdatedAt, &s.CorrectionCount, &s.DriftCount, &s.CreatedAt, &s.UpdatedAt)
+		`SELECT id, title, icon, provider_id, claude_session_id, work_dir, group_name, last_compress_msg_id, attention_enabled, attention_rules, is_shadow, parent_id, health_score, health_updated_at, correction_count, drift_count, auto_reset_threshold, created_at, updated_at FROM sessions WHERE id = ?`, id,
+	).Scan(&s.ID, &s.Title, &s.Icon, &s.ProviderID, &s.ClaudeSessionID, &s.WorkDir, &s.GroupName, &s.LastCompressMsgID, &s.AttentionEnabled, &s.AttentionRules, &s.IsShadow, &s.ParentID, &s.HealthScore, &s.HealthUpdatedAt, &s.CorrectionCount, &s.DriftCount, &s.AutoResetThreshold, &s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -63,8 +63,8 @@ func GetSession(id int64) (*model.Session, error) {
 func UpdateSession(s *model.Session) error {
 	s.UpdatedAt = time.Now()
 	_, err := DB.Exec(
-		`UPDATE sessions SET title=?, icon=?, provider_id=?, group_name=?, attention_enabled=?, updated_at=? WHERE id=?`,
-		s.Title, s.Icon, s.ProviderID, s.GroupName, s.AttentionEnabled, s.UpdatedAt, s.ID,
+		`UPDATE sessions SET title=?, icon=?, provider_id=?, group_name=?, attention_enabled=?, auto_reset_threshold=?, updated_at=? WHERE id=?`,
+		s.Title, s.Icon, s.ProviderID, s.GroupName, s.AttentionEnabled, s.AutoResetThreshold, s.UpdatedAt, s.ID,
 	)
 	return err
 }
@@ -548,14 +548,14 @@ func GetShadowSessionByParent(parentID int64) (*model.Session, error) {
 	err := DB.QueryRow(`
 		SELECT id, title, icon, provider_id, claude_session_id, work_dir, group_name,
 		       last_compress_msg_id, attention_enabled, attention_rules, is_shadow, parent_id,
-		       health_score, health_updated_at, correction_count, drift_count,
+		       health_score, health_updated_at, correction_count, drift_count, auto_reset_threshold,
 		       created_at, updated_at
 		FROM sessions
 		WHERE parent_id = ? AND is_shadow = 1
 		ORDER BY created_at DESC LIMIT 1
 	`, parentID).Scan(&s.ID, &s.Title, &s.Icon, &s.ProviderID, &s.ClaudeSessionID, &s.WorkDir, &s.GroupName,
 		&s.LastCompressMsgID, &s.AttentionEnabled, &s.AttentionRules, &s.IsShadow, &s.ParentID,
-		&s.HealthScore, &s.HealthUpdatedAt, &s.CorrectionCount, &s.DriftCount,
+		&s.HealthScore, &s.HealthUpdatedAt, &s.CorrectionCount, &s.DriftCount, &s.AutoResetThreshold,
 		&s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
 		return nil, err
@@ -616,5 +616,37 @@ func IncrementDriftCount(sessionID int64) error {
 		`UPDATE sessions SET drift_count = drift_count + 1, health_updated_at=?, updated_at=? WHERE id=?`,
 		now, time.Now(), sessionID,
 	)
+	return err
+}
+
+// ========== Context Reset Functions (Issue #214) ==========
+
+// ResetSessionMessages deletes messages from a session, optionally keeping the last N.
+// Returns the number of messages deleted.
+func ResetSessionMessages(sessionID int64, keepLast int) (int64, error) {
+	if keepLast <= 0 {
+		// Delete all messages
+		result, err := DB.Exec(`DELETE FROM messages WHERE session_id = ?`, sessionID)
+		if err != nil {
+			return 0, err
+		}
+		return result.RowsAffected()
+	}
+
+	// Keep last N messages: delete all except the most recent N
+	result, err := DB.Exec(`
+		DELETE FROM messages WHERE session_id = ? AND id NOT IN (
+			SELECT id FROM messages WHERE session_id = ? ORDER BY id DESC LIMIT ?
+		)`, sessionID, sessionID, keepLast)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+// UpdateAutoResetThreshold sets the auto_reset_threshold for a session.
+func UpdateAutoResetThreshold(sessionID int64, threshold int) error {
+	_, err := DB.Exec(`UPDATE sessions SET auto_reset_threshold=?, updated_at=? WHERE id=?`,
+		threshold, time.Now(), sessionID)
 	return err
 }

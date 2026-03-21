@@ -223,6 +223,9 @@ func migrate() error {
 	// Memory changelog table (Issue #212: memory change tracking)
 	InitChangelogTable()
 
+	// Sessions: add auto_reset_threshold column (Issue #214: context reset)
+	DB.Exec(`ALTER TABLE sessions ADD COLUMN auto_reset_threshold INTEGER NOT NULL DEFAULT 0`)
+
 	return nil
 }
 

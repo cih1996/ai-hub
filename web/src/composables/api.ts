@@ -56,6 +56,13 @@ export const getMessagesPaginated = (sessionId: number, limit = 50, beforeId?: n
 export const compressSession = (id: number) =>
   request<{ ok: boolean }>(`/sessions/${id}/compress`, { method: 'POST' })
 
+// Reset session context (delete messages, keep session config)
+export const resetSession = (id: number, keepLast = 0) =>
+  request<{ ok: boolean; deleted_count: number; kept_count: number }>(`/sessions/${id}/reset`, {
+    method: 'POST',
+    body: JSON.stringify({ confirm: true, keep_last: keepLast }),
+  })
+
 // Groups
 export interface Group {
   id: number

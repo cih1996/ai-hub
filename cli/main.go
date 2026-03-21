@@ -261,6 +261,8 @@ Sessions:
   sessions <id>      Session detail
   sessions <id> messages   View recent messages
   sessions <id> move --group <name>  Move session to group
+  sessions <id> reset [--keep-last N] [--yes]  Reset session context
+  sessions <id> reset --auto-threshold N  Set auto-reset threshold
   send               Send message to a session (0=new)
 
 Groups:
