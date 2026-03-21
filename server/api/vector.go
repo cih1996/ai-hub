@@ -1260,12 +1260,12 @@ func validateContentWithSchema(content, schemaDef string) error {
 		return fmt.Errorf("invalid schema definition: %w", err)
 	}
 
-	// Create compiler and add the schema as a resource
+	// Create compiler and add the schema as a resource (use virtual URI to avoid leaking server paths)
 	compiler := jsonschema.NewCompiler()
-	if err := compiler.AddResource("schema.json", schemaDoc); err != nil {
+	if err := compiler.AddResource("mem://schema", schemaDoc); err != nil {
 		return fmt.Errorf("failed to add schema resource: %w", err)
 	}
-	sch, err := compiler.Compile("schema.json")
+	sch, err := compiler.Compile("mem://schema")
 	if err != nil {
 		return fmt.Errorf("failed to compile schema: %w", err)
 	}
