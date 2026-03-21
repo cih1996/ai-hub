@@ -643,6 +643,28 @@ func vectorWrite(c *gin.Context, defaultScope string) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "schema '" + req.Schema + "' not found"})
 			return
 		}
+
+		// Writer permission check: if schema defines writers, only listed session IDs may write
+		if schemaDef.Writers != "" {
+			var allowedWriters []int64
+			if err := json.Unmarshal([]byte(schemaDef.Writers), &allowedWriters); err == nil && len(allowedWriters) > 0 {
+				allowed := false
+				for _, w := range allowedWriters {
+					if w == req.SessionID {
+						allowed = true
+						break
+					}
+				}
+				if !allowed {
+					c.JSON(http.StatusForbidden, gin.H{
+						"error": fmt.Sprintf("session %d is not authorized to write with schema '%s' (allowed writers: %s)",
+							req.SessionID, req.Schema, schemaDef.Writers),
+					})
+					return
+				}
+			}
+		}
+
 		if err := validateContentWithSchema(req.Content, schemaDef.Definition); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "schema validation failed: " + err.Error()})
 			return

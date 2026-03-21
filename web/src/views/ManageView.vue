@@ -42,11 +42,13 @@ const restoringDefault = ref(false)
 const schemas = ref<SchemaItem[]>([])
 const selectedSchema = ref<SchemaItem | null>(null)
 const schemaContent = ref('')
+const schemaWriters = ref('')  // comma-separated session IDs, e.g. "21, 23"
 const schemaLoading = ref(false)
 const schemaSaving = ref(false)
 const showNewSchemaDialog = ref(false)
 const newSchemaName = ref('')
 const newSchemaDefinition = ref('{\n  "type": "object",\n  "required": [],\n  "properties": {}\n}')
+const newSchemaWriters = ref('')
 const schemaJsonError = ref('')
 
 const isSchemaTab = () => activeTab.value === 'schemas'
@@ -81,7 +83,26 @@ function selectSchema(s: SchemaItem) {
   } catch {
     schemaContent.value = s.definition
   }
+  // Parse writers JSON array to comma-separated text
+  if (s.writers) {
+    try {
+      const arr = JSON.parse(s.writers) as number[]
+      schemaWriters.value = arr.join(', ')
+    } catch {
+      schemaWriters.value = s.writers
+    }
+  } else {
+    schemaWriters.value = ''
+  }
   schemaJsonError.value = ''
+}
+
+// Parse comma-separated writers text to number array
+function parseWriters(text: string): number[] | undefined {
+  const trimmed = text.trim()
+  if (!trimmed) return []
+  const ids = trimmed.split(/[,\s]+/).map(s => parseInt(s.trim())).filter(n => !isNaN(n) && n > 0)
+  return ids
 }
 
 async function saveSchema() {
@@ -90,7 +111,8 @@ async function saveSchema() {
   schemaSaving.value = true
   try {
     const def = JSON.parse(schemaContent.value)
-    await updateSchemaApi(selectedSchema.value.name, def)
+    const writers = parseWriters(schemaWriters.value)
+    await updateSchemaApi(selectedSchema.value.name, def, writers)
     await loadSchemas()
     const updated = schemas.value.find(s => s.name === selectedSchema.value!.name)
     if (updated) selectSchema(updated)
@@ -109,9 +131,11 @@ async function createNewSchema() {
   }
   try {
     const def = JSON.parse(newSchemaDefinition.value)
-    await createSchemaApi(name, def)
+    const writers = parseWriters(newSchemaWriters.value)
+    await createSchemaApi(name, def, writers && writers.length > 0 ? writers : undefined)
     showNewSchemaDialog.value = false
     newSchemaName.value = ''
+    newSchemaWriters.value = ''
     newSchemaDefinition.value = '{\n  "type": "object",\n  "required": [],\n  "properties": {}\n}'
     await loadSchemas()
     const created = schemas.value.find(s => s.name === name)
@@ -475,6 +499,7 @@ onBeforeUnmount(() => {
           >
             <div class="file-info">
               <span class="file-label">{{ s.name }}</span>
+              <span v-if="s.writers" class="schema-writers-badge" :title="'Writers: ' + s.writers">W</span>
               <span class="file-subpath">{{ formatSchemaTime(s.updated_at) }}</span>
             </div>
             <button class="btn-delete-file" @click.stop="deleteSchema(s)" title="删除">
@@ -498,6 +523,10 @@ onBeforeUnmount(() => {
                 </button>
               </div>
             </div>
+            <div class="schema-writers-row">
+              <label class="schema-writers-label">Writers</label>
+              <input v-model="schemaWriters" class="schema-writers-input" placeholder="留空不限制，填写会话ID用逗号分隔，如: 21, 23" />
+            </div>
             <textarea
               v-model="schemaContent"
               class="editor-textarea schema-editor"
@@ -514,6 +543,10 @@ onBeforeUnmount(() => {
                   JSON 错误
                 </span>
               </div>
+            </div>
+            <div class="schema-writers-row">
+              <label class="schema-writers-label">Writers</label>
+              <input v-model="newSchemaWriters" class="schema-writers-input" placeholder="留空不限制，填写会话ID用逗号分隔，如: 21, 23" />
             </div>
             <textarea
               v-model="newSchemaDefinition"
@@ -626,6 +659,25 @@ onBeforeUnmount(() => {
 .schema-error {
   display: flex; align-items: center; gap: 4px; font-size: 11px;
   color: var(--danger, #ef4444); flex-shrink: 0;
+}
+/* Schema writers row */
+.schema-writers-row {
+  display: flex; align-items: center; gap: 8px; padding: 6px 12px;
+  border-bottom: 1px solid var(--border); background: var(--bg-secondary);
+}
+.schema-writers-label {
+  font-size: 12px; color: var(--text-secondary); font-weight: 500; flex-shrink: 0;
+}
+.schema-writers-input {
+  flex: 1; padding: 4px 8px; font-size: 12px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--bg-primary); color: var(--text-primary);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+.schema-writers-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; font-size: 10px; font-weight: 600;
+  border-radius: 3px; background: var(--accent-soft); color: var(--accent);
+  flex-shrink: 0;
 }
 /* Vector search */
 .search-bar { margin-top: 10px; }

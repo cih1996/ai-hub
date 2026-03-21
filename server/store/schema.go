@@ -8,8 +8,8 @@ import (
 // CreateSchema inserts a new JSON Schema definition.
 func CreateSchema(s *model.Schema) error {
 	result, err := DB.Exec(
-		`INSERT INTO schemas (name, definition) VALUES (?, ?)`,
-		s.Name, s.Definition,
+		`INSERT INTO schemas (name, definition, writers) VALUES (?, ?, ?)`,
+		s.Name, s.Definition, s.Writers,
 	)
 	if err != nil {
 		return err
@@ -26,8 +26,8 @@ func CreateSchema(s *model.Schema) error {
 func GetSchema(name string) (*model.Schema, error) {
 	var s model.Schema
 	err := DB.QueryRow(
-		`SELECT id, name, definition, created_at, updated_at FROM schemas WHERE name = ?`, name,
-	).Scan(&s.ID, &s.Name, &s.Definition, &s.CreatedAt, &s.UpdatedAt)
+		`SELECT id, name, definition, writers, created_at, updated_at FROM schemas WHERE name = ?`, name,
+	).Scan(&s.ID, &s.Name, &s.Definition, &s.Writers, &s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -39,7 +39,7 @@ func GetSchema(name string) (*model.Schema, error) {
 
 // ListSchemas returns all schema definitions.
 func ListSchemas() ([]model.Schema, error) {
-	rows, err := DB.Query(`SELECT id, name, definition, created_at, updated_at FROM schemas ORDER BY name`)
+	rows, err := DB.Query(`SELECT id, name, definition, writers, created_at, updated_at FROM schemas ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +47,7 @@ func ListSchemas() ([]model.Schema, error) {
 	var list []model.Schema
 	for rows.Next() {
 		var s model.Schema
-		if err := rows.Scan(&s.ID, &s.Name, &s.Definition, &s.CreatedAt, &s.UpdatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.Name, &s.Definition, &s.Writers, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			return nil, err
 		}
 		list = append(list, s)
@@ -61,11 +61,11 @@ func DeleteSchema(name string) error {
 	return err
 }
 
-// UpdateSchema updates a schema's definition by name (read-then-merge pattern).
-func UpdateSchema(name, definition string) (*model.Schema, error) {
+// UpdateSchema updates a schema's definition and/or writers by name (read-then-merge pattern).
+func UpdateSchema(name, definition, writers string) (*model.Schema, error) {
 	_, err := DB.Exec(
-		`UPDATE schemas SET definition = ?, updated_at = CURRENT_TIMESTAMP WHERE name = ?`,
-		definition, name,
+		`UPDATE schemas SET definition = ?, writers = ?, updated_at = CURRENT_TIMESTAMP WHERE name = ?`,
+		definition, writers, name,
 	)
 	if err != nil {
 		return nil, err

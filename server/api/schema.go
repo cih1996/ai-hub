@@ -49,6 +49,7 @@ func CreateSchema(c *gin.Context) {
 	var req struct {
 		Name       string          `json:"name"`
 		Definition json.RawMessage `json:"definition"`
+		Writers    json.RawMessage `json:"writers"` // optional: JSON array of session IDs, e.g. [21,23]
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -70,6 +71,17 @@ func CreateSchema(c *gin.Context) {
 		return
 	}
 
+	// Validate writers if provided
+	writers := ""
+	if len(req.Writers) > 0 {
+		var writerIDs []int64
+		if err := json.Unmarshal(req.Writers, &writerIDs); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "writers must be a JSON array of session IDs: " + err.Error()})
+			return
+		}
+		writers = string(req.Writers)
+	}
+
 	// Check for duplicate name
 	existing, err := store.GetSchema(req.Name)
 	if err != nil {
@@ -84,6 +96,7 @@ func CreateSchema(c *gin.Context) {
 	s := &model.Schema{
 		Name:       req.Name,
 		Definition: string(req.Definition),
+		Writers:    writers,
 	}
 	if err := store.CreateSchema(s); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -141,16 +154,16 @@ func UpdateSchema(c *gin.Context) {
 
 	var req struct {
 		Definition json.RawMessage `json:"definition"`
+		Writers    json.RawMessage `json:"writers"` // optional: JSON array of session IDs
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	// Merge: only update definition if provided
+	// Merge: only update fields if provided
 	definition := existing.Definition
 	if len(req.Definition) > 0 {
-		// Validate that definition is valid JSON
 		var parsed interface{}
 		if err := json.Unmarshal(req.Definition, &parsed); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "definition must be valid JSON: " + err.Error()})
@@ -159,7 +172,17 @@ func UpdateSchema(c *gin.Context) {
 		definition = string(req.Definition)
 	}
 
-	updated, err := store.UpdateSchema(name, definition)
+	writers := existing.Writers
+	if len(req.Writers) > 0 {
+		var writerIDs []int64
+		if err := json.Unmarshal(req.Writers, &writerIDs); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "writers must be a JSON array of session IDs: " + err.Error()})
+			return
+		}
+		writers = string(req.Writers)
+	}
+
+	updated, err := store.UpdateSchema(name, definition, writers)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

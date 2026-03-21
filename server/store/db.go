@@ -205,6 +205,9 @@ func migrate() error {
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	)`)
 
+	// Schemas: add writers column (write permission isolation)
+	DB.Exec(`ALTER TABLE schemas ADD COLUMN writers TEXT NOT NULL DEFAULT ''`)
+
 	return nil
 }
 

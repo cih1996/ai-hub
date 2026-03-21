@@ -193,6 +193,7 @@ type Schema struct {
 	ID         int64  `json:"id"`
 	Name       string `json:"name"`       // 唯一标识名
 	Definition string `json:"definition"` // JSON Schema 定义（JSON 字符串）
+	Writers    string `json:"writers"`    // 允许写入的会话 ID 列表（JSON 数组，如 [21,23]，空 = 不限制）
 	CreatedAt  string `json:"created_at"`
 	UpdatedAt  string `json:"updated_at"`
 }

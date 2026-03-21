@@ -45,6 +45,7 @@ func schemasList(c *client.Client) int {
 		ID         int64  `json:"id"`
 		Name       string `json:"name"`
 		Definition string `json:"definition"`
+		Writers    string `json:"writers"`
 		CreatedAt  string `json:"created_at"`
 		UpdatedAt  string `json:"updated_at"`
 	}
@@ -65,7 +66,11 @@ func schemasList(c *client.Client) int {
 		if len(preview) > 80 {
 			preview = preview[:80] + "..."
 		}
-		fmt.Printf("  %s\n    %s\n    created: %s\n\n", s.Name, preview, FormatTime(s.CreatedAt))
+		writerInfo := ""
+		if s.Writers != "" {
+			writerInfo = fmt.Sprintf("\n    writers: %s", s.Writers)
+		}
+		fmt.Printf("  %s\n    %s%s\n    created: %s\n\n", s.Name, preview, writerInfo, FormatTime(s.CreatedAt))
 	}
 	return 0
 }
@@ -86,6 +91,7 @@ func schemasGet(c *client.Client, args []string) int {
 	var schema struct {
 		Name       string `json:"name"`
 		Definition string `json:"definition"`
+		Writers    string `json:"writers"`
 		CreatedAt  string `json:"created_at"`
 		UpdatedAt  string `json:"updated_at"`
 	}
@@ -99,15 +105,23 @@ func schemasGet(c *client.Client, args []string) int {
 	if err := json.Unmarshal([]byte(schema.Definition), &raw); err == nil {
 		pretty, err := json.MarshalIndent(raw, "", "  ")
 		if err == nil {
-			fmt.Printf("Schema: %s\nCreated: %s\nUpdated: %s\n\nDefinition:\n%s\n",
-				schema.Name, FormatTime(schema.CreatedAt), FormatTime(schema.UpdatedAt), string(pretty))
+			writersLine := ""
+			if schema.Writers != "" {
+				writersLine = fmt.Sprintf("Writers: %s\n", schema.Writers)
+			}
+			fmt.Printf("Schema: %s\nCreated: %s\nUpdated: %s\n%s\nDefinition:\n%s\n",
+				schema.Name, FormatTime(schema.CreatedAt), FormatTime(schema.UpdatedAt), writersLine, string(pretty))
 			return 0
 		}
 	}
 
 	// Fallback: print raw
-	fmt.Printf("Schema: %s\nCreated: %s\n\nDefinition:\n%s\n",
-		schema.Name, FormatTime(schema.CreatedAt), schema.Definition)
+	writersLine := ""
+	if schema.Writers != "" {
+		writersLine = fmt.Sprintf("Writers: %s\n", schema.Writers)
+	}
+	fmt.Printf("Schema: %s\nCreated: %s\n%s\nDefinition:\n%s\n",
+		schema.Name, FormatTime(schema.CreatedAt), writersLine, schema.Definition)
 	return 0
 }
 
@@ -120,12 +134,16 @@ func schemasCreate(c *client.Client, args []string) int {
 
 	name := args[0]
 	var definition string
+	var writers string
 
 	// Parse flags
 	for i := 1; i < len(args); i++ {
 		if (args[i] == "--definition" || args[i] == "--def") && i+1 < len(args) {
 			i++
 			definition = args[i]
+		} else if args[i] == "--writers" && i+1 < len(args) {
+			i++
+			writers = args[i]
 		}
 	}
 
@@ -157,6 +175,15 @@ func schemasCreate(c *client.Client, args []string) int {
 	body := map[string]interface{}{
 		"name":       name,
 		"definition": parsed,
+	}
+	// Add writers if specified
+	if writers != "" {
+		var writerIDs json.RawMessage
+		if err := json.Unmarshal([]byte(writers), &writerIDs); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: writers must be a valid JSON array of session IDs: %v\n", err)
+			return 1
+		}
+		body["writers"] = writerIDs
 	}
 	_, err := c.POST("/schemas", body)
 	if err != nil {
@@ -196,6 +223,10 @@ Subcommands:
   create <name> --definition '<json>'    Create a new schema
   delete <name>                          Delete a schema
 
+Flags for create:
+  --definition, --def  JSON Schema definition (required, or pipe via stdin)
+  --writers            JSON array of session IDs allowed to write, e.g. '[21,23]'
+
 Create also accepts definition from stdin:
   cat schema.json | ai-hub schemas create my-schema
 
@@ -203,6 +234,7 @@ Examples:
   ai-hub schemas list
   ai-hub schemas get my-schema
   ai-hub schemas create my-schema --definition '{"type":"object","required":["title"],"properties":{"title":{"type":"string"}}}'
+  ai-hub schemas create my-schema --definition '{"type":"object"}' --writers '[21,23]'
   ai-hub schemas delete my-schema
 `)
 }

@@ -450,14 +450,15 @@ export interface SchemaItem {
   id: number
   name: string
   definition: string
+  writers: string
   created_at: string
   updated_at: string
 }
 export const listSchemas = () => request<SchemaItem[]>('/schemas')
 export const getSchemaByName = (name: string) => request<SchemaItem>('/schemas/' + encodeURIComponent(name))
-export const createSchemaApi = (name: string, definition: object) =>
-  request<SchemaItem>('/schemas', { method: 'POST', body: JSON.stringify({ name, definition }) })
-export const updateSchemaApi = (name: string, definition: object) =>
-  request<SchemaItem>('/schemas/' + encodeURIComponent(name), { method: 'PUT', body: JSON.stringify({ definition }) })
+export const createSchemaApi = (name: string, definition: object, writers?: number[]) =>
+  request<SchemaItem>('/schemas', { method: 'POST', body: JSON.stringify({ name, definition, ...(writers && writers.length > 0 ? { writers } : {}) }) })
+export const updateSchemaApi = (name: string, definition: object, writers?: number[]) =>
+  request<SchemaItem>('/schemas/' + encodeURIComponent(name), { method: 'PUT', body: JSON.stringify({ definition, ...(writers !== undefined ? { writers } : {}) }) })
 export const deleteSchemaApi = (name: string) =>
   request<{ ok: boolean }>('/schemas/' + encodeURIComponent(name), { method: 'DELETE' })
