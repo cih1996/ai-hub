@@ -201,6 +201,20 @@ type Hook struct {
 	UpdatedAt     string `json:"updated_at"`
 }
 
+// MemoryChangelog 记忆变更日志
+type MemoryChangelog struct {
+	ID         int64  `json:"id"`
+	FileName   string `json:"file_name"`   // 记忆文件名
+	Scope      string `json:"scope"`       // 作用域
+	ChangeType string `json:"change_type"` // create | update | delete
+	SessionID  int64  `json:"session_id"`  // 变更者的会话 ID
+	Diff       string `json:"diff"`        // 变更内容 diff
+	Schema     string `json:"schema"`      // 使用的 schema 名称
+	Version    int    `json:"version"`     // 版本号（自增）
+	Content    string `json:"content"`     // 变更后的完整内容
+	CreatedAt  string `json:"created_at"`
+}
+
 // Schema JSON Schema 定义（用于结构化记忆校验）
 type Schema struct {
 	ID         int64  `json:"id"`

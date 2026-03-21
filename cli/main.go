@@ -174,6 +174,8 @@ func Run(args []string) int {
 		return commands.RunInjectionRouter(c, commandArgs)
 	case "hooks":
 		return commands.RunHooks(c, commandArgs)
+	case "changelog":
+		return commands.RunChangelog(c, commandArgs)
 	case "mem":
 		return runMem(c, globalFlags.GroupName, commandArgs)
 	default:
@@ -331,6 +333,10 @@ Hooks:
   hooks delete <id>                   Delete a hook
   hooks enable <id>                   Enable a hook
   hooks disable <id>                  Disable a hook
+
+Changelog:
+  changelog <file> [--scope <scope>] [--limit N]          View memory change history
+  changelog <file> [--scope <scope>] --rollback <version> Rollback to specific version
 
 Use "ai-hub <command> --help" for more information about a command.`)
 }

@@ -214,6 +214,9 @@ func migrate() error {
 	// Hooks table (Issue #211: event hook system)
 	InitHooksTable()
 
+	// Memory changelog table (Issue #212: memory change tracking)
+	InitChangelogTable()
+
 	return nil
 }
 

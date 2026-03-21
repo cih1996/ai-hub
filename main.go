@@ -387,6 +387,10 @@ func main() {
 		v1.POST("/hooks/:id/enable", api.EnableHook)
 		v1.POST("/hooks/:id/disable", api.DisableHook)
 
+		// Changelog (Issue #212: memory change tracking)
+		v1.GET("/changelog", api.GetChangelog)
+		v1.POST("/changelog/rollback", api.RollbackChangelog)
+
 		// Anthropic API reverse proxy for precise token metering (Issue #72)
 		v1.Any("/proxy/s/:session_id/anthropic/*path", api.HandleAnthropicProxy)
 		v1.Any("/proxy/anthropic/*path", api.HandleAnthropicProxy) // legacy compat
