@@ -96,6 +96,68 @@ func EnableShadowAI(c *gin.Context) {
 		reqConfig.ContextResetThreshold = defaultShadowConfig.ContextResetThreshold
 	}
 
+	// === Re-enable path: reuse existing session if available ===
+	if existing.SessionID > 0 {
+		oldSession, err := store.GetSession(existing.SessionID)
+		if err == nil && oldSession != nil {
+			log.Printf("[shadow-ai] re-enabling with existing session #%d", existing.SessionID)
+
+			// Clean up old triggers (delete all, will recreate below)
+			oldTriggers, _ := store.ListTriggersBySession(existing.SessionID)
+			for _, t := range oldTriggers {
+				store.DeleteTrigger(t.ID)
+			}
+			log.Printf("[shadow-ai] cleaned up %d old triggers", len(oldTriggers))
+
+			// Create new triggers with current config
+			now := time.Now().In(time.FixedZone("CST", 8*3600))
+			triggerDefs := []struct {
+				interval string
+				content  string
+			}{
+				{reqConfig.PatrolInterval, "【定时巡检】快速巡检：扫描所有活跃会话的错误统计、用户纠正，记录异常。"},
+				{reqConfig.ExtractInterval, "【定时提炼】记忆提炼：从最近对话中提取有价值的用户偏好、习惯、纠正内容，写入结构化记忆。"},
+				{reqConfig.DeepScanInterval, "【深度巡检】全面检查所有会话健康度、Schema演进、记忆一致性。"},
+				{reqConfig.SelfCleanInterval, "【自我清理】归档工作日志，清理过期临时数据，更新 shadow/status.md。"},
+			}
+			var triggerIDs []int64
+			for _, td := range triggerDefs {
+				t := &model.Trigger{
+					SessionID:   existing.SessionID,
+					Content:     td.content,
+					TriggerTime: td.interval,
+					MaxFires:    -1,
+					Enabled:     true,
+					Status:      "active",
+					CreatedAt:   now.Format("2006-01-02 15:04:05"),
+					UpdatedAt:   now.Format("2006-01-02 15:04:05"),
+				}
+				if err := store.CreateTrigger(t); err != nil {
+					log.Printf("[shadow-ai] failed to create trigger: %v", err)
+					continue
+				}
+				triggerIDs = append(triggerIDs, t.ID)
+			}
+
+			// Update config and status
+			saveShadowSettings(true, existing.SessionID, reqConfig)
+
+			log.Printf("[shadow-ai] re-enabled: session=%d, triggers=%v", existing.SessionID, triggerIDs)
+			c.JSON(http.StatusOK, gin.H{
+				"ok":         true,
+				"session_id": existing.SessionID,
+				"triggers":   triggerIDs,
+				"config":     reqConfig,
+				"reused":     true,
+			})
+			return
+		}
+		// Old session not found, fall through to full creation
+		log.Printf("[shadow-ai] old session #%d not found, creating new", existing.SessionID)
+	}
+
+	// === Full creation flow (first-time enable) ===
+
 	// Step 1: Create shadow AI session (with IsShadow flag)
 	session := &model.Session{
 		Title:    "影子AI",
@@ -168,20 +230,25 @@ func EnableShadowAI(c *gin.Context) {
 	// Step 6: Initialize shadow AI self-management memory files
 	initShadowMemoryFiles(session.ID, now, reqConfig)
 
-	// Step 7: Create default injection routes
-	defaultRoutes := []struct {
-		keywords   string
-		categories string
-	}{
-		{"开发|编程|代码|bug|fix|功能|feature", "domain,lessons,active"},
-		{"部署|上线|发布|运维|服务器", "domain,lessons,decisions"},
-		{"设计|架构|方案|评审|选型", "domain,decisions"},
-		{"错误|失败|问题|异常|报错", "lessons,error-genome"},
+	// Step 7: Create default injection routes (only if none exist)
+	existingRoutes, _ := store.ListInjectionRoutes()
+	if len(existingRoutes) == 0 {
+		defaultRoutes := []struct {
+			keywords   string
+			categories string
+		}{
+			{"开发|编程|代码|bug|fix|功能|feature", "domain,lessons,active"},
+			{"部署|上线|发布|运维|服务器", "domain,lessons,decisions"},
+			{"设计|架构|方案|评审|选型", "domain,decisions"},
+			{"错误|失败|问题|异常|报错", "lessons,error-genome"},
+		}
+		for _, dr := range defaultRoutes {
+			store.CreateInjectionRoute(dr.keywords, dr.categories)
+		}
+		log.Printf("[shadow-ai] created %d default injection routes", len(defaultRoutes))
+	} else {
+		log.Printf("[shadow-ai] skipped injection routes creation, %d already exist", len(existingRoutes))
 	}
-	for _, dr := range defaultRoutes {
-		store.CreateInjectionRoute(dr.keywords, dr.categories)
-	}
-	log.Printf("[shadow-ai] created %d default injection routes", len(defaultRoutes))
 
 	// Step 8: Save config to settings
 	saveShadowSettings(true, session.ID, reqConfig)
@@ -204,10 +271,10 @@ func DisableShadowAI(c *gin.Context) {
 		return
 	}
 
-	// Stop all triggers for the shadow session
+	// Delete all triggers for the shadow session (not just disable)
 	triggers, _ := store.ListTriggersBySession(status.SessionID)
 	for _, t := range triggers {
-		store.UpdateTriggerEnabled(t.ID, false)
+		store.DeleteTrigger(t.ID)
 	}
 
 	// Kill any running process
@@ -216,7 +283,7 @@ func DisableShadowAI(c *gin.Context) {
 	// Mark as disabled (keep session and data)
 	saveShadowSettings(false, status.SessionID, status.Config)
 
-	log.Printf("[shadow-ai] disabled: session=%d, stopped %d triggers", status.SessionID, len(triggers))
+	log.Printf("[shadow-ai] disabled: session=%d, deleted %d triggers", status.SessionID, len(triggers))
 
 	c.JSON(http.StatusOK, gin.H{
 		"ok":         true,
