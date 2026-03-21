@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { listFiles, readFileContent, writeFileContent, createFileApi, deleteFileApi, getTemplateVars, getDefaultFile, searchMemory } from '../composables/api'
-import type { TemplateVar, MemorySearchResult } from '../composables/api'
+import { listSchemas, createSchemaApi, updateSchemaApi, deleteSchemaApi } from '../composables/api'
+import type { TemplateVar, MemorySearchResult, SchemaItem } from '../composables/api'
 
 interface FileItem {
   name: string
@@ -19,9 +20,10 @@ const tabs: { key: string; label: string; desc: string }[] = [
   { key: 'rules', label: '全局', desc: '~/.ai-hub/rules/' },
   { key: 'memory', label: '记忆', desc: '~/.ai-hub/memory/' },
   { key: 'notes', label: '笔记', desc: '~/.ai-hub/notes/' },
+  { key: 'schemas', label: 'Schema', desc: 'JSON Schema 校验定义' },
 ]
 
-type Scope = 'rules' | 'memory' | 'notes'
+type Scope = 'rules' | 'memory' | 'notes' | 'schemas'
 
 const activeTab = ref<Scope>('rules')
 const activeTabDesc = ref('~/.ai-hub/rules/')
@@ -35,6 +37,111 @@ const newFileName = ref('')
 const templateVars = ref<TemplateVar[]>([])
 const showVars = ref(false)
 const restoringDefault = ref(false)
+
+// Schema state
+const schemas = ref<SchemaItem[]>([])
+const selectedSchema = ref<SchemaItem | null>(null)
+const schemaContent = ref('')
+const schemaLoading = ref(false)
+const schemaSaving = ref(false)
+const showNewSchemaDialog = ref(false)
+const newSchemaName = ref('')
+const newSchemaDefinition = ref('{\n  "type": "object",\n  "required": [],\n  "properties": {}\n}')
+const schemaJsonError = ref('')
+
+const isSchemaTab = () => activeTab.value === 'schemas'
+
+// Validate JSON and update error message
+function validateSchemaJson(json: string): boolean {
+  try {
+    JSON.parse(json)
+    schemaJsonError.value = ''
+    return true
+  } catch (e: any) {
+    schemaJsonError.value = e.message
+    return false
+  }
+}
+
+async function loadSchemas() {
+  schemaLoading.value = true
+  try {
+    schemas.value = await listSchemas()
+  } catch {
+    schemas.value = []
+  }
+  schemaLoading.value = false
+}
+
+function selectSchema(s: SchemaItem) {
+  selectedSchema.value = s
+  try {
+    const parsed = JSON.parse(s.definition)
+    schemaContent.value = JSON.stringify(parsed, null, 2)
+  } catch {
+    schemaContent.value = s.definition
+  }
+  schemaJsonError.value = ''
+}
+
+async function saveSchema() {
+  if (!selectedSchema.value) return
+  if (!validateSchemaJson(schemaContent.value)) return
+  schemaSaving.value = true
+  try {
+    const def = JSON.parse(schemaContent.value)
+    await updateSchemaApi(selectedSchema.value.name, def)
+    await loadSchemas()
+    const updated = schemas.value.find(s => s.name === selectedSchema.value!.name)
+    if (updated) selectSchema(updated)
+  } catch (e: any) {
+    alert('保存失败: ' + e.message)
+  }
+  schemaSaving.value = false
+}
+
+async function createNewSchema() {
+  const name = newSchemaName.value.trim()
+  if (!name) return
+  if (!validateSchemaJson(newSchemaDefinition.value)) {
+    alert('Schema 定义必须是合法的 JSON')
+    return
+  }
+  try {
+    const def = JSON.parse(newSchemaDefinition.value)
+    await createSchemaApi(name, def)
+    showNewSchemaDialog.value = false
+    newSchemaName.value = ''
+    newSchemaDefinition.value = '{\n  "type": "object",\n  "required": [],\n  "properties": {}\n}'
+    await loadSchemas()
+    const created = schemas.value.find(s => s.name === name)
+    if (created) selectSchema(created)
+  } catch (e: any) {
+    alert('创建失败: ' + e.message)
+  }
+}
+
+async function deleteSchema(s: SchemaItem) {
+  if (!confirm(`确定删除 Schema「${s.name}」？`)) return
+  try {
+    await deleteSchemaApi(s.name)
+    if (selectedSchema.value?.name === s.name) {
+      selectedSchema.value = null
+      schemaContent.value = ''
+    }
+    await loadSchemas()
+  } catch (e: any) {
+    alert('删除失败: ' + e.message)
+  }
+}
+
+function formatSchemaTime(t: string): string {
+  if (!t) return '-'
+  try {
+    const d = new Date(t)
+    return d.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }) + ' ' + d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+  } catch { return t }
+}
 
 // Vector search
 const searchQuery = ref('')
@@ -218,9 +325,15 @@ function insertVar(name: string) {
 
 watch(activeTab, () => {
   selectedFile.value = null
+  selectedSchema.value = null
   content.value = ''
+  schemaContent.value = ''
   activeTabDesc.value = tabs.find(t => t.key === activeTab.value)?.desc ?? ''
-  loadFiles()
+  if (activeTab.value === 'schemas') {
+    loadSchemas()
+  } else {
+    loadFiles()
+  }
 })
 
 onBeforeUnmount(() => {
@@ -241,7 +354,7 @@ onBeforeUnmount(() => {
         >{{ tab.label }}</button>
       </div>
       <div class="tab-desc">{{ activeTabDesc }}</div>
-      <div class="search-bar" ref="searchBarRef">
+      <div v-if="!isSchemaTab()" class="search-bar" ref="searchBarRef">
         <div class="search-inputs">
           <input
             v-model="searchQuery"
@@ -275,66 +388,143 @@ onBeforeUnmount(() => {
       </div>
     </div>
     <div class="manage-body">
-      <div class="file-list">
-        <div class="file-list-header">
-          <span class="file-list-title">文件</span>
-          <button class="btn-sm" @click="showNewDialog = true">+ 新建</button>
-        </div>
-        <div v-if="showNewDialog" class="new-file-dialog">
-          <input v-model="newFileName" placeholder="文件名.md" class="input-sm" @keyup.enter="createNew" />
-          <button class="btn-sm btn-accent" @click="createNew">创建</button>
-          <button class="btn-sm" @click="showNewDialog = false; newFileName = ''">取消</button>
-        </div>
-        <div v-if="loading" class="file-list-empty">加载中...</div>
-        <div v-else-if="files.length === 0" class="file-list-empty">暂无文件</div>
-        <div
-          v-for="f in files"
-          :key="f.path"
-          class="file-item"
-          :class="{ active: selectedFile?.path === f.path, ghost: !f.exists }"
-          @click="selectFile(f)"
-        >
-          <div class="file-info">
-            <span class="file-label">{{ getLabel(f) }}</span>
-            <span class="file-subpath">{{ f.name }}</span>
+      <!-- File mode (rules / memory / notes) -->
+      <template v-if="!isSchemaTab()">
+        <div class="file-list">
+          <div class="file-list-header">
+            <span class="file-list-title">文件</span>
+            <button class="btn-sm" @click="showNewDialog = true">+ 新建</button>
           </div>
-          <button class="btn-delete-file" @click.stop="deleteFile(f)" title="删除">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M18 6L6 18M6 6l12 12"/>
-            </svg>
-          </button>
-        </div>
-      </div>
-      <div class="editor-panel">
-        <div v-if="selectedFile" class="editor-content">
-          <div class="editor-toolbar">
-            <span class="editor-filename">{{ selectedFile.path }}</span>
-            <div class="editor-actions">
-              <button
-                v-if="activeTab === 'rules'"
-                class="btn-default"
-                :disabled="restoringDefault"
-                @click="restoreDefault"
-              >{{ restoringDefault ? '获取中...' : '默认' }}</button>
-              <button class="btn-vars" @click="showVars = !showVars">
-                {{ showVars ? '隐藏变量' : '插入变量' }}
-              </button>
-              <button class="btn-save" :disabled="saving" @click="saveFile">
-                {{ saving ? '保存中...' : '保存' }}
-              </button>
+          <div v-if="showNewDialog" class="new-file-dialog">
+            <input v-model="newFileName" placeholder="文件名.md" class="input-sm" @keyup.enter="createNew" />
+            <button class="btn-sm btn-accent" @click="createNew">创建</button>
+            <button class="btn-sm" @click="showNewDialog = false; newFileName = ''">取消</button>
+          </div>
+          <div v-if="loading" class="file-list-empty">加载中...</div>
+          <div v-else-if="files.length === 0" class="file-list-empty">暂无文件</div>
+          <div
+            v-for="f in files"
+            :key="f.path"
+            class="file-item"
+            :class="{ active: selectedFile?.path === f.path, ghost: !f.exists }"
+            @click="selectFile(f)"
+          >
+            <div class="file-info">
+              <span class="file-label">{{ getLabel(f) }}</span>
+              <span class="file-subpath">{{ f.name }}</span>
             </div>
+            <button class="btn-delete-file" @click.stop="deleteFile(f)" title="删除">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 6L6 18M6 6l12 12"/>
+              </svg>
+            </button>
           </div>
-          <div v-if="showVars" class="vars-panel">
-            <div v-for="v in templateVars" :key="v.name" class="var-item" @click="insertVar(v.name)">
-              <span class="var-tag">{{ varTag(v.name) }}</span>
-              <span class="var-desc">{{ v.desc }}</span>
-              <span class="var-value">{{ v.value }}</span>
-            </div>
-          </div>
-          <textarea v-model="content" class="editor-textarea" spellcheck="false" />
         </div>
-        <div v-else class="editor-empty">选择一个文件进行编辑</div>
-      </div>
+        <div class="editor-panel">
+          <div v-if="selectedFile" class="editor-content">
+            <div class="editor-toolbar">
+              <span class="editor-filename">{{ selectedFile.path }}</span>
+              <div class="editor-actions">
+                <button
+                  v-if="activeTab === 'rules'"
+                  class="btn-default"
+                  :disabled="restoringDefault"
+                  @click="restoreDefault"
+                >{{ restoringDefault ? '获取中...' : '默认' }}</button>
+                <button class="btn-vars" @click="showVars = !showVars">
+                  {{ showVars ? '隐藏变量' : '插入变量' }}
+                </button>
+                <button class="btn-save" :disabled="saving" @click="saveFile">
+                  {{ saving ? '保存中...' : '保存' }}
+                </button>
+              </div>
+            </div>
+            <div v-if="showVars" class="vars-panel">
+              <div v-for="v in templateVars" :key="v.name" class="var-item" @click="insertVar(v.name)">
+                <span class="var-tag">{{ varTag(v.name) }}</span>
+                <span class="var-desc">{{ v.desc }}</span>
+                <span class="var-value">{{ v.value }}</span>
+              </div>
+            </div>
+            <textarea v-model="content" class="editor-textarea" spellcheck="false" />
+          </div>
+          <div v-else class="editor-empty">选择一个文件进行编辑</div>
+        </div>
+      </template>
+
+      <!-- Schema mode -->
+      <template v-else>
+        <div class="file-list">
+          <div class="file-list-header">
+            <span class="file-list-title">SCHEMAS</span>
+            <button class="btn-sm" @click="showNewSchemaDialog = true">+ 新建</button>
+          </div>
+          <div v-if="showNewSchemaDialog" class="new-schema-dialog">
+            <input v-model="newSchemaName" placeholder="Schema 名称" class="input-sm" @keyup.enter="createNewSchema" />
+            <button class="btn-sm btn-accent" @click="createNewSchema">创建</button>
+            <button class="btn-sm" @click="showNewSchemaDialog = false; newSchemaName = ''">取消</button>
+          </div>
+          <div v-if="schemaLoading" class="file-list-empty">加载中...</div>
+          <div v-else-if="schemas.length === 0" class="file-list-empty">暂无 Schema</div>
+          <div
+            v-for="s in schemas"
+            :key="s.name"
+            class="file-item"
+            :class="{ active: selectedSchema?.name === s.name }"
+            @click="selectSchema(s)"
+          >
+            <div class="file-info">
+              <span class="file-label">{{ s.name }}</span>
+              <span class="file-subpath">{{ formatSchemaTime(s.updated_at) }}</span>
+            </div>
+            <button class="btn-delete-file" @click.stop="deleteSchema(s)" title="删除">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 6L6 18M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="editor-panel">
+          <div v-if="selectedSchema" class="editor-content">
+            <div class="editor-toolbar">
+              <span class="editor-filename">{{ selectedSchema.name }}</span>
+              <div class="editor-actions">
+                <span v-if="schemaJsonError" class="schema-error" title="JSON 格式错误">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                  JSON 错误
+                </span>
+                <button class="btn-save" :disabled="schemaSaving || !!schemaJsonError" @click="saveSchema">
+                  {{ schemaSaving ? '保存中...' : '保存' }}
+                </button>
+              </div>
+            </div>
+            <textarea
+              v-model="schemaContent"
+              class="editor-textarea schema-editor"
+              spellcheck="false"
+              @input="validateSchemaJson(schemaContent)"
+            />
+          </div>
+          <div v-else-if="showNewSchemaDialog" class="editor-content">
+            <div class="editor-toolbar">
+              <span class="editor-filename">新建 Schema - 定义 JSON</span>
+              <div class="editor-actions">
+                <span v-if="schemaJsonError" class="schema-error">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                  JSON 错误
+                </span>
+              </div>
+            </div>
+            <textarea
+              v-model="newSchemaDefinition"
+              class="editor-textarea schema-editor"
+              spellcheck="false"
+              @input="validateSchemaJson(newSchemaDefinition)"
+            />
+          </div>
+          <div v-else class="editor-empty">选择一个 Schema 进行编辑</div>
+        </div>
+      </template>
     </div>
   </div>
 </template>
@@ -364,7 +554,7 @@ onBeforeUnmount(() => {
 .btn-sm:hover { background: var(--bg-hover); color: var(--text-primary); }
 .btn-accent { color: var(--accent); }
 .btn-accent:hover { background: var(--accent-soft); }
-.new-file-dialog { display: flex; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--border); align-items: center; }
+.new-file-dialog, .new-schema-dialog { display: flex; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--border); align-items: center; }
 .input-sm {
   flex: 1; padding: 4px 8px; font-size: 12px; background: var(--bg-tertiary);
   border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-primary);
@@ -427,9 +617,15 @@ onBeforeUnmount(() => {
   font-size: 13px; line-height: 1.6; resize: none;
   background: var(--bg-primary); color: var(--text-primary); border: none;
 }
+.schema-editor { tab-size: 2; }
 .editor-empty {
   flex: 1; display: flex; align-items: center; justify-content: center;
   color: var(--text-muted); font-size: 14px;
+}
+/* Schema error indicator */
+.schema-error {
+  display: flex; align-items: center; gap: 4px; font-size: 11px;
+  color: var(--danger, #ef4444); flex-shrink: 0;
 }
 /* Vector search */
 .search-bar { margin-top: 10px; }

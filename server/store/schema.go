@@ -60,3 +60,15 @@ func DeleteSchema(name string) error {
 	_, err := DB.Exec(`DELETE FROM schemas WHERE name = ?`, name)
 	return err
 }
+
+// UpdateSchema updates a schema's definition by name (read-then-merge pattern).
+func UpdateSchema(name, definition string) (*model.Schema, error) {
+	_, err := DB.Exec(
+		`UPDATE schemas SET definition = ?, updated_at = CURRENT_TIMESTAMP WHERE name = ?`,
+		definition, name,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return GetSchema(name)
+}

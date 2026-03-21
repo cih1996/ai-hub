@@ -444,3 +444,20 @@ export const getServiceLogs = (id: number, lines = 100) =>
 export const getCompressSettings = () => request<CompressSettings>('/settings/compress')
 export const updateCompressSettings = (s: CompressSettings) =>
   request<{ ok: boolean }>('/settings/compress', { method: 'PUT', body: JSON.stringify(s) })
+
+// Schemas
+export interface SchemaItem {
+  id: number
+  name: string
+  definition: string
+  created_at: string
+  updated_at: string
+}
+export const listSchemas = () => request<SchemaItem[]>('/schemas')
+export const getSchemaByName = (name: string) => request<SchemaItem>('/schemas/' + encodeURIComponent(name))
+export const createSchemaApi = (name: string, definition: object) =>
+  request<SchemaItem>('/schemas', { method: 'POST', body: JSON.stringify({ name, definition }) })
+export const updateSchemaApi = (name: string, definition: object) =>
+  request<SchemaItem>('/schemas/' + encodeURIComponent(name), { method: 'PUT', body: JSON.stringify({ definition }) })
+export const deleteSchemaApi = (name: string) =>
+  request<{ ok: boolean }>('/schemas/' + encodeURIComponent(name), { method: 'DELETE' })

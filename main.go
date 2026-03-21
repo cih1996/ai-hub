@@ -355,6 +355,7 @@ func main() {
 		v1.GET("/schemas", api.ListSchemas)
 		v1.GET("/schemas/:name", api.GetSchema)
 		v1.POST("/schemas", api.CreateSchema)
+		v1.PUT("/schemas/:name", api.UpdateSchema)
 		v1.DELETE("/schemas/:name", api.DeleteSchema)
 
 		// File transfer

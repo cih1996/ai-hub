@@ -118,3 +118,51 @@ func DeleteSchema(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true, "name": name})
 }
+
+// UpdateSchema updates a schema definition by name (read-then-merge).
+// PUT /api/v1/schemas/:name
+func UpdateSchema(c *gin.Context) {
+	name := c.Param("name")
+	if name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
+		return
+	}
+
+	// Read existing schema first (read-then-merge pattern per API convention)
+	existing, err := store.GetSchema(name)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if existing == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "schema not found"})
+		return
+	}
+
+	var req struct {
+		Definition json.RawMessage `json:"definition"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Merge: only update definition if provided
+	definition := existing.Definition
+	if len(req.Definition) > 0 {
+		// Validate that definition is valid JSON
+		var parsed interface{}
+		if err := json.Unmarshal(req.Definition, &parsed); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "definition must be valid JSON: " + err.Error()})
+			return
+		}
+		definition = string(req.Definition)
+	}
+
+	updated, err := store.UpdateSchema(name, definition)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, updated)
+}
