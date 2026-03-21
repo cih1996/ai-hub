@@ -220,6 +220,10 @@ func main() {
 		v1.GET("/sessions/:id/errors", api.GetSessionErrors)
 		v1.GET("/stats/errors", api.GetErrorStats)
 
+		// Session health (Issue #213)
+		v1.GET("/sessions/:id/health", api.GetSessionHealth)
+		v1.PUT("/sessions/:id/health", api.UpdateSessionHealth)
+
 		// Session group transfer
 		v1.PUT("/sessions/:id/group", api.UpdateSessionGroup)
 

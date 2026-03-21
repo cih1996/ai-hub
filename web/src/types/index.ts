@@ -28,6 +28,10 @@ export interface Session {
   warning_count: number
   attention_enabled: boolean
   attention_rules: string
+  health_score: string
+  health_updated_at: string
+  correction_count: number
+  drift_count: number
   created_at: string
   updated_at: string
 }

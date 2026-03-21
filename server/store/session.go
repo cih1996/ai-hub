@@ -33,7 +33,7 @@ func CreateSession(s *model.Session) error {
 
 func ListSessions() ([]model.Session, error) {
 	// Exclude shadow sessions from normal listing
-	rows, err := DB.Query(`SELECT id, title, icon, provider_id, claude_session_id, work_dir, group_name, last_compress_msg_id, attention_enabled, attention_rules, is_shadow, parent_id, created_at, updated_at FROM sessions WHERE is_shadow = 0 ORDER BY updated_at DESC`)
+	rows, err := DB.Query(`SELECT id, title, icon, provider_id, claude_session_id, work_dir, group_name, last_compress_msg_id, attention_enabled, attention_rules, is_shadow, parent_id, health_score, health_updated_at, correction_count, drift_count, created_at, updated_at FROM sessions WHERE is_shadow = 0 ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -41,7 +41,7 @@ func ListSessions() ([]model.Session, error) {
 	var list []model.Session
 	for rows.Next() {
 		var s model.Session
-		if err := rows.Scan(&s.ID, &s.Title, &s.Icon, &s.ProviderID, &s.ClaudeSessionID, &s.WorkDir, &s.GroupName, &s.LastCompressMsgID, &s.AttentionEnabled, &s.AttentionRules, &s.IsShadow, &s.ParentID, &s.CreatedAt, &s.UpdatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.Title, &s.Icon, &s.ProviderID, &s.ClaudeSessionID, &s.WorkDir, &s.GroupName, &s.LastCompressMsgID, &s.AttentionEnabled, &s.AttentionRules, &s.IsShadow, &s.ParentID, &s.HealthScore, &s.HealthUpdatedAt, &s.CorrectionCount, &s.DriftCount, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			return nil, err
 		}
 		list = append(list, s)
@@ -52,8 +52,8 @@ func ListSessions() ([]model.Session, error) {
 func GetSession(id int64) (*model.Session, error) {
 	var s model.Session
 	err := DB.QueryRow(
-		`SELECT id, title, icon, provider_id, claude_session_id, work_dir, group_name, last_compress_msg_id, attention_enabled, attention_rules, is_shadow, parent_id, created_at, updated_at FROM sessions WHERE id = ?`, id,
-	).Scan(&s.ID, &s.Title, &s.Icon, &s.ProviderID, &s.ClaudeSessionID, &s.WorkDir, &s.GroupName, &s.LastCompressMsgID, &s.AttentionEnabled, &s.AttentionRules, &s.IsShadow, &s.ParentID, &s.CreatedAt, &s.UpdatedAt)
+		`SELECT id, title, icon, provider_id, claude_session_id, work_dir, group_name, last_compress_msg_id, attention_enabled, attention_rules, is_shadow, parent_id, health_score, health_updated_at, correction_count, drift_count, created_at, updated_at FROM sessions WHERE id = ?`, id,
+	).Scan(&s.ID, &s.Title, &s.Icon, &s.ProviderID, &s.ClaudeSessionID, &s.WorkDir, &s.GroupName, &s.LastCompressMsgID, &s.AttentionEnabled, &s.AttentionRules, &s.IsShadow, &s.ParentID, &s.HealthScore, &s.HealthUpdatedAt, &s.CorrectionCount, &s.DriftCount, &s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -548,12 +548,14 @@ func GetShadowSessionByParent(parentID int64) (*model.Session, error) {
 	err := DB.QueryRow(`
 		SELECT id, title, icon, provider_id, claude_session_id, work_dir, group_name,
 		       last_compress_msg_id, attention_enabled, attention_rules, is_shadow, parent_id,
+		       health_score, health_updated_at, correction_count, drift_count,
 		       created_at, updated_at
 		FROM sessions
 		WHERE parent_id = ? AND is_shadow = 1
 		ORDER BY created_at DESC LIMIT 1
 	`, parentID).Scan(&s.ID, &s.Title, &s.Icon, &s.ProviderID, &s.ClaudeSessionID, &s.WorkDir, &s.GroupName,
 		&s.LastCompressMsgID, &s.AttentionEnabled, &s.AttentionRules, &s.IsShadow, &s.ParentID,
+		&s.HealthScore, &s.HealthUpdatedAt, &s.CorrectionCount, &s.DriftCount,
 		&s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
 		return nil, err
@@ -575,4 +577,44 @@ func CleanupOldShadowSessions(maxAge time.Duration) (int64, error) {
 	}
 
 	return result.RowsAffected()
+}
+
+// ========== Health Score Functions (Issue #213) ==========
+
+// GetSessionHealth returns the health info for a session.
+func GetSessionHealth(sessionID int64) (score string, updatedAt string, correctionCount, driftCount int, err error) {
+	err = DB.QueryRow(
+		`SELECT health_score, health_updated_at, correction_count, drift_count FROM sessions WHERE id = ?`, sessionID,
+	).Scan(&score, &updatedAt, &correctionCount, &driftCount)
+	return
+}
+
+// UpdateSessionHealth sets the health score for a session.
+func UpdateSessionHealth(sessionID int64, score string) error {
+	now := time.Now().In(time.FixedZone("CST", 8*3600)).Format("2006-01-02 15:04:05")
+	_, err := DB.Exec(
+		`UPDATE sessions SET health_score=?, health_updated_at=?, updated_at=? WHERE id=?`,
+		score, now, time.Now(), sessionID,
+	)
+	return err
+}
+
+// IncrementCorrectionCount increments the correction_count for a session.
+func IncrementCorrectionCount(sessionID int64) error {
+	now := time.Now().In(time.FixedZone("CST", 8*3600)).Format("2006-01-02 15:04:05")
+	_, err := DB.Exec(
+		`UPDATE sessions SET correction_count = correction_count + 1, health_updated_at=?, updated_at=? WHERE id=?`,
+		now, time.Now(), sessionID,
+	)
+	return err
+}
+
+// IncrementDriftCount increments the drift_count for a session.
+func IncrementDriftCount(sessionID int64) error {
+	now := time.Now().In(time.FixedZone("CST", 8*3600)).Format("2006-01-02 15:04:05")
+	_, err := DB.Exec(
+		`UPDATE sessions SET drift_count = drift_count + 1, health_updated_at=?, updated_at=? WHERE id=?`,
+		now, time.Now(), sessionID,
+	)
+	return err
 }

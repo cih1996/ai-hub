@@ -58,6 +58,11 @@ type Session struct {
 	// Shadow session fields (for attention mode)
 	IsShadow       bool  `json:"is_shadow"`        // 是否为影子会话
 	ParentID       int64 `json:"parent_id"`        // 本体会话 ID（影子会话专用）
+	// Health fields (Issue #213)
+	HealthScore     string `json:"health_score"`      // green | yellow | red (empty = unset)
+	HealthUpdatedAt string `json:"health_updated_at"` // 最后评估时间
+	CorrectionCount int    `json:"correction_count"`  // 用户纠正次数
+	DriftCount      int    `json:"drift_count"`       // 规则偏离次数
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }
