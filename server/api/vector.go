@@ -4,6 +4,7 @@ import (
 	"ai-hub/server/core"
 	"ai-hub/server/store"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 // resolveTeamScope looks up a session's group_name and returns the team scope.
@@ -623,10 +625,28 @@ func vectorWrite(c *gin.Context, defaultScope string) {
 		Scope         string                 `json:"scope"`           // optional: explicit scope override
 		SessionID     int64                  `json:"session_id"`      // optional: auto-resolve session/team scope
 		ExtraMetadata map[string]interface{} `json:"extra_metadata"`  // optional: structured memory fields (tags/type/status/version etc.)
+		Schema        string                 `json:"schema"`          // optional: schema name for validation before write
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+
+	// Schema validation: if schema name is specified, validate content against JSON Schema
+	if req.Schema != "" {
+		schemaDef, err := store.GetSchema(req.Schema)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load schema: " + err.Error()})
+			return
+		}
+		if schemaDef == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "schema '" + req.Schema + "' not found"})
+			return
+		}
+		if err := validateContentWithSchema(req.Content, schemaDef.Definition); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "schema validation failed: " + err.Error()})
+			return
+		}
 	}
 
 	// Resolve scope with three-layer isolation
@@ -1227,4 +1247,39 @@ func GetVectorDoc(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, doc)
+}
+
+// validateContentWithSchema validates content against a JSON Schema definition.
+// Content can be:
+//   - A JSON string: validated directly against the schema
+//   - Non-JSON (e.g. markdown): wrapped as {"content": "<text>"} and validated
+func validateContentWithSchema(content, schemaDef string) error {
+	// Parse the JSON Schema definition into a Go value
+	var schemaDoc interface{}
+	if err := json.Unmarshal([]byte(schemaDef), &schemaDoc); err != nil {
+		return fmt.Errorf("invalid schema definition: %w", err)
+	}
+
+	// Create compiler and add the schema as a resource
+	compiler := jsonschema.NewCompiler()
+	if err := compiler.AddResource("schema.json", schemaDoc); err != nil {
+		return fmt.Errorf("failed to add schema resource: %w", err)
+	}
+	sch, err := compiler.Compile("schema.json")
+	if err != nil {
+		return fmt.Errorf("failed to compile schema: %w", err)
+	}
+
+	// Try to parse content as JSON first
+	var doc interface{}
+	if err := json.Unmarshal([]byte(content), &doc); err != nil {
+		// Not valid JSON — wrap as {"content": "..."}
+		doc = map[string]interface{}{"content": content}
+	}
+
+	// Validate
+	if err := sch.Validate(doc); err != nil {
+		return err
+	}
+	return nil
 }

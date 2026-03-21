@@ -14,10 +14,11 @@ import (
 func RunWrite(c *client.Client, args []string) int {
 	filename, flagArgs := SplitQueryAndFlags(args)
 
-	var level, content string
+	var level, content, schema string
 	fs := flag.NewFlagSet("write", flag.ExitOnError)
 	fs.StringVar(&level, "level", "", "Level: session, team, or global (required)")
 	fs.StringVar(&content, "content", "", "Content to write (or use stdin)")
+	fs.StringVar(&schema, "schema", "", "Schema name for validation before write (optional)")
 
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, `Usage: ai-hub write <filename> --level <level> [flags]
@@ -28,10 +29,12 @@ Flags:
 `)
 		PrintLevelUsage()
 		fmt.Fprintf(os.Stderr, `  --content <text>    Content to write (or pipe via stdin)
+  --schema <name>     Schema name for validation before write (optional)
 
 Examples:
   ai-hub write "note.md" --level session --content "# My Note"
   echo "hello" | ai-hub write "note.md" --level team
+  ai-hub write "config.json" --level team --schema my-schema --content '{"title":"test"}'
 `)
 	}
 
@@ -79,6 +82,11 @@ Examples:
 		"scope":     scope,
 		"file_name": filename,
 		"content":   content,
+	}
+
+	// Add schema if specified
+	if schema != "" {
+		reqBody["schema"] = schema
 	}
 
 	respData, err := c.POST("/vector/write", reqBody)

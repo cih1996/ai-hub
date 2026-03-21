@@ -187,3 +187,12 @@ type Mount struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
+
+// Schema JSON Schema 定义（用于结构化记忆校验）
+type Schema struct {
+	ID         int64  `json:"id"`
+	Name       string `json:"name"`       // 唯一标识名
+	Definition string `json:"definition"` // JSON Schema 定义（JSON 字符串）
+	CreatedAt  string `json:"created_at"`
+	UpdatedAt  string `json:"updated_at"`
+}

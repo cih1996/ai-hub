@@ -351,6 +351,12 @@ func main() {
 		v1.POST("/mounts", api.CreateMount)
 		v1.DELETE("/mounts/:alias", api.DeleteMount)
 
+		// Schemas (JSON Schema definitions for structured memory)
+		v1.GET("/schemas", api.ListSchemas)
+		v1.GET("/schemas/:name", api.GetSchema)
+		v1.POST("/schemas", api.CreateSchema)
+		v1.DELETE("/schemas/:name", api.DeleteSchema)
+
 		// File transfer
 		v1.POST("/transfer/upload", api.TransferInit)
 		v1.PUT("/transfer/upload/:id/chunk", api.TransferChunk)

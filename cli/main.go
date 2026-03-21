@@ -164,6 +164,8 @@ func Run(args []string) int {
 		return commands.RunReload(c, commandArgs)
 	case "skills":
 		return commands.RunSkills(c, commandArgs)
+	case "schemas":
+		return commands.RunSchemas(c, commandArgs)
 	case "mount":
 		return commands.RunMount(c, commandArgs)
 	case "transfer":
@@ -275,6 +277,12 @@ Skills:
   skills create <name> --content "..."  Create a new skill
   skills update <name> --content "..."  Update skill content
   skills delete <name>                  Delete a skill
+
+Schemas:
+  schemas            List all schemas (default)
+  schemas get <name> Show schema definition
+  schemas create <name> --definition '<json>'  Create a schema
+  schemas delete <name>                        Delete a schema
 
 System:
   rules              Manage session rules (get/set/delete)
