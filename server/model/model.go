@@ -58,6 +58,11 @@ type Session struct {
 	// Shadow session fields (for attention mode)
 	IsShadow       bool  `json:"is_shadow"`        // 是否为影子会话
 	ParentID       int64 `json:"parent_id"`        // 本体会话 ID（影子会话专用）
+	// Health fields (Issue #213)
+	HealthScore     string `json:"health_score"`      // green | yellow | red (empty = unset)
+	HealthUpdatedAt string `json:"health_updated_at"` // 最后评估时间
+	CorrectionCount int    `json:"correction_count"`  // 用户纠正次数
+	DriftCount      int    `json:"drift_count"`       // 规则偏离次数
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }
@@ -186,6 +191,33 @@ type Mount struct {
 	LocalPath string    `json:"local_path"` // 本地目录路径
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// Hook 事件 Hook（事件驱动触发）
+type Hook struct {
+	ID            int64  `json:"id"`
+	Event         string `json:"event"`          // session.created | message.received | message.count | session.error
+	Condition     string `json:"condition"`       // 条件表达式，如 content_match:xxx 或 count_gt:100
+	TargetSession int64  `json:"target_session"`  // 触发时发消息到哪个会话
+	Payload       string `json:"payload"`         // 消息模板，支持 {source_session_id} 等占位符
+	Enabled       bool   `json:"enabled"`
+	FiredCount    int    `json:"fired_count"`
+	CreatedAt     string `json:"created_at"`
+	UpdatedAt     string `json:"updated_at"`
+}
+
+// MemoryChangelog 记忆变更日志
+type MemoryChangelog struct {
+	ID         int64  `json:"id"`
+	FileName   string `json:"file_name"`   // 记忆文件名
+	Scope      string `json:"scope"`       // 作用域
+	ChangeType string `json:"change_type"` // create | update | delete
+	SessionID  int64  `json:"session_id"`  // 变更者的会话 ID
+	Diff       string `json:"diff"`        // 变更内容 diff
+	Schema     string `json:"schema"`      // 使用的 schema 名称
+	Version    int    `json:"version"`     // 版本号（自增）
+	Content    string `json:"content"`     // 变更后的完整内容
+	CreatedAt  string `json:"created_at"`
 }
 
 // Schema JSON Schema 定义（用于结构化记忆校验）

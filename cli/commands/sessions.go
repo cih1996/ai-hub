@@ -51,6 +51,11 @@ func RunSessions(c *client.Client, args []string) int {
 		return sessionMove(c, id, groupName, hasGroupFlag)
 	}
 
+	// Check for "health" subcommand
+	if len(args) > 1 && args[1] == "health" {
+		return sessionHealth(c, id, args[2:])
+	}
+
 	return sessionDetail(c, id)
 }
 
@@ -436,4 +441,104 @@ func sessionMove(c *client.Client, id int64, groupName string, hasGroupFlag bool
 
 	fmt.Printf("Session #%d moved: %s → %s\n", id, resp.OldGroup, resp.NewGroup)
 	return 0
+}
+
+// sessionHealth handles the "sessions <id> health" subcommand
+func sessionHealth(c *client.Client, id int64, args []string) int {
+	var setScore, incrField string
+
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--set":
+			if i+1 < len(args) {
+				i++
+				setScore = args[i]
+			}
+		case "--incr":
+			if i+1 < len(args) {
+				i++
+				incrField = args[i]
+			}
+		}
+	}
+
+	// If --set or --incr provided, update
+	if setScore != "" || incrField != "" {
+		body := map[string]interface{}{}
+		if setScore != "" {
+			body["health_score"] = setScore
+		}
+		if incrField != "" {
+			body["incr"] = incrField
+		}
+
+		respData, err := c.PUT(fmt.Sprintf("/sessions/%d/health", id), body)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return 1
+		}
+
+		var resp struct {
+			HealthScore     string `json:"health_score"`
+			CorrectionCount int    `json:"correction_count"`
+			DriftCount      int    `json:"drift_count"`
+		}
+		json.Unmarshal(respData, &resp)
+
+		scoreDisplay := resp.HealthScore
+		if scoreDisplay == "" {
+			scoreDisplay = "(unset)"
+		}
+		fmt.Printf("Session #%d health updated:\n", id)
+		fmt.Printf("  健康度: %s\n", colorScore(scoreDisplay))
+		fmt.Printf("  纠正次数: %d\n", resp.CorrectionCount)
+		fmt.Printf("  偏离次数: %d\n", resp.DriftCount)
+		return 0
+	}
+
+	// Default: show health
+	respData, err := c.GET(fmt.Sprintf("/sessions/%d/health", id))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return 1
+	}
+
+	var resp struct {
+		SessionID       int64  `json:"session_id"`
+		HealthScore     string `json:"health_score"`
+		HealthUpdatedAt string `json:"health_updated_at"`
+		CorrectionCount int    `json:"correction_count"`
+		DriftCount      int    `json:"drift_count"`
+	}
+	if err := json.Unmarshal(respData, &resp); err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing response: %v\n", err)
+		return 1
+	}
+
+	scoreDisplay := resp.HealthScore
+	if scoreDisplay == "" {
+		scoreDisplay = "(unset)"
+	}
+	fmt.Printf("Session #%d health:\n", id)
+	fmt.Printf("  健康度: %s\n", colorScore(scoreDisplay))
+	fmt.Printf("  纠正次数: %d\n", resp.CorrectionCount)
+	fmt.Printf("  偏离次数: %d\n", resp.DriftCount)
+	if resp.HealthUpdatedAt != "" {
+		fmt.Printf("  更新时间: %s\n", FormatTime(resp.HealthUpdatedAt))
+	}
+	return 0
+}
+
+// colorScore adds a visual indicator for health scores
+func colorScore(score string) string {
+	switch score {
+	case "green":
+		return "green (healthy)"
+	case "yellow":
+		return "yellow (warning)"
+	case "red":
+		return "red (critical)"
+	default:
+		return score
+	}
 }

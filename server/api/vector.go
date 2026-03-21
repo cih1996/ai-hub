@@ -2,6 +2,7 @@ package api
 
 import (
 	"ai-hub/server/core"
+	"ai-hub/server/model"
 	"ai-hub/server/store"
 	"encoding/json"
 	"fmt"
@@ -710,6 +711,16 @@ func vectorWrite(c *gin.Context, defaultScope string) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
 		return
 	}
+
+	// Read old content before write (for changelog diff)
+	var oldContent string
+	var isCreate bool
+	if oldData, err := os.ReadFile(path); err == nil {
+		oldContent = string(oldData)
+	} else {
+		isCreate = true
+	}
+
 	os.MkdirAll(dir, 0755)
 	if err := os.WriteFile(path, []byte(req.Content), 0644); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -723,6 +734,25 @@ func vectorWrite(c *gin.Context, defaultScope string) {
 	if len(req.ExtraMetadata) > 0 && core.Vector != nil {
 		docID := filepath.Base(path)
 		core.Vector.UpdateMetadata(scope, docID, req.ExtraMetadata)
+	}
+
+	// Record changelog for schema-validated writes (Issue #212)
+	if req.Schema != "" {
+		changeType := "update"
+		if isCreate {
+			changeType = "create"
+		}
+		diff := buildSimpleDiff(oldContent, req.Content)
+		cl := &model.MemoryChangelog{
+			FileName:   req.FileName,
+			Scope:      scope,
+			ChangeType: changeType,
+			SessionID:  req.SessionID,
+			Diff:       diff,
+			Schema:     req.Schema,
+			Content:    req.Content,
+		}
+		store.AddChangelog(cl)
 	}
 
 	c.JSON(http.StatusOK, gin.H{"ok": true, "file_name": req.FileName, "scope": scope})
@@ -1304,4 +1334,51 @@ func validateContentWithSchema(content, schemaDef string) error {
 		return err
 	}
 	return nil
+}
+
+// buildSimpleDiff creates a simple diff summary between old and new content.
+func buildSimpleDiff(oldContent, newContent string) string {
+	if oldContent == "" {
+		return "(new file)"
+	}
+	if newContent == "" {
+		return "(deleted)"
+	}
+	if oldContent == newContent {
+		return "(no change)"
+	}
+
+	oldLines := strings.Split(oldContent, "\n")
+	newLines := strings.Split(newContent, "\n")
+
+	var added, removed int
+	// Simple line-based diff counting
+	oldSet := make(map[string]int)
+	for _, l := range oldLines {
+		oldSet[l]++
+	}
+	newSet := make(map[string]int)
+	for _, l := range newLines {
+		newSet[l]++
+	}
+	for l, c := range newSet {
+		if oc, ok := oldSet[l]; ok {
+			if c > oc {
+				added += c - oc
+			}
+		} else {
+			added += c
+		}
+	}
+	for l, c := range oldSet {
+		if nc, ok := newSet[l]; ok {
+			if c > nc {
+				removed += c - nc
+			}
+		} else {
+			removed += c
+		}
+	}
+
+	return fmt.Sprintf("+%d/-%d lines (%d→%d)", added, removed, len(oldLines), len(newLines))
 }

@@ -14,6 +14,8 @@ var dataDir string
 
 func InitDataDir(dir string) {
 	dataDir = dir
+	// Initialize hook stream callback (Issue #211)
+	initHookStreamCallback()
 }
 
 type SkillInfo struct {

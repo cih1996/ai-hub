@@ -352,6 +352,12 @@ onMounted(async () => {
                   :class="s.process_state === 'busy' ? 'busy' : 'idle'"
                   :title="s.process_state === 'busy' ? '运行中' : '空闲'"
                 ></span>
+                <span
+                  v-if="s.health_score"
+                  class="health-dot"
+                  :class="s.health_score"
+                  :title="'健康度: ' + s.health_score + (s.correction_count ? ' | 纠正: ' + s.correction_count : '')"
+                ></span>
                 <svg v-if="s.has_triggers" class="trigger-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
                 </svg>
@@ -746,6 +752,16 @@ onMounted(async () => {
 .process-dot.idle {
   background: var(--warning);
 }
+.health-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+.health-dot.green { background: #22c55e; }
+.health-dot.yellow { background: #eab308; }
+.health-dot.red { background: #ef4444; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .session-time {
   font-size: 11px;

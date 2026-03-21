@@ -187,6 +187,12 @@ func migrate() error {
 	DB.Exec(`ALTER TABLE sessions ADD COLUMN is_shadow INTEGER NOT NULL DEFAULT 0`)
 	DB.Exec(`ALTER TABLE sessions ADD COLUMN parent_id INTEGER NOT NULL DEFAULT 0`)
 
+	// Sessions: add health fields (Issue #213)
+	DB.Exec(`ALTER TABLE sessions ADD COLUMN health_score TEXT NOT NULL DEFAULT ''`)
+	DB.Exec(`ALTER TABLE sessions ADD COLUMN health_updated_at TEXT NOT NULL DEFAULT ''`)
+	DB.Exec(`ALTER TABLE sessions ADD COLUMN correction_count INTEGER NOT NULL DEFAULT 0`)
+	DB.Exec(`ALTER TABLE sessions ADD COLUMN drift_count INTEGER NOT NULL DEFAULT 0`)
+
 	// Mounts table (static file serving)
 	DB.Exec(`CREATE TABLE IF NOT EXISTS mounts (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -210,6 +216,12 @@ func migrate() error {
 
 	// Injection router table (Issue #210: structured memory injection)
 	InitInjectionRouterTable()
+
+	// Hooks table (Issue #211: event hook system)
+	InitHooksTable()
+
+	// Memory changelog table (Issue #212: memory change tracking)
+	InitChangelogTable()
 
 	return nil
 }
