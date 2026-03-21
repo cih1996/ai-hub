@@ -346,6 +346,13 @@ func SendChat(c *gin.Context) {
 		sessionJSON, _ := json.Marshal(session)
 		broadcast(WSMessage{Type: "session_created", SessionID: session.ID, Content: string(sessionJSON)})
 
+		// Fire session.created hooks
+		go core.FireHooks(core.HookEvent{
+			Type:            "session.created",
+			SourceSessionID: session.ID,
+			Content:         req.Content,
+		})
+
 		// Write session rules before starting stream (avoids race condition with putSessionRules)
 		if req.SessionRules != "" {
 			dir := sessionRulesDir()
@@ -409,6 +416,9 @@ func SendChat(c *gin.Context) {
 			return
 		}
 	}
+
+	// Fire message.received hooks (for both new and existing sessions)
+	go fireMessageReceivedHook(session.ID, req.Content)
 
 	// Kick off streaming in background — results are pushed via WS broadcast
 	triggerMsgID := store.GetLastUserMessageID(session.ID)
@@ -1145,6 +1155,15 @@ func extractAndSaveErrors(sessionID, messageID int64, content string) {
 		}
 		if err := store.AddAIError(e); err != nil {
 			log.Printf("[ai-error] save failed: %v", err)
+		}
+
+		// Fire session.error hooks for error-level events
+		if m[1] == "error" {
+			go core.FireHooks(core.HookEvent{
+				Type:            "session.error",
+				SourceSessionID: sessionID,
+				Content:         strings.TrimSpace(m[2]),
+			})
 		}
 	}
 }
@@ -1935,4 +1954,34 @@ func truncateString(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+// fireMessageReceivedHook fires message.received and message.count hooks.
+func fireMessageReceivedHook(sessionID int64, content string) {
+	// Get message count for message.count hooks
+	msgCount, _ := store.GetMessagesCount(sessionID)
+
+	// Fire message.received
+	core.FireHooks(core.HookEvent{
+		Type:            "message.received",
+		SourceSessionID: sessionID,
+		Content:         content,
+		MessageCount:    msgCount,
+	})
+
+	// Fire message.count
+	core.FireHooks(core.HookEvent{
+		Type:            "message.count",
+		SourceSessionID: sessionID,
+		Content:         content,
+		MessageCount:    msgCount,
+	})
+}
+
+// initHookStreamCallback registers the stream callback for hook-triggered messages.
+// Must be called during api initialization.
+func initHookStreamCallback() {
+	core.SetHookStreamCallback(func(session *model.Session, content string, triggerMsgID int64) {
+		go runStream(session, content, false, triggerMsgID)
+	})
 }

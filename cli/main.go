@@ -172,6 +172,8 @@ func Run(args []string) int {
 		return commands.RunTransfer(c, commandArgs)
 	case "injection-router":
 		return commands.RunInjectionRouter(c, commandArgs)
+	case "hooks":
+		return commands.RunHooks(c, commandArgs)
 	case "mem":
 		return runMem(c, globalFlags.GroupName, commandArgs)
 	default:
@@ -322,6 +324,13 @@ Injection Router:
   injection-router list                                        List injection rules
   injection-router set --keywords "kw" --inject "categories"   Create injection rule
   injection-router delete <id>                                 Delete injection rule
+
+Hooks:
+  hooks list [--event <type>]         List event hooks
+  hooks create --event <type> --target-session <id> --payload <msg> [--condition <cond>]
+  hooks delete <id>                   Delete a hook
+  hooks enable <id>                   Enable a hook
+  hooks disable <id>                  Disable a hook
 
 Use "ai-hub <command> --help" for more information about a command.`)
 }

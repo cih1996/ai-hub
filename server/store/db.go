@@ -211,6 +211,9 @@ func migrate() error {
 	// Injection router table (Issue #210: structured memory injection)
 	InitInjectionRouterTable()
 
+	// Hooks table (Issue #211: event hook system)
+	InitHooksTable()
+
 	return nil
 }
 

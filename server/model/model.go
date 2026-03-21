@@ -188,6 +188,19 @@ type Mount struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// Hook 事件 Hook（事件驱动触发）
+type Hook struct {
+	ID            int64  `json:"id"`
+	Event         string `json:"event"`          // session.created | message.received | message.count | session.error
+	Condition     string `json:"condition"`       // 条件表达式，如 content_match:xxx 或 count_gt:100
+	TargetSession int64  `json:"target_session"`  // 触发时发消息到哪个会话
+	Payload       string `json:"payload"`         // 消息模板，支持 {source_session_id} 等占位符
+	Enabled       bool   `json:"enabled"`
+	FiredCount    int    `json:"fired_count"`
+	CreatedAt     string `json:"created_at"`
+	UpdatedAt     string `json:"updated_at"`
+}
+
 // Schema JSON Schema 定义（用于结构化记忆校验）
 type Schema struct {
 	ID         int64  `json:"id"`

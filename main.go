@@ -378,6 +378,15 @@ func main() {
 		v1.GET("/structured-memory/:category", api.GetStructuredMemory)
 		v1.PUT("/structured-memory/:category", api.PutStructuredMemory)
 
+		// Hooks (Issue #211: event hook system)
+		v1.GET("/hooks", api.ListHooks)
+		v1.GET("/hooks/:id", api.GetHook)
+		v1.POST("/hooks", api.CreateHook)
+		v1.PUT("/hooks/:id", api.UpdateHook)
+		v1.DELETE("/hooks/:id", api.DeleteHook)
+		v1.POST("/hooks/:id/enable", api.EnableHook)
+		v1.POST("/hooks/:id/disable", api.DisableHook)
+
 		// Anthropic API reverse proxy for precise token metering (Issue #72)
 		v1.Any("/proxy/s/:session_id/anthropic/*path", api.HandleAnthropicProxy)
 		v1.Any("/proxy/anthropic/*path", api.HandleAnthropicProxy) // legacy compat
