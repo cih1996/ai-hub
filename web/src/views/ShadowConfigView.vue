@@ -260,7 +260,9 @@ onMounted(() => {
       <div class="config-section">
         <div class="section-header clickable" @click="showAdvanced = !showAdvanced">
           <h3>高级信息</h3>
-          <span class="toggle-icon">{{ showAdvanced ? '▼' : '▶' }}</span>
+          <svg class="toggle-icon" :class="{ expanded: showAdvanced }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="9 18 15 12 9 6"/>
+          </svg>
         </div>
 
         <div v-if="showAdvanced" class="advanced-info">
@@ -342,8 +344,13 @@ onMounted(() => {
 }
 
 .toggle-icon {
-  font-size: 12px;
   color: var(--text-secondary);
+  transition: transform 0.2s ease;
+  display: inline-block;
+}
+
+.toggle-icon.expanded {
+  transform: rotate(90deg);
 }
 
 .status-card {
