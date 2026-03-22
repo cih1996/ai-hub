@@ -378,6 +378,7 @@ onMounted(() => {
 .routes-table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
 }
 
 .routes-table thead {
@@ -394,10 +395,19 @@ onMounted(() => {
   border-bottom: 1px solid var(--border);
 }
 
+/* 列宽优化 */
+.routes-table th:nth-child(1) { width: 80px; }   /* ID */
+.routes-table th:nth-child(2) { width: 30%; }    /* 关键词 */
+.routes-table th:nth-child(3) { width: 30%; }    /* 注入分类 */
+.routes-table th:nth-child(4) { width: 150px; }  /* 创建时间 */
+.routes-table th:nth-child(5) { width: 200px; }  /* 操作 */
+
 .routes-table td {
   padding: 16px;
   border-bottom: 1px solid var(--border);
   color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .routes-table tbody tr:hover {

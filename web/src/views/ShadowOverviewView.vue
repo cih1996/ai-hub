@@ -182,16 +182,16 @@ onMounted(() => {
           <div class="metric-content">
             <div class="health-stats">
               <div class="health-item">
-                <span class="health-dot healthy"></span>
-                <span class="health-count">{{ metrics?.session_health?.healthy || 0 }}</span>
+                <span class="health-badge healthy">{{ metrics?.session_health?.healthy || 0 }}</span>
+                <span class="health-label">健康</span>
               </div>
               <div class="health-item">
-                <span class="health-dot warning"></span>
-                <span class="health-count">{{ metrics?.session_health?.warning || 0 }}</span>
+                <span class="health-badge warning">{{ metrics?.session_health?.warning || 0 }}</span>
+                <span class="health-label">警告</span>
               </div>
               <div class="health-item">
-                <span class="health-dot error"></span>
-                <span class="health-count">{{ metrics?.session_health?.error || 0 }}</span>
+                <span class="health-badge error">{{ metrics?.session_health?.error || 0 }}</span>
+                <span class="health-label">错误</span>
               </div>
             </div>
           </div>
@@ -426,32 +426,40 @@ onMounted(() => {
 
 .health-item {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
 }
 
-.health-dot {
-  width: 12px;
-  height: 12px;
+.health-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
   border-radius: 50%;
-}
-
-.health-dot.healthy {
-  background: #10b981;
-}
-
-.health-dot.warning {
-  background: #f59e0b;
-}
-
-.health-dot.error {
-  background: #ef4444;
-}
-
-.health-count {
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 600;
-  color: var(--text-primary);
+}
+
+.health-badge.healthy {
+  background: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+}
+
+.health-badge.warning {
+  background: rgba(245, 158, 11, 0.1);
+  color: #f59e0b;
+}
+
+.health-badge.error {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+}
+
+.health-label {
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
 .metric-label {

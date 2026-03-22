@@ -29,11 +29,14 @@ type ShadowAIConfig struct {
 
 // ShadowAIStatus holds the shadow AI status response
 type ShadowAIStatus struct {
-	Enabled   bool            `json:"enabled"`
-	SessionID int64           `json:"session_id"`
-	Status    string          `json:"status"` // "running" | "paused" | "uninitialized"
-	Config    ShadowAIConfig  `json:"config"`
-	Triggers  []model.Trigger `json:"triggers,omitempty"`
+	Enabled       bool            `json:"enabled"`
+	SessionID     int64           `json:"session_id"`
+	Status        string          `json:"status"` // "running" | "paused" | "uninitialized"
+	Config        ShadowAIConfig  `json:"config"`
+	Triggers      []model.Trigger `json:"triggers,omitempty"`
+	CreatedAt     string          `json:"created_at,omitempty"`     // 影子AI创建时间
+	LastActivity  string          `json:"last_activity,omitempty"`  // 最后活动时间
+	UptimeSeconds int64           `json:"uptime_seconds,omitempty"` // 运行时长（秒）
 }
 
 var defaultShadowConfig = ShadowAIConfig{
@@ -533,9 +536,37 @@ func loadShadowStatus() ShadowAIStatus {
 
 	if status.Enabled && status.SessionID > 0 {
 		status.Status = "running"
-		// Check if triggers are active
+
+		// Get session info to fill created_at and calculate uptime
+		if session, err := store.GetSession(status.SessionID); err == nil && session != nil {
+			// Fill created_at (convert time.Time to string)
+			status.CreatedAt = session.CreatedAt.Format("2006-01-02 15:04:05")
+
+			// Calculate uptime_seconds
+			status.UptimeSeconds = int64(time.Since(session.CreatedAt).Seconds())
+		}
+
+		// Check if triggers are active and get last activity time
 		triggers, _ := store.ListTriggersBySession(status.SessionID)
 		status.Triggers = triggers
+
+		// Find the latest last_fired_at as last_activity
+		var latestActivity time.Time
+		for _, t := range triggers {
+			if t.LastFiredAt != "" {
+				if firedTime, err := time.Parse("2006-01-02 15:04:05", t.LastFiredAt); err == nil {
+					if firedTime.After(latestActivity) {
+						latestActivity = firedTime
+					}
+				}
+			}
+		}
+
+		if !latestActivity.IsZero() {
+			status.LastActivity = latestActivity.Format("2006-01-02 15:04:05")
+		}
+
+		// Check if all triggers are disabled
 		allDisabled := true
 		for _, t := range triggers {
 			if t.Enabled {
