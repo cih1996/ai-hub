@@ -80,25 +80,6 @@ function exportSession(s: Session) {
 }
 
 // Import
-const importInput = ref<HTMLInputElement | null>(null)
-const importing = ref(false)
-
-async function handleImport(e: Event) {
-  const input = e.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (!file) return
-  importing.value = true
-  try {
-    const result = await api.importArchive(file)
-    await store.loadSessions()
-    alert(`导入成功：${result.sessions_imported} 个会话${result.team_files_imported ? '，' + result.team_files_imported + ' 个团队文件' : ''}${result.warnings?.length ? '\n注意：' + result.warnings.join('\n') : ''}`)
-  } catch (err: any) {
-    alert('导入失败：' + (err.message || '未知错误'))
-  } finally {
-    importing.value = false
-    input.value = ''
-  }
-}
 
 // Team detail modal
 const teamDetailGroup = ref('')  // non-empty = show modal for this group_name
@@ -410,17 +391,6 @@ onMounted(async () => {
           </svg>
           <span>设置</span>
         </button>
-        <button class="theme-btn" @click="importInput?.click()" :title="importing ? '导入中…' : '导入会话'" :disabled="importing">
-          <svg v-if="!importing" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-            <polyline points="7 10 12 15 17 10"/>
-            <line x1="12" y1="15" x2="12" y2="3"/>
-          </svg>
-          <svg v-else class="streaming-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 12a9 9 0 11-6.219-8.56"/>
-          </svg>
-        </button>
-        <input ref="importInput" type="file" accept=".tar.gz,.tgz" style="display:none" @change="handleImport" />
         <button class="theme-btn" @click="toggleTheme" :title="'主题: ' + themeModeLabel[themeMode]">
           <svg v-if="themeMode === 'dark'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
           <svg v-else-if="themeMode === 'light'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
@@ -839,7 +809,7 @@ onMounted(async () => {
 .footer-row {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 12px;
 }
 .footer-btn {
   flex: 1;

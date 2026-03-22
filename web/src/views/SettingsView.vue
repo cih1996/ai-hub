@@ -114,12 +114,73 @@ function maskKey(key: string): string {
   return key.slice(0, 4) + '••••' + key.slice(-4)
 }
 
+
+// ---- Data Management ----
+const importFileInput = ref<HTMLInputElement | null>(null)
+
+// 导入功能
+function handleImport() {
+  importFileInput.value?.click()
+}
+
+async function onImportFileSelected(event: Event) {
+  const target = event.target as HTMLInputElement
+  const file = target.files?.[0]
+  if (!file) return
+
+  try {
+    const formData = new FormData()
+    formData.append('file', file)
+
+    const res = await fetch('/api/v1/import', {
+      method: 'POST',
+      body: formData,
+    })
+
+    if (!res.ok) {
+      const error = await res.json()
+      alert('导入失败: ' + (error.error || '未知错误'))
+      return
+    }
+
+    alert('导入成功！页面将刷新以加载新数据。')
+    window.location.reload()
+  } catch (err) {
+    console.error('Import failed:', err)
+    alert('导入失败: ' + err)
+  } finally {
+    // Reset file input
+    if (target) target.value = ''
+  }
+}
+
+// 导出功能
+async function handleExport() {
+  try {
+    const res = await fetch('/api/v1/export')
+    if (!res.ok) {
+      const error = await res.json()
+      alert('导出失败: ' + (error.error || '未知错误'))
+      return
+    }
+
+    const blob = await res.blob()
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `ai-hub-backup-${new Date().toISOString().split('T')[0]}.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    window.URL.revokeObjectURL(url)
+  } catch (err) {
+    console.error('Export failed:', err)
+    alert('导出失败: ' + err)
+  }
+}
 onMounted(() => {
   store.loadProviders()
   loadCompressSettings()
-  loadShadowStatus().then(() => {
-    if (shadowStatus.value?.enabled) loadShadowLogs()
-  })
 })
 
 // ---- Auto Compress Settings ----
@@ -154,84 +215,6 @@ async function saveCompressSettings() {
   }
 }
 
-// ---- Shadow AI Settings ----
-const shadowStatus = ref<api.ShadowAIStatus | null>(null)
-const shadowLoading = ref(false)
-const shadowToggling = ref(false)
-const shadowConfigEditing = ref(false)
-const shadowConfigSaving = ref(false)
-const shadowConfigSaveOk = ref(false)
-const shadowLogs = ref('')
-const shadowLogsLoading = ref(false)
-
-const shadowConfigForm = reactive<api.ShadowAIConfig>({
-  patrol_interval: '10m',
-  extract_interval: '1h',
-  deep_scan_interval: '6h',
-  self_clean_interval: '24h',
-  context_reset_threshold: 50,
-})
-
-async function loadShadowStatus() {
-  shadowLoading.value = true
-  try {
-    shadowStatus.value = await api.getShadowAIStatus()
-    if (shadowStatus.value?.config) {
-      Object.assign(shadowConfigForm, shadowStatus.value.config)
-    }
-  } catch { shadowStatus.value = null }
-  finally { shadowLoading.value = false }
-}
-
-async function toggleShadowAI() {
-  shadowToggling.value = true
-  try {
-    if (shadowStatus.value?.enabled) {
-      await api.disableShadowAI()
-    } else {
-      await api.enableShadowAI()
-    }
-    await loadShadowStatus()
-    if (shadowStatus.value?.enabled) await loadShadowLogs()
-  } catch (e: unknown) {
-    console.error('Shadow AI toggle failed:', e)
-  } finally {
-    shadowToggling.value = false
-  }
-}
-
-async function saveShadowConfig() {
-  shadowConfigSaving.value = true
-  shadowConfigSaveOk.value = false
-  try {
-    const res = await api.updateShadowAIConfig({ ...shadowConfigForm })
-    if (res.config) Object.assign(shadowConfigForm, res.config)
-    shadowConfigSaveOk.value = true
-    shadowConfigEditing.value = false
-    await loadShadowStatus()
-    setTimeout(() => { shadowConfigSaveOk.value = false }, 3000)
-  } catch (e: unknown) {
-    console.error('Shadow AI config save failed:', e)
-  } finally {
-    shadowConfigSaving.value = false
-  }
-}
-
-function cancelShadowConfigEdit() {
-  if (shadowStatus.value?.config) {
-    Object.assign(shadowConfigForm, shadowStatus.value.config)
-  }
-  shadowConfigEditing.value = false
-}
-
-async function loadShadowLogs() {
-  shadowLogsLoading.value = true
-  try {
-    const res = await api.getShadowAILogs(10)
-    shadowLogs.value = res.content || ''
-  } catch { shadowLogs.value = '' }
-  finally { shadowLogsLoading.value = false }
-}
 </script>
 
 <template>
@@ -440,118 +423,59 @@ async function loadShadowLogs() {
         </div>
       </section>
 
-      <!-- Shadow AI Settings -->
+
+      <!-- 数据管理 -->
       <section class="section">
         <div class="section-header">
           <div>
-            <h2>影子AI</h2>
-            <p class="section-desc">全局记忆管理者 & 会话健康守护者，自动巡检、记忆提炼、健康评估。</p>
+            <h2>数据管理</h2>
+            <p class="section-desc">导入和导出会话数据</p>
           </div>
         </div>
-
-        <div class="shadow-settings">
-          <div v-if="shadowLoading" class="shadow-loading">加载中...</div>
-          <template v-else>
-            <div class="shadow-toggle-row">
-              <div class="shadow-info">
-                <span class="shadow-status-badge" :class="shadowStatus?.status || 'uninitialized'">
-                  {{ shadowStatus?.status === 'running' ? '运行中' : shadowStatus?.status === 'paused' ? '已暂停' : '未初始化' }}
-                </span>
-                <span v-if="shadowStatus?.session_id" class="shadow-session">
-                  会话 #{{ shadowStatus.session_id }}
-                </span>
-              </div>
-              <button
-                class="btn-shadow-toggle"
-                :class="{ enabled: shadowStatus?.enabled }"
-                :disabled="shadowToggling"
-                @click="toggleShadowAI"
-              >
-                {{ shadowToggling ? '切换中...' : (shadowStatus?.enabled ? '关闭' : '开启') }}
-              </button>
+        
+        <div class="data-management">
+          <!-- 导入功能 -->
+          <div class="management-item">
+            <div class="item-info">
+              <h4>导入数据</h4>
+              <p>从备份文件导入会话、设置和记忆数据</p>
             </div>
-
-            <template v-if="shadowStatus?.enabled && shadowStatus.config">
-              <div class="shadow-config">
-                <template v-if="shadowConfigEditing">
-                  <div class="config-edit-item">
-                    <span class="config-label">快速巡检</span>
-                    <input v-model="shadowConfigForm.patrol_interval" class="config-input" placeholder="10m" />
-                  </div>
-                  <div class="config-edit-item">
-                    <span class="config-label">记忆提炼</span>
-                    <input v-model="shadowConfigForm.extract_interval" class="config-input" placeholder="1h" />
-                  </div>
-                  <div class="config-edit-item">
-                    <span class="config-label">深度巡检</span>
-                    <input v-model="shadowConfigForm.deep_scan_interval" class="config-input" placeholder="6h" />
-                  </div>
-                  <div class="config-edit-item">
-                    <span class="config-label">自我清理</span>
-                    <input v-model="shadowConfigForm.self_clean_interval" class="config-input" placeholder="24h" />
-                  </div>
-                  <div class="config-edit-item">
-                    <span class="config-label">重置阈值</span>
-                    <input v-model.number="shadowConfigForm.context_reset_threshold" type="number" min="10" class="config-input" />
-                  </div>
-                </template>
-                <template v-else>
-                  <div class="config-item">
-                    <span class="config-label">快速巡检</span>
-                    <span class="config-value">{{ shadowStatus.config.patrol_interval }}</span>
-                  </div>
-                  <div class="config-item">
-                    <span class="config-label">记忆提炼</span>
-                    <span class="config-value">{{ shadowStatus.config.extract_interval }}</span>
-                  </div>
-                  <div class="config-item">
-                    <span class="config-label">深度巡检</span>
-                    <span class="config-value">{{ shadowStatus.config.deep_scan_interval }}</span>
-                  </div>
-                  <div class="config-item">
-                    <span class="config-label">自我清理</span>
-                    <span class="config-value">{{ shadowStatus.config.self_clean_interval }}</span>
-                  </div>
-                  <div class="config-item">
-                    <span class="config-label">重置阈值</span>
-                    <span class="config-value">{{ shadowStatus.config.context_reset_threshold }} 条消息</span>
-                  </div>
-                </template>
-              </div>
-              <div class="shadow-config-actions">
-                <template v-if="shadowConfigEditing">
-                  <button class="btn-sm" @click="cancelShadowConfigEdit">取消</button>
-                  <button class="btn-save btn-sm" @click="saveShadowConfig" :disabled="shadowConfigSaving">
-                    {{ shadowConfigSaving ? '保存中...' : '保存配置' }}
-                  </button>
-                </template>
-                <template v-else>
-                  <button class="btn-sm" @click="shadowConfigEditing = true">编辑配置</button>
-                  <span v-if="shadowConfigSaveOk" class="save-ok">✓ 已保存</span>
-                </template>
-              </div>
-
-              <div v-if="shadowStatus.triggers?.length" class="shadow-triggers">
-                <h4>定时器 ({{ shadowStatus.triggers.length }})</h4>
-                <div v-for="t in shadowStatus.triggers" :key="t.id" class="trigger-item">
-                  <span class="trigger-status" :class="t.enabled ? 'active' : 'disabled'">
-                    {{ t.enabled ? '●' : '○' }}
-                  </span>
-                  <span class="trigger-content">{{ t.content.substring(0, 30) }}...</span>
-                  <span class="trigger-meta">{{ t.trigger_time }} · {{ t.fired_count }}次</span>
-                </div>
-              </div>
-
-              <div class="shadow-logs-section">
-                <h4>最近工作日志</h4>
-                <div v-if="shadowLogsLoading" class="shadow-logs-loading">加载中...</div>
-                <pre v-else-if="shadowLogs" class="shadow-logs-content">{{ shadowLogs }}</pre>
-                <div v-else class="shadow-logs-empty">暂无日志记录</div>
-              </div>
-            </template>
-          </template>
+            <button class="action-btn" @click="handleImport">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+              导入
+            </button>
+          </div>
+          
+          <!-- 导出功能 -->
+          <div class="management-item">
+            <div class="item-info">
+              <h4>导出数据</h4>
+              <p>导出所有会话、设置和记忆数据到备份文件</p>
+            </div>
+            <button class="action-btn" @click="handleExport">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+              导出
+            </button>
+          </div>
         </div>
       </section>
+
+      <!-- 隐藏的文件选择器 -->
+      <input
+        ref="importFileInput"
+        type="file"
+        accept=".json"
+        style="display: none"
+        @change="onImportFileSelected"
+      />
     </div>
   </div>
 </template>
@@ -757,3 +681,55 @@ async function loadShadowLogs() {
   .provider-actions { margin-left: 0; width: 100%; justify-content: flex-end; }
 }
 </style>
+
+/* ---- Data Management ---- */
+.data-management {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.management-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.item-info h4 {
+  margin: 0 0 4px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.item-info p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.action-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--primary);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+
+.action-btn:hover {
+  opacity: 0.9;
+}
+
+.action-btn svg {
+  flex-shrink: 0;
+}
