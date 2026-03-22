@@ -55,7 +55,7 @@ const renderedContent = computed(() => {
 
 async function loadPatrolResult() {
   try {
-    const res = await fetch('/api/v1/files/content?path=memory/shadow/patrol-result.md')
+    const res = await fetch('/api/v1/files/content?scope=session&path=memory/shadow/patrol-result.md')
     patrolResult.value = await res.json()
   } catch (err) {
     console.error('Failed to load patrol result:', err)

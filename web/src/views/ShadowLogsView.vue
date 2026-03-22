@@ -36,7 +36,7 @@ async function loadLog(key: string) {
   try {
     const file = logFiles.find(f => f.key === key)
     if (!file) return
-    const res = await fetch(`/api/v1/files/content?path=${file.path}`)
+    const res = await fetch(`/api/v1/files/content?scope=session&path=${file.path}`)
     const data = await res.json()
     content.value = data.content || ''
   } catch (err) {
