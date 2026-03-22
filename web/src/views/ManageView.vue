@@ -1,11 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { listFiles, readFileContent, writeFileContent, createFileApi, deleteFileApi, getTemplateVars, getDefaultFile, searchMemory } from '../composables/api'
-import { listSchemas, createSchemaApi, updateSchemaApi, deleteSchemaApi } from '../composables/api'
-import { listStructuredMemory, getStructuredMemory, putStructuredMemory, getChangelog, rollbackChangelog, listSessions } from '../composables/api'
-import type { TemplateVar, MemorySearchResult, SchemaItem, StructuredCategory, ChangelogEntry } from '../composables/api'
-import type { Session } from '../types'
-import InjectionRouterView from './InjectionRouterView.vue'
+import type { TemplateVar, MemorySearchResult } from '../composables/api'
 
 interface FileItem {
   name: string
@@ -23,13 +19,9 @@ const tabs: { key: string; label: string; desc: string }[] = [
   { key: 'rules', label: '全局', desc: '~/.ai-hub/rules/' },
   { key: 'memory', label: '记忆', desc: '~/.ai-hub/memory/' },
   { key: 'notes', label: '笔记', desc: '~/.ai-hub/notes/' },
-  { key: 'schemas', label: 'Schema', desc: 'JSON Schema 校验定义' },
-  { key: 'structured', label: '结构化记忆', desc: '影子AI管理的结构化记忆（7大分类）' },
-  { key: 'health', label: '健康度', desc: '所有会话健康状态概览' },
-  { key: 'injection', label: '注入路由', desc: '关键词→记忆分类的注入映射' },
 ]
 
-type Scope = 'rules' | 'memory' | 'notes' | 'schemas' | 'structured' | 'health' | 'injection'
+type Scope = 'rules' | 'memory' | 'notes'
 
 const activeTab = ref<Scope>('rules')
 const activeTabDesc = ref('~/.ai-hub/rules/')
@@ -44,138 +36,11 @@ const templateVars = ref<TemplateVar[]>([])
 const showVars = ref(false)
 const restoringDefault = ref(false)
 
-// Schema state
-const schemas = ref<SchemaItem[]>([])
-const selectedSchema = ref<SchemaItem | null>(null)
-const schemaContent = ref('')
-const schemaWriters = ref('')  // comma-separated session IDs, e.g. "21, 23"
-const schemaLoading = ref(false)
-const schemaSaving = ref(false)
-const showNewSchemaDialog = ref(false)
-const newSchemaName = ref('')
-const newSchemaDefinition = ref('{\n  "type": "object",\n  "required": [],\n  "properties": {}\n}')
-const newSchemaWriters = ref('')
-const schemaJsonError = ref('')
-
-const isSchemaTab = () => activeTab.value === 'schemas'
-const isStructuredTab = () => activeTab.value === 'structured'
-const isHealthTab = () => activeTab.value === 'health'
-const isInjectionTab = () => activeTab.value === 'injection'
-const isFileTab = () => !isSchemaTab() && !isStructuredTab() && !isHealthTab() && !isInjectionTab()
+function isFileTab(): boolean {
+  return true
+}
 
 // Validate JSON and update error message
-function validateSchemaJson(json: string): boolean {
-  try {
-    JSON.parse(json)
-    schemaJsonError.value = ''
-    return true
-  } catch (e: any) {
-    schemaJsonError.value = e.message
-    return false
-  }
-}
-
-async function loadSchemas() {
-  schemaLoading.value = true
-  try {
-    schemas.value = await listSchemas()
-  } catch {
-    schemas.value = []
-  }
-  schemaLoading.value = false
-}
-
-function selectSchema(s: SchemaItem) {
-  selectedSchema.value = s
-  try {
-    const parsed = JSON.parse(s.definition)
-    schemaContent.value = JSON.stringify(parsed, null, 2)
-  } catch {
-    schemaContent.value = s.definition
-  }
-  // Parse writers JSON array to comma-separated text
-  if (s.writers) {
-    try {
-      const arr = JSON.parse(s.writers) as number[]
-      schemaWriters.value = arr.join(', ')
-    } catch {
-      schemaWriters.value = s.writers
-    }
-  } else {
-    schemaWriters.value = ''
-  }
-  schemaJsonError.value = ''
-}
-
-// Parse comma-separated writers text to number array
-function parseWriters(text: string): number[] | undefined {
-  const trimmed = text.trim()
-  if (!trimmed) return []
-  const ids = trimmed.split(/[,\s]+/).map(s => parseInt(s.trim())).filter(n => !isNaN(n) && n > 0)
-  return ids
-}
-
-async function saveSchema() {
-  if (!selectedSchema.value) return
-  if (!validateSchemaJson(schemaContent.value)) return
-  schemaSaving.value = true
-  try {
-    const def = JSON.parse(schemaContent.value)
-    const writers = parseWriters(schemaWriters.value)
-    await updateSchemaApi(selectedSchema.value.name, def, writers)
-    await loadSchemas()
-    const updated = schemas.value.find(s => s.name === selectedSchema.value!.name)
-    if (updated) selectSchema(updated)
-  } catch (e: any) {
-    alert('保存失败: ' + e.message)
-  }
-  schemaSaving.value = false
-}
-
-async function createNewSchema() {
-  const name = newSchemaName.value.trim()
-  if (!name) return
-  if (!validateSchemaJson(newSchemaDefinition.value)) {
-    alert('Schema 定义必须是合法的 JSON')
-    return
-  }
-  try {
-    const def = JSON.parse(newSchemaDefinition.value)
-    const writers = parseWriters(newSchemaWriters.value)
-    await createSchemaApi(name, def, writers && writers.length > 0 ? writers : undefined)
-    showNewSchemaDialog.value = false
-    newSchemaName.value = ''
-    newSchemaWriters.value = ''
-    newSchemaDefinition.value = '{\n  "type": "object",\n  "required": [],\n  "properties": {}\n}'
-    await loadSchemas()
-    const created = schemas.value.find(s => s.name === name)
-    if (created) selectSchema(created)
-  } catch (e: any) {
-    alert('创建失败: ' + e.message)
-  }
-}
-
-async function deleteSchema(s: SchemaItem) {
-  if (!confirm(`确定删除 Schema「${s.name}」？`)) return
-  try {
-    await deleteSchemaApi(s.name)
-    if (selectedSchema.value?.name === s.name) {
-      selectedSchema.value = null
-      schemaContent.value = ''
-    }
-    await loadSchemas()
-  } catch (e: any) {
-    alert('删除失败: ' + e.message)
-  }
-}
-
-function formatSchemaTime(t: string): string {
-  if (!t) return '-'
-  try {
-    const d = new Date(t)
-    return d.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }) + ' ' + d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-  } catch { return t }
-}
 
 // Vector search
 const searchQuery = ref('')
@@ -357,144 +222,12 @@ function insertVar(name: string) {
   content.value += `{{${name}}}`
 }
 
-// ---- Structured Memory ----
-const structCategories = ref<StructuredCategory[]>([])
-const structActiveCategory = ref('')
-const structContent = ref('')
-const structLoading = ref(false)
-const structSaving = ref(false)
-const structSaveOk = ref(false)
-const structChangelog = ref<ChangelogEntry[]>([])
-const structShowHistory = ref(false)
-const structHistoryLoading = ref(false)
-
-async function loadStructuredCategories() {
-  structLoading.value = true
-  try {
-    structCategories.value = await listStructuredMemory()
-    if (structCategories.value.length > 0 && !structActiveCategory.value) {
-      const first = structCategories.value[0]!
-      structActiveCategory.value = first.category
-      await loadStructuredContent(structActiveCategory.value)
-    }
-  } catch { structCategories.value = [] }
-  finally { structLoading.value = false }
-}
-
-async function loadStructuredContent(category: string) {
-  structActiveCategory.value = category
-  structShowHistory.value = false
-  try {
-    const res = await getStructuredMemory(category)
-    structContent.value = res.content || ''
-  } catch { structContent.value = '' }
-}
-
-async function saveStructuredContent() {
-  if (!structActiveCategory.value) return
-  structSaving.value = true
-  structSaveOk.value = false
-  try {
-    await putStructuredMemory(structActiveCategory.value, structContent.value)
-    structSaveOk.value = true
-    await loadStructuredCategories()
-    setTimeout(() => { structSaveOk.value = false }, 3000)
-  } catch (e: any) {
-    alert('保存失败: ' + e.message)
-  }
-  structSaving.value = false
-}
-
-async function loadStructuredHistory() {
-  if (!structActiveCategory.value) return
-  structHistoryLoading.value = true
-  structShowHistory.value = true
-  try {
-    const fileName = structActiveCategory.value + '.md'
-    const res = await getChangelog(fileName, 'structured-memory', 20)
-    structChangelog.value = res.changelog || []
-  } catch { structChangelog.value = [] }
-  finally { structHistoryLoading.value = false }
-}
-
-function getCategoryLabel(cat: string): string {
-  const found = structCategories.value.find(c => c.category === cat)
-  return found?.label || cat
-}
-
-function formatChangeTime(t: string): string {
-  if (!t) return '-'
-  try {
-    const d = new Date(t)
-    return d.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }) + ' ' +
-           d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-  } catch { return t }
-}
-
-const rollingBack = ref(false)
-async function onRollback(entry: ChangelogEntry) {
-  if (!structActiveCategory.value || rollingBack.value) return
-  rollingBack.value = true
-  try {
-    // Structured memory uses structured_memory scope with category.md as file name
-    await rollbackChangelog(structActiveCategory.value + '.md', 'structured-memory', entry.version)
-    // Reload the content and history
-    await loadStructuredContent(structActiveCategory.value)
-    if (structShowHistory.value) {
-      await loadStructuredHistory()
-    }
-  } catch (e: any) {
-    console.error('Rollback failed:', e)
-  }
-  rollingBack.value = false
-}
-
-// ---- Health Overview ----
-const healthSessions = ref<Session[]>([])
-const healthLoading = ref(false)
-
-async function loadHealthSessions() {
-  healthLoading.value = true
-  try {
-    const sessions = await listSessions()
-    healthSessions.value = sessions
-  } catch { healthSessions.value = [] }
-  finally { healthLoading.value = false }
-}
-
-function healthColor(score: string): string {
-  switch (score) {
-    case 'green': return '#22c55e'
-    case 'yellow': return '#eab308'
-    case 'red': return '#ef4444'
-    default: return 'var(--text-muted)'
-  }
-}
-
-function healthLabel(score: string): string {
-  switch (score) {
-    case 'green': return '健康'
-    case 'yellow': return '注意'
-    case 'red': return '异常'
-    default: return '未评估'
-  }
-}
 
 watch(activeTab, () => {
   selectedFile.value = null
-  selectedSchema.value = null
   content.value = ''
-  schemaContent.value = ''
   activeTabDesc.value = tabs.find(t => t.key === activeTab.value)?.desc ?? ''
-  if (activeTab.value === 'schemas') {
-    loadSchemas()
-  } else if (activeTab.value === 'structured') {
-    loadStructuredCategories()
-  } else if (activeTab.value === 'health') {
-    loadHealthSessions()
-  } else {
-    loadFiles()
-  }
+  loadFiles()
 })
 
 onBeforeUnmount(() => {
@@ -613,222 +346,6 @@ onBeforeUnmount(() => {
         </div>
       </template>
 
-      <!-- Schema mode -->
-      <template v-else>
-        <div class="file-list">
-          <div class="file-list-header">
-            <span class="file-list-title">SCHEMAS</span>
-            <button class="btn-sm" @click="showNewSchemaDialog = true">+ 新建</button>
-          </div>
-          <div v-if="showNewSchemaDialog" class="new-schema-dialog">
-            <input v-model="newSchemaName" placeholder="Schema 名称" class="input-sm" @keyup.enter="createNewSchema" />
-            <button class="btn-sm btn-accent" @click="createNewSchema">创建</button>
-            <button class="btn-sm" @click="showNewSchemaDialog = false; newSchemaName = ''">取消</button>
-          </div>
-          <div v-if="schemaLoading" class="file-list-empty">加载中...</div>
-          <div v-else-if="schemas.length === 0" class="file-list-empty">暂无 Schema</div>
-          <div
-            v-for="s in schemas"
-            :key="s.name"
-            class="file-item"
-            :class="{ active: selectedSchema?.name === s.name }"
-            @click="selectSchema(s)"
-          >
-            <div class="file-info">
-              <span class="file-label">{{ s.name }}</span>
-              <span v-if="s.writers" class="schema-writers-badge" :title="'Writers: ' + s.writers">W</span>
-              <span class="file-subpath">{{ formatSchemaTime(s.updated_at) }}</span>
-            </div>
-            <button class="btn-delete-file" @click.stop="deleteSchema(s)" title="删除">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M18 6L6 18M6 6l12 12"/>
-              </svg>
-            </button>
-          </div>
-        </div>
-        <div class="editor-panel">
-          <div v-if="selectedSchema" class="editor-content">
-            <div class="editor-toolbar">
-              <span class="editor-filename">{{ selectedSchema.name }}</span>
-              <div class="editor-actions">
-                <span v-if="schemaJsonError" class="schema-error" title="JSON 格式错误">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                  JSON 错误
-                </span>
-                <button class="btn-save" :disabled="schemaSaving || !!schemaJsonError" @click="saveSchema">
-                  {{ schemaSaving ? '保存中...' : '保存' }}
-                </button>
-              </div>
-            </div>
-            <div class="schema-writers-row">
-              <label class="schema-writers-label">Writers</label>
-              <input v-model="schemaWriters" class="schema-writers-input" placeholder="留空不限制，填写会话ID用逗号分隔，如: 21, 23" />
-            </div>
-            <textarea
-              v-model="schemaContent"
-              class="editor-textarea schema-editor"
-              spellcheck="false"
-              @input="validateSchemaJson(schemaContent)"
-            />
-          </div>
-          <div v-else-if="showNewSchemaDialog" class="editor-content">
-            <div class="editor-toolbar">
-              <span class="editor-filename">新建 Schema - 定义 JSON</span>
-              <div class="editor-actions">
-                <span v-if="schemaJsonError" class="schema-error">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                  JSON 错误
-                </span>
-              </div>
-            </div>
-            <div class="schema-writers-row">
-              <label class="schema-writers-label">Writers</label>
-              <input v-model="newSchemaWriters" class="schema-writers-input" placeholder="留空不限制，填写会话ID用逗号分隔，如: 21, 23" />
-            </div>
-            <textarea
-              v-model="newSchemaDefinition"
-              class="editor-textarea schema-editor"
-              spellcheck="false"
-              @input="validateSchemaJson(newSchemaDefinition)"
-            />
-          </div>
-          <div v-else class="editor-empty">选择一个 Schema 进行编辑</div>
-        </div>
-      </template>
-
-      <!-- Structured Memory mode -->
-      <template v-if="isStructuredTab()">
-        <div class="file-list">
-          <div class="file-list-header">
-            <span class="file-list-title">分类</span>
-          </div>
-          <div v-if="structLoading" class="file-list-empty">加载中...</div>
-          <div v-else-if="structCategories.length === 0" class="file-list-empty">暂无分类</div>
-          <div
-            v-for="cat in structCategories"
-            :key="cat.category"
-            class="file-item"
-            :class="{ active: structActiveCategory === cat.category }"
-            @click="loadStructuredContent(cat.category)"
-          >
-            <div class="file-info">
-              <span class="file-label">{{ cat.label }}</span>
-              <span class="file-subpath">
-                {{ cat.category }}
-                <span v-if="cat.has_data" class="struct-dot has-data" title="有内容">●</span>
-                <span v-else class="struct-dot no-data" title="无内容">○</span>
-                <span v-if="cat.fixed" class="struct-badge fixed">固定</span>
-                <span v-else class="struct-badge conditional">条件</span>
-              </span>
-            </div>
-          </div>
-        </div>
-        <div class="editor-panel">
-          <div v-if="structActiveCategory" class="editor-content">
-            <div class="editor-toolbar">
-              <span class="editor-filename">{{ getCategoryLabel(structActiveCategory) }} ({{ structActiveCategory }}.md)</span>
-              <div class="editor-actions">
-                <button class="btn-vars" @click="loadStructuredHistory">
-                  {{ structShowHistory ? '隐藏历史' : '变更历史' }}
-                </button>
-                <button class="btn-save" :disabled="structSaving" @click="saveStructuredContent">
-                  {{ structSaving ? '保存中...' : '保存' }}
-                </button>
-                <span v-if="structSaveOk" class="save-ok-inline">✓</span>
-              </div>
-            </div>
-            <div v-if="structShowHistory" class="history-panel">
-              <div v-if="structHistoryLoading" class="history-loading">加载中...</div>
-              <div v-else-if="structChangelog.length === 0" class="history-empty">暂无变更记录</div>
-              <div v-else class="history-timeline">
-                <div v-for="entry in structChangelog" :key="entry.id" class="history-item">
-                  <div class="history-meta">
-                    <span class="history-version">v{{ entry.version }}</span>
-                    <span class="history-type" :class="entry.change_type">{{ entry.change_type }}</span>
-                    <span class="history-time">{{ formatChangeTime(entry.created_at) }}</span>
-                    <span v-if="entry.session_id" class="history-session">#{{ entry.session_id }}</span>
-                    <button
-                      class="btn-rollback"
-                      @click="onRollback(entry)"
-                      :disabled="rollingBack"
-                      title="回滚到此版本"
-                    >回滚</button>
-                  </div>
-                  <div v-if="entry.diff" class="history-diff">{{ entry.diff }}</div>
-                </div>
-              </div>
-            </div>
-            <textarea v-model="structContent" class="editor-textarea" spellcheck="false" />
-          </div>
-          <div v-else class="editor-empty">选择一个分类进行编辑</div>
-        </div>
-      </template>
-
-      <!-- Health Overview mode -->
-      <template v-if="isHealthTab()">
-        <div class="health-container">
-          <div v-if="healthLoading" class="health-loading">加载中...</div>
-          <div v-else-if="healthSessions.length === 0" class="health-empty">暂无会话</div>
-          <div v-else class="health-list">
-            <div class="health-summary">
-              <span class="health-stat">
-                <span class="health-dot" style="color: #22c55e">●</span>
-                {{ healthSessions.filter(s => s.health_score === 'green').length }} 健康
-              </span>
-              <span class="health-stat">
-                <span class="health-dot" style="color: #eab308">●</span>
-                {{ healthSessions.filter(s => s.health_score === 'yellow').length }} 注意
-              </span>
-              <span class="health-stat">
-                <span class="health-dot" style="color: #ef4444">●</span>
-                {{ healthSessions.filter(s => s.health_score === 'red').length }} 异常
-              </span>
-              <span class="health-stat">
-                <span class="health-dot" style="color: var(--text-muted)">●</span>
-                {{ healthSessions.filter(s => !s.health_score).length }} 未评估
-              </span>
-            </div>
-            <div
-              v-for="s in healthSessions"
-              :key="s.id"
-              class="health-card"
-            >
-              <div class="health-card-main">
-                <span class="health-score-dot" :style="{ color: healthColor(s.health_score) }">●</span>
-                <span class="health-card-title">#{{ s.id }} {{ s.title }}</span>
-                <span class="health-card-badge" :style="{ background: healthColor(s.health_score) + '22', color: healthColor(s.health_score) }">
-                  {{ healthLabel(s.health_score) }}
-                </span>
-              </div>
-              <div class="health-card-details">
-                <span class="health-detail" v-if="s.correction_count > 0">
-                  纠正 {{ s.correction_count }}
-                </span>
-                <span class="health-detail" v-if="s.drift_count > 0">
-                  偏离 {{ s.drift_count }}
-                </span>
-                <span class="health-detail" v-if="s.error_count > 0" style="color: #ef4444">
-                  错误 {{ s.error_count }}
-                </span>
-                <span class="health-detail" v-if="s.warning_count > 0" style="color: #eab308">
-                  警告 {{ s.warning_count }}
-                </span>
-                <span class="health-detail" v-if="s.health_updated_at">
-                  评估于 {{ formatTime(s.health_updated_at) }}
-                </span>
-                <span class="health-detail" v-if="s.group_name">
-                  {{ s.group_name }}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </template>
-
-      <!-- Injection Router mode -->
-      <template v-if="isInjectionTab()">
-        <InjectionRouterView />
-      </template>
     </div>
   </div>
 </template>
@@ -858,7 +375,7 @@ onBeforeUnmount(() => {
 .btn-sm:hover { background: var(--bg-hover); color: var(--text-primary); }
 .btn-accent { color: var(--accent); }
 .btn-accent:hover { background: var(--accent-soft); }
-.new-file-dialog, .new-schema-dialog { display: flex; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--border); align-items: center; }
+.new-file-dialog { display: flex; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--border); align-items: center; }
 .input-sm {
   flex: 1; padding: 4px 8px; font-size: 12px; background: var(--bg-tertiary);
   border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-primary);
@@ -920,35 +437,6 @@ onBeforeUnmount(() => {
   flex: 1; padding: 16px; font-family: 'SF Mono', 'Fira Code', monospace;
   font-size: 13px; line-height: 1.6; resize: none;
   background: var(--bg-primary); color: var(--text-primary); border: none;
-}
-.schema-editor { tab-size: 2; }
-.editor-empty {
-  flex: 1; display: flex; align-items: center; justify-content: center;
-  color: var(--text-muted); font-size: 14px;
-}
-/* Schema error indicator */
-.schema-error {
-  display: flex; align-items: center; gap: 4px; font-size: 11px;
-  color: var(--danger, #ef4444); flex-shrink: 0;
-}
-/* Schema writers row */
-.schema-writers-row {
-  display: flex; align-items: center; gap: 8px; padding: 6px 12px;
-  border-bottom: 1px solid var(--border); background: var(--bg-secondary);
-}
-.schema-writers-label {
-  font-size: 12px; color: var(--text-secondary); font-weight: 500; flex-shrink: 0;
-}
-.schema-writers-input {
-  flex: 1; padding: 4px 8px; font-size: 12px; border-radius: var(--radius-sm);
-  border: 1px solid var(--border); background: var(--bg-primary); color: var(--text-primary);
-  font-family: 'SF Mono', 'Fira Code', monospace;
-}
-.schema-writers-badge {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 16px; height: 16px; font-size: 10px; font-weight: 600;
-  border-radius: 3px; background: var(--accent-soft); color: var(--accent);
-  flex-shrink: 0;
 }
 /* Vector search */
 .search-bar { margin-top: 10px; }
@@ -1056,20 +544,8 @@ onBeforeUnmount(() => {
   .editor-actions { width: 100%; justify-content: flex-end; }
   .editor-textarea { padding: 12px; font-size: 12px; }
   .vars-panel { padding: 6px 12px; }
-  .health-container { padding: 12px; }
-  .health-card { padding: 10px 12px; }
 }
 
-/* ---- Structured Memory ---- */
-.struct-dot { font-size: 10px; margin-left: 4px; }
-.struct-dot.has-data { color: #22c55e; }
-.struct-dot.no-data { color: var(--text-muted); }
-.struct-badge {
-  font-size: 9px; padding: 1px 5px; border-radius: 3px;
-  margin-left: 4px; font-weight: 600; text-transform: uppercase;
-}
-.struct-badge.fixed { background: rgba(59,130,246,0.15); color: #3b82f6; }
-.struct-badge.conditional { background: var(--bg-tertiary); color: var(--text-muted); }
 
 .save-ok-inline { color: #22c55e; font-size: 13px; }
 
@@ -1115,41 +591,4 @@ onBeforeUnmount(() => {
   white-space: pre-wrap; word-break: break-word;
 }
 
-/* ---- Health Overview ---- */
-.health-container {
-  flex: 1; padding: 24px; overflow-y: auto;
-}
-.health-loading, .health-empty {
-  text-align: center; color: var(--text-muted); padding: 40px; font-size: 14px;
-}
-.health-list { display: flex; flex-direction: column; gap: 8px; max-width: 680px; margin: 0 auto; }
-.health-summary {
-  display: flex; gap: 20px; padding: 12px 16px;
-  background: var(--bg-secondary); border: 1px solid var(--border);
-  border-radius: var(--radius); margin-bottom: 8px;
-}
-.health-stat { font-size: 13px; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; }
-.health-dot { font-size: 16px; }
-.health-card {
-  display: flex; flex-direction: column; gap: 6px;
-  padding: 12px 16px; background: var(--bg-secondary);
-  border: 1px solid var(--border); border-radius: var(--radius);
-  transition: background var(--transition);
-}
-.health-card:hover { background: var(--bg-hover); }
-.health-card-main { display: flex; align-items: center; gap: 10px; }
-.health-score-dot { font-size: 18px; flex-shrink: 0; }
-.health-card-title {
-  flex: 1; font-size: 14px; font-weight: 500; color: var(--text-primary);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.health-card-badge {
-  font-size: 11px; padding: 2px 10px; border-radius: 99px;
-  font-weight: 600; flex-shrink: 0;
-}
-.health-card-details {
-  display: flex; gap: 12px; flex-wrap: wrap;
-  padding-left: 28px;
-}
-.health-detail { font-size: 12px; color: var(--text-muted); }
 </style>
