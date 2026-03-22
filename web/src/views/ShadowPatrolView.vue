@@ -107,7 +107,12 @@ onMounted(() => {
       <!-- 统计卡片 -->
       <div class="stats-grid">
         <div class="stat-card">
-          <div class="stat-icon">🔍</div>
+          <div class="stat-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"/>
+              <path d="m21 21-4.35-4.35"/>
+            </svg>
+          </div>
           <div class="stat-value">{{ totalPatrols }}</div>
           <div class="stat-label">总巡检次数</div>
         </div>
@@ -124,7 +129,12 @@ onMounted(() => {
         <div class="section-header">
           <h3>最近巡检结果</h3>
           <button class="refresh-btn" @click="loadPatrolResult">
-            🔄 刷新
+            <svg class="btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="23 4 23 10 17 10"/>
+              <polyline points="1 20 1 14 7 14"/>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+            </svg>
+            刷新
           </button>
         </div>
 
