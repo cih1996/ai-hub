@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 )
 
@@ -116,6 +118,39 @@ func fireTrigger(t *model.Trigger, port int) error {
 	return nil
 }
 
+// extractActivityType extracts activity type from trigger content
+func extractActivityType(content string) string {
+	if strings.Contains(content, "【定时巡检】") {
+		return "patrol"
+	}
+	if strings.Contains(content, "【定时提炼】") {
+		return "extract"
+	}
+	if strings.Contains(content, "【深度巡检】") {
+		return "deep_scan"
+	}
+	if strings.Contains(content, "【自我清理】") {
+		return "self_clean"
+	}
+	return ""
+}
+
+// getActivityLabel returns Chinese label for activity type
+func getActivityLabel(actType string) string {
+	switch actType {
+	case "patrol":
+		return "巡检"
+	case "extract":
+		return "提炼"
+	case "deep_scan":
+		return "深扫"
+	case "self_clean":
+		return "清理"
+	default:
+		return actType
+	}
+}
+
 func StartTriggerLoop(port int) {
 	ticker := time.NewTicker(1 * time.Minute)
 	go func() {
@@ -124,6 +159,7 @@ func StartTriggerLoop(port int) {
 			checkTriggers(port)
 		}
 	}()
+	fmt.Fprintf(os.Stderr, "[DEBUG] trigger scheduler started, checking every 1 minute\n")
 	log.Printf("[trigger] scheduler started, checking every 1 minute")
 }
 
@@ -136,6 +172,9 @@ func checkTriggers(port int) {
 	if len(triggers) == 0 {
 		return
 	}
+
+	fmt.Fprintf(os.Stderr, "[DEBUG] checking %d triggers\n", len(triggers))
+	log.Printf("[trigger] checking %d triggers", len(triggers))
 
 	now := time.Now().In(bjLoc)
 
@@ -159,12 +198,33 @@ func checkTriggers(port int) {
 
 		// 先用当前 next_fire_at 判断是否该触发（不要提前刷新）
 		if shouldFire(t, now) {
+			fmt.Fprintf(os.Stderr, "[DEBUG] firing trigger: id=%d session=%d\n", t.ID, t.SessionID)
 			log.Printf("[trigger] firing: id=%d session=%d", t.ID, t.SessionID)
 			if err := fireTrigger(t, port); err != nil {
 				log.Printf("[trigger] failed: id=%d err=%v", t.ID, err)
 				t.Status = "failed"
 				store.UpdateTrigger(t)
 				continue
+			}
+
+			// Auto-record shadow AI activity
+			log.Printf("[trigger] checking shadow AI activity recording for session=%d", t.SessionID)
+			if session, err := store.GetSession(t.SessionID); err == nil && session != nil && session.IsShadow {
+				actType := extractActivityType(t.Content)
+				if actType != "" {
+					timestamp := now.Format(time.RFC3339)
+					summary := fmt.Sprintf("%s触发 #%d", getActivityLabel(actType), t.FiredCount+1)
+
+					_, err := store.DB.Exec(
+						"INSERT INTO shadow_activities (timestamp, type, summary, created_at) VALUES (?, ?, ?, ?)",
+						timestamp, actType, summary, timestamp,
+					)
+					if err != nil {
+						log.Printf("[trigger] failed to record activity: %v", err)
+					} else {
+						log.Printf("[trigger] recorded activity: session=%d type=%s count=%d", t.SessionID, actType, t.FiredCount+1)
+					}
+				}
 			}
 
 			t.FiredCount++
