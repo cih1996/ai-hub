@@ -151,7 +151,10 @@ func EnableShadowAI(c *gin.Context) {
 			log.Printf("[shadow-ai] failed to update rules: %v", err)
 		}
 
-			// Update config and status
+		// Ensure all shadow memory files exist (create missing ones)
+		ensureShadowMemoryFiles(existing.SessionID, now, reqConfig)
+
+		// Update config and status
 			saveShadowSettings(true, existing.SessionID, reqConfig)
 
 			log.Printf("[shadow-ai] re-enabled: session=%d, triggers=%v", existing.SessionID, triggerIDs)
@@ -630,6 +633,21 @@ func initShadowMemoryFiles(sessionID int64, now time.Time, config ShadowAIConfig
 
 		"patrol-result.md": "# 最近巡检结果\n\n暂无巡检记录。\n",
 
+		"rule-changes.md": `# 影子AI规则修改历史
+
+暂无规则修改记录。
+
+## 记录格式示例
+
+` + "```markdown" + `
+## 2026-03-23 02:30:00
+- 会话ID: 123
+- 原因: 反复出现路径错误（错误ID: #456, #457, #458）
+- 修改: 添加"禁止使用相对路径"规则
+- 预期效果: 减少路径相关错误
+` + "```" + `
+`,
+
 		"config.md": fmt.Sprintf(`# 影子AI运行配置
 
 - 巡检间隔: %s
@@ -647,6 +665,75 @@ func initShadowMemoryFiles(sessionID int64, now time.Time, config ShadowAIConfig
 		}
 	}
 	log.Printf("[shadow-ai] initialized %d memory files", len(files))
+}
+
+// ensureShadowMemoryFiles checks and creates missing shadow memory files (for re-enable path)
+func ensureShadowMemoryFiles(sessionID int64, now time.Time, config ShadowAIConfig) {
+	memDir := filepath.Join(core.GetDataDir(), "memory", "shadow")
+	os.MkdirAll(memDir, 0755)
+
+	// Define all required files with their default content
+	files := map[string]string{
+		"status.md": fmt.Sprintf(`# 影子AI状态
+
+- 启动时间: %s
+- 会话ID: %d
+- 状态: 已启动
+- 最后巡检: 无
+- 最后提炼: 无
+- 最后深扫: 无
+- 最后清理: 无
+`, now.Format("2006-01-02 15:04:05"), sessionID),
+
+		"work-log.md": fmt.Sprintf(`# 影子AI工作日志
+
+## %s
+- [%s] 系统初始化完成，会话 #%d
+`, now.Format("2006-01-02"), now.Format("15:04:05"), sessionID),
+
+		"patrol-result.md": "# 最近巡检结果\n\n暂无巡检记录。\n",
+
+		"rule-changes.md": `# 影子AI规则修改历史
+
+暂无规则修改记录。
+
+## 记录格式示例
+
+` + "```markdown" + `
+## 2026-03-23 02:30:00
+- 会话ID: 123
+- 原因: 反复出现路径错误（错误ID: #456, #457, #458）
+- 修改: 添加"禁止使用相对路径"规则
+- 预期效果: 减少路径相关错误
+` + "```" + `
+`,
+
+		"config.md": fmt.Sprintf(`# 影子AI运行配置
+
+- 巡检间隔: %s
+- 提炼间隔: %s
+- 深扫间隔: %s
+- 清理间隔: %s
+- 重置阈值: %d
+`, config.PatrolInterval, config.ExtractInterval, config.DeepScanInterval, config.SelfCleanInterval, config.ContextResetThreshold),
+	}
+
+	// Only create files that don't exist
+	createdCount := 0
+	for name, content := range files {
+		path := filepath.Join(memDir, name)
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+				log.Printf("[shadow-ai] failed to create missing file %s: %v", name, err)
+			} else {
+				createdCount++
+				log.Printf("[shadow-ai] created missing file: %s", name)
+			}
+		}
+	}
+	if createdCount > 0 {
+		log.Printf("[shadow-ai] ensured %d missing memory files", createdCount)
+	}
 }
 
 // lastNLines returns the last n lines of a string
@@ -946,8 +1033,44 @@ curl -X PUT http://localhost:{{AI_HUB_PORT}}/api/v1/files/content \
 - 可以设置健康度（PUT /sessions/:id/health）
 - 可以写入结构化记忆（PUT /structured-memory/:category）
 - 可以管理注入路由（POST/PUT/DELETE /injection-router）
-- **禁止**修改其他会话的规则
+- **可以**修改其他会话的规则（用于错误纠正和优化）
 - **禁止**删除其他会话的消息
+
+### 会话规则修改指南
+
+**使用场景：**
+- 发现会话反复犯同类错误，需要在规则中添加禁止事项
+- 会话健康度持续低于阈值，需要调整规则优化交互
+- 用户偏好发生变化，需要更新会话规则
+
+**操作步骤：**
+
+1. 读取现有规则：
+` + "`" + `bash
+ai-hub rules get <session_id>
+` + "`" + `
+
+2. 分析问题并设计修改方案（必须基于具体错误证据）
+
+3. 修改规则（追加模式，不要删除现有规则）：
+` + "`" + `bash
+ai-hub rules set <session_id> --content "原规则内容 + 新增规则"
+` + "`" + `
+
+4. 记录修改历史到 memory/shadow/rule-changes.md：
+` + "`" + `markdown
+## 2026-03-23 02:30:00
+- 会话ID: 123
+- 原因: 反复出现路径错误（错误ID: #456, #457, #458）
+- 修改: 添加"禁止使用相对路径"规则
+- 预期效果: 减少路径相关错误
+` + "`" + `
+
+**修改原则：**
+- 必须基于具体错误证据（至少3次同类错误）
+- 只追加规则，不删除现有规则
+- 修改后必须记录到 rule-changes.md
+- 每次修改后观察至少1小时，评估效果
 
 ## 自我管理
 - 不依赖上下文历史，全靠记忆库
