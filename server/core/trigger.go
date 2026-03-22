@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -158,6 +159,7 @@ func StartTriggerLoop(port int) {
 			checkTriggers(port)
 		}
 	}()
+	fmt.Fprintf(os.Stderr, "[DEBUG] trigger scheduler started, checking every 1 minute\n")
 	log.Printf("[trigger] scheduler started, checking every 1 minute")
 }
 
@@ -170,6 +172,9 @@ func checkTriggers(port int) {
 	if len(triggers) == 0 {
 		return
 	}
+
+	fmt.Fprintf(os.Stderr, "[DEBUG] checking %d triggers\n", len(triggers))
+	log.Printf("[trigger] checking %d triggers", len(triggers))
 
 	now := time.Now().In(bjLoc)
 
@@ -193,6 +198,7 @@ func checkTriggers(port int) {
 
 		// 先用当前 next_fire_at 判断是否该触发（不要提前刷新）
 		if shouldFire(t, now) {
+			fmt.Fprintf(os.Stderr, "[DEBUG] firing trigger: id=%d session=%d\n", t.ID, t.SessionID)
 			log.Printf("[trigger] firing: id=%d session=%d", t.ID, t.SessionID)
 			if err := fireTrigger(t, port); err != nil {
 				log.Printf("[trigger] failed: id=%d err=%v", t.ID, err)
@@ -202,6 +208,7 @@ func checkTriggers(port int) {
 			}
 
 			// Auto-record shadow AI activity
+			log.Printf("[trigger] checking shadow AI activity recording for session=%d", t.SessionID)
 			if session, err := store.GetSession(t.SessionID); err == nil && session != nil && session.IsShadow {
 				actType := extractActivityType(t.Content)
 				if actType != "" {
