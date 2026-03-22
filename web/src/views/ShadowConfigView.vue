@@ -393,6 +393,16 @@ onMounted(() => {
   color: #6b7280;
 }
 
+[data-theme="light"] .status-badge.enabled {
+  background: #ecfdf5;
+  color: #059669;
+}
+
+[data-theme="light"] .status-badge.disabled {
+  background: #f3f4f6;
+  color: #4b5563;
+}
+
 .status-detail {
   display: flex;
   gap: 8px;
@@ -517,5 +527,33 @@ onMounted(() => {
   font-size: 14px;
   color: var(--text-primary);
   font-family: monospace;
+}
+
+@media (max-width: 768px) {
+  .shadow-config {
+    padding: 16px;
+  }
+
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .status-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .toggle-btn {
+    width: 100%;
+  }
+
+  .form-actions {
+    justify-content: stretch;
+  }
+
+  .save-btn {
+    width: 100%;
+  }
 }
 </style>

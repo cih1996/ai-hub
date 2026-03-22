@@ -662,9 +662,9 @@ func lastNLines(s string, n int) string {
 	return strings.Join(lines[len(lines)-n:], "\n")
 }
 
-// generateShadowRules creates the preset rules for the shadow AI session
-func generateShadowRules(sessionID int64) string {
-	return fmt.Sprintf(`# 影子AI — 全局记忆管理者 & 会话健康守护者
+// getDefaultShadowRules returns the default shadow AI rules template
+func getDefaultShadowRules() string {
+	return `# 影子AI — 全局记忆管理者 & 会话健康守护者
 
 ## 身份定义
 你是影子AI（Shadow AI），系统级智能代理。你的职责是：
@@ -836,7 +836,7 @@ curl -X POST http://localhost:{{AI_HUB_PORT}}/api/v1/injection-router \
 # 影子AI状态
 
 - 启动时间: 2026-03-22 03:00:00
-- 会话ID: %d
+- 会话ID: {{SESSION_ID}}
 - 状态: 运行中
 - 最后巡检: 2026-03-22 04:32:27（第8次）
 - 最后提炼: 2026-03-22 04:12:27（第2次）
@@ -871,7 +871,7 @@ curl -X PUT http://localhost:{{AI_HUB_PORT}}/api/v1/files/content \
 # 影子AI工作日志
 
 ## 2026-03-22
-- [03:00:59] 系统初始化完成，会话 #%d
+- [03:00:59] 系统初始化完成，会话 #{{SESSION_ID}}
 - [03:22:27] 巡检 #1：发现 20 个会话有错误，3 个严重
 - [04:01:32] 提炼 #1：从 5 个会话提取记忆，更新 domain/lessons
 - [04:22:27] 巡检 #2：无新增异常，系统静默
@@ -953,7 +953,7 @@ curl -X PUT http://localhost:{{AI_HUB_PORT}}/api/v1/files/content \
 - 不依赖上下文历史，全靠记忆库
 - 每次唤醒先从记忆库恢复状态
 - 上下文阈值已设置为自动重置
-- 你的会话ID是 %d
+- 你的会话ID是 {{SESSION_ID}}
 
 ## 活动记录（重要：每次任务完成后必须记录）
 
@@ -1050,5 +1050,40 @@ curl -X POST http://localhost:{{AI_HUB_PORT}}/api/v1/shadow-ai/activity \
 - ai-hub search "关键词"          # 搜索记忆
 - ai-hub write "文件.md" --level session --content "内容"  # 写入记忆
 - ai-hub read "文件.md" --level session   # 读取记忆
-`, sessionID)
+`
+}
+
+// generateShadowRules creates the preset rules for the shadow AI session
+// It reads from ~/.ai-hub/shadow-ai/rules.md if exists, otherwise creates default rules
+func generateShadowRules(sessionID int64) string {
+	// Build rules file path
+	rulesPath := filepath.Join(core.GetDataDir(), "shadow-ai", "rules.md")
+
+	// Try to read existing rules file
+	if data, err := os.ReadFile(rulesPath); err == nil {
+		// File exists, replace {{SESSION_ID}} placeholder
+		content := string(data)
+		content = strings.ReplaceAll(content, "{{SESSION_ID}}", strconv.FormatInt(sessionID, 10))
+		return content
+	}
+
+	// File doesn't exist, create default rules
+	defaultRules := getDefaultShadowRules()
+
+	// Create directory if not exists
+	if err := os.MkdirAll(filepath.Dir(rulesPath), 0755); err != nil {
+		log.Printf("Failed to create shadow-ai directory: %v", err)
+		// Fallback to in-memory rules
+		return strings.ReplaceAll(defaultRules, "{{SESSION_ID}}", strconv.FormatInt(sessionID, 10))
+	}
+
+	// Write default rules to file
+	if err := os.WriteFile(rulesPath, []byte(defaultRules), 0644); err != nil {
+		log.Printf("Failed to write default shadow rules: %v", err)
+		// Fallback to in-memory rules
+		return strings.ReplaceAll(defaultRules, "{{SESSION_ID}}", strconv.FormatInt(sessionID, 10))
+	}
+
+	// Return rules with session ID replaced
+	return strings.ReplaceAll(defaultRules, "{{SESSION_ID}}", strconv.FormatInt(sessionID, 10))
 }

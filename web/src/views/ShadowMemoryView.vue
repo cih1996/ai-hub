@@ -139,7 +139,13 @@ onMounted(() => {
               :class="['category-item', { active: selectedCategory === cat.category, 'has-data': cat.has_data }]"
               @click="selectCategory(cat.category)"
             >
-              <span class="category-icon">📋</span>
+              <svg class="category-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+                <line x1="16" y1="13" x2="8" y2="13"/>
+                <line x1="16" y1="17" x2="8" y2="17"/>
+                <polyline points="10 9 9 9 8 9"/>
+              </svg>
               <span class="category-label">{{ cat.label }}</span>
               <span v-if="cat.has_data" class="data-badge">●</span>
             </div>
@@ -161,14 +167,22 @@ onMounted(() => {
                 class="action-btn"
                 @click="isEditing = true"
               >
-                ✏️ 编辑
+                <svg class="btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                </svg>
+                编辑
               </button>
               <button
                 v-if="isEditing"
                 class="action-btn"
                 @click="isEditing = false"
               >
-                👁️ 预览
+                <svg class="btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                  <circle cx="12" cy="12" r="3"/>
+                </svg>
+                预览
               </button>
               <button
                 v-if="isEditing"
@@ -176,7 +190,22 @@ onMounted(() => {
                 :disabled="saving"
                 @click="saveContent"
               >
-                {{ saving ? '保存中...' : '💾 保存' }}
+                <svg v-if="!saving" class="btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5z"/>
+                  <polyline points="17 21 17 13 7 13 7 21"/>
+                  <polyline points="7 3 7 8 15 8"/>
+                </svg>
+                <svg v-else class="btn-icon spinner-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="12" y1="2" x2="12" y2="6"/>
+                  <line x1="12" y1="18" x2="12" y2="22"/>
+                  <line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/>
+                  <line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/>
+                  <line x1="2" y1="12" x2="6" y2="12"/>
+                  <line x1="18" y1="12" x2="22" y2="12"/>
+                  <line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/>
+                  <line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/>
+                </svg>
+                {{ saving ? '保存中...' : '保存' }}
               </button>
             </div>
           </div>
@@ -354,6 +383,9 @@ onMounted(() => {
 }
 
 .action-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   padding: 8px 16px;
   background: var(--bg-primary);
   border: 1px solid var(--border);
@@ -362,6 +394,15 @@ onMounted(() => {
   font-size: 14px;
   color: var(--text-primary);
   transition: all 0.2s;
+}
+
+.btn-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.spinner-icon {
+  animation: spin 1.2s linear infinite;
 }
 
 .action-btn:hover:not(:disabled) {
@@ -502,5 +543,26 @@ onMounted(() => {
 
 .error-hint {
   color: #ef4444;
+}
+
+@media (max-width: 768px) {
+  .shadow-memory {
+    padding: 16px;
+    height: auto;
+    min-height: calc(100vh - 120px);
+  }
+
+  .memory-container {
+    flex-direction: column;
+  }
+
+  .categories-sidebar {
+    width: 100%;
+    max-height: 300px;
+  }
+
+  .content-area {
+    min-height: 400px;
+  }
 }
 </style>
