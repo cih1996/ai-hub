@@ -276,11 +276,11 @@ onMounted(() => {
 
 .category-item.active {
   background: var(--primary);
-  color: white;
+  color: white !important;
 }
 
 .category-item.active .category-label {
-  color: white;
+  color: white !important;
 }
 
 .category-icon {
@@ -299,7 +299,7 @@ onMounted(() => {
 }
 
 .category-item.active .data-badge {
-  color: white;
+  color: white !important;
 }
 
 /* 右侧内容区域 */

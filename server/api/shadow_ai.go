@@ -29,11 +29,14 @@ type ShadowAIConfig struct {
 
 // ShadowAIStatus holds the shadow AI status response
 type ShadowAIStatus struct {
-	Enabled   bool            `json:"enabled"`
-	SessionID int64           `json:"session_id"`
-	Status    string          `json:"status"` // "running" | "paused" | "uninitialized"
-	Config    ShadowAIConfig  `json:"config"`
-	Triggers  []model.Trigger `json:"triggers,omitempty"`
+	Enabled       bool            `json:"enabled"`
+	SessionID     int64           `json:"session_id"`
+	Status        string          `json:"status"` // "running" | "paused" | "uninitialized"
+	Config        ShadowAIConfig  `json:"config"`
+	Triggers      []model.Trigger `json:"triggers,omitempty"`
+	CreatedAt     string          `json:"created_at,omitempty"`     // 影子AI创建时间
+	LastActivity  string          `json:"last_activity,omitempty"`  // 最后活动时间
+	UptimeSeconds int64           `json:"uptime_seconds,omitempty"` // 运行时长（秒）
 }
 
 var defaultShadowConfig = ShadowAIConfig{
@@ -138,6 +141,15 @@ func EnableShadowAI(c *gin.Context) {
 				}
 				triggerIDs = append(triggerIDs, t.ID)
 			}
+
+		// Update rules file with latest template
+		rulesContent := generateShadowRules(existing.SessionID)
+		rulesDir := filepath.Join(core.GetDataDir(), "session-rules")
+		os.MkdirAll(rulesDir, 0755)
+		rulesPath := filepath.Join(rulesDir, fmt.Sprintf("%d.md", existing.SessionID))
+		if err := os.WriteFile(rulesPath, []byte(rulesContent), 0644); err != nil {
+			log.Printf("[shadow-ai] failed to update rules: %v", err)
+		}
 
 			// Update config and status
 			saveShadowSettings(true, existing.SessionID, reqConfig)
@@ -533,9 +545,37 @@ func loadShadowStatus() ShadowAIStatus {
 
 	if status.Enabled && status.SessionID > 0 {
 		status.Status = "running"
-		// Check if triggers are active
+
+		// Get session info to fill created_at and calculate uptime
+		if session, err := store.GetSession(status.SessionID); err == nil && session != nil {
+			// Fill created_at (convert time.Time to string)
+			status.CreatedAt = session.CreatedAt.Format("2006-01-02 15:04:05")
+
+			// Calculate uptime_seconds
+			status.UptimeSeconds = int64(time.Since(session.CreatedAt).Seconds())
+		}
+
+		// Check if triggers are active and get last activity time
 		triggers, _ := store.ListTriggersBySession(status.SessionID)
 		status.Triggers = triggers
+
+		// Find the latest last_fired_at as last_activity
+		var latestActivity time.Time
+		for _, t := range triggers {
+			if t.LastFiredAt != "" {
+				if firedTime, err := time.Parse("2006-01-02 15:04:05", t.LastFiredAt); err == nil {
+					if firedTime.After(latestActivity) {
+						latestActivity = firedTime
+					}
+				}
+			}
+		}
+
+		if !latestActivity.IsZero() {
+			status.LastActivity = latestActivity.Format("2006-01-02 15:04:05")
+		}
+
+		// Check if all triggers are disabled
 		allDisabled := true
 		for _, t := range triggers {
 			if t.Enabled {
@@ -952,7 +992,12 @@ curl -X POST http://localhost:{{AI_HUB_PORT}}/api/v1/shadow-ai/activity \
 5. 更新 memory/shadow/patrol-result.md（最新巡检结果）
 6. 更新 memory/shadow/status.md（更新"最后巡检"时间和基线数据）
 7. 追加一条到 memory/shadow/work-log.md
-8. 记录活动：` + "`" + `POST /shadow-ai/activity` + "`" + ` type=patrol，summary 包含巡检次数和发现
+8. 【必须】记录活动到数据库（验证返回 ok: true）：
+   ` + "`" + `bash
+   curl -X POST http://localhost:{{AI_HUB_PORT}}/api/v1/shadow-ai/activity \
+     -H 'Content-Type: application/json' \
+     -d '{"type": "patrol", "summary": "巡检 #N：发现 X 个新增错误"}'
+   ` + "`" + `
 
 ### 【定时提炼】触发时（每1小时）
 
@@ -963,7 +1008,12 @@ curl -X POST http://localhost:{{AI_HUB_PORT}}/api/v1/shadow-ai/activity \
 5. 对每个分类执行：读取→合并→写回（参考"写入方法"）
 6. 更新 memory/shadow/status.md（更新"最后提炼"时间）
 7. 追加一条到 memory/shadow/work-log.md（记录提炼了哪些分类）
-8. 记录活动：` + "`" + `POST /shadow-ai/activity` + "`" + ` type=extract，summary 包含提炼次数和更新的分类
+8. 【必须】记录活动到数据库（验证返回 ok: true）：
+   ` + "`" + `bash
+   curl -X POST http://localhost:{{AI_HUB_PORT}}/api/v1/shadow-ai/activity \
+     -H 'Content-Type: application/json' \
+     -d '{"type": "extract", "summary": "提炼 #N：从 X 个会话提取记忆，更新 domain/lessons"}'
+   ` + "`" + `
 
 ### 【深度巡检】触发时（每6小时）
 
@@ -973,7 +1023,12 @@ curl -X POST http://localhost:{{AI_HUB_PORT}}/api/v1/shadow-ai/activity \
 4. 评估是否需要新增 Schema 或调整路由
 5. 更新 memory/shadow/status.md（更新"最后深扫"时间）
 6. 追加一条到 memory/shadow/work-log.md
-7. 记录活动：` + "`" + `POST /shadow-ai/activity` + "`" + ` type=deep_scan，summary 包含检查结果
+7. 【必须】记录活动到数据库（验证返回 ok: true）：
+   ` + "`" + `bash
+   curl -X POST http://localhost:{{AI_HUB_PORT}}/api/v1/shadow-ai/activity \
+     -H 'Content-Type: application/json' \
+     -d '{"type": "deep_scan", "summary": "深扫 #N：检查 X 个会话，Y 个健康度低于 0.7"}'
+   ` + "`" + `
 
 ### 【自我清理】触发时（每24小时）
 
@@ -982,7 +1037,12 @@ curl -X POST http://localhost:{{AI_HUB_PORT}}/api/v1/shadow-ai/activity \
 3. 生成日报（总结过去24小时的工作）
 4. 更新 memory/shadow/status.md（更新"最后清理"时间）
 5. 追加一条到 memory/shadow/work-log.md
-6. 记录活动：` + "`" + `POST /shadow-ai/activity` + "`" + ` type=self_clean，summary 包含清理内容
+6. 【必须】记录活动到数据库（验证返回 ok: true）：
+   ` + "`" + `bash
+   curl -X POST http://localhost:{{AI_HUB_PORT}}/api/v1/shadow-ai/activity \
+     -H 'Content-Type: application/json' \
+     -d '{"type": "self_clean", "summary": "清理 #N：归档日志 X 行，清理临时数据"}'
+   ` + "`" + `
 
 ## CLI 速查
 - ai-hub sessions --with-errors  # 查看有错误的会话
