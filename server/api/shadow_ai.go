@@ -20,11 +20,12 @@ import (
 
 // ShadowAIConfig holds the shadow AI configuration
 type ShadowAIConfig struct {
-	PatrolInterval        string `json:"patrol_interval"`         // e.g. "10m"
-	ExtractInterval       string `json:"extract_interval"`        // e.g. "1h"
-	DeepScanInterval      string `json:"deep_scan_interval"`      // e.g. "6h"
-	SelfCleanInterval     string `json:"self_clean_interval"`     // e.g. "24h"
-	ContextResetThreshold int    `json:"context_reset_threshold"` // e.g. 50
+	PatrolInterval          string `json:"patrol_interval"`           // e.g. "10m"
+	ExtractInterval         string `json:"extract_interval"`          // e.g. "1h"
+	DeepScanInterval        string `json:"deep_scan_interval"`        // e.g. "6h"
+	SelfCleanInterval       string `json:"self_clean_interval"`       // e.g. "24h"
+	ErrorCorrectionInterval string `json:"error_correction_interval"` // e.g. "30m"
+	ContextResetThreshold   int    `json:"context_reset_threshold"`   // e.g. 50
 }
 
 // ShadowAIStatus holds the shadow AI status response
@@ -40,11 +41,12 @@ type ShadowAIStatus struct {
 }
 
 var defaultShadowConfig = ShadowAIConfig{
-	PatrolInterval:        "10m",
-	ExtractInterval:       "1h",
-	DeepScanInterval:      "6h",
-	SelfCleanInterval:     "24h",
-	ContextResetThreshold: 50,
+	PatrolInterval:          "10m",
+	ExtractInterval:         "1h",
+	DeepScanInterval:        "6h",
+	SelfCleanInterval:       "24h",
+	ErrorCorrectionInterval: "30m",
+	ContextResetThreshold:   50,
 }
 
 // Trigger content prefixes for matching triggers to config intervals
@@ -56,6 +58,7 @@ var triggerPrefixes = []struct {
 	{"【定时提炼】", "extract"},
 	{"【深度巡检】", "deep_scan"},
 	{"【自我清理】", "self_clean"},
+	{"【错误纠正】", "error_correction"},
 }
 
 // GetShadowAIStatus handles GET /api/v1/shadow-ai/status
@@ -95,6 +98,9 @@ func EnableShadowAI(c *gin.Context) {
 	if reqConfig.SelfCleanInterval == "" {
 		reqConfig.SelfCleanInterval = defaultShadowConfig.SelfCleanInterval
 	}
+	if reqConfig.ErrorCorrectionInterval == "" {
+		reqConfig.ErrorCorrectionInterval = defaultShadowConfig.ErrorCorrectionInterval
+	}
 	if reqConfig.ContextResetThreshold <= 0 {
 		reqConfig.ContextResetThreshold = defaultShadowConfig.ContextResetThreshold
 	}
@@ -122,6 +128,7 @@ func EnableShadowAI(c *gin.Context) {
 				{reqConfig.ExtractInterval, "【定时提炼】记忆提炼：从最近对话中提取有价值的用户偏好、习惯、纠正内容，写入结构化记忆。"},
 				{reqConfig.DeepScanInterval, "【深度巡检】全面检查所有会话健康度、Schema演进、记忆一致性。"},
 				{reqConfig.SelfCleanInterval, "【自我清理】归档工作日志，清理过期临时数据，更新 shadow/status.md。"},
+			{reqConfig.ErrorCorrectionInterval, "【错误纠正】错误纠正：识别反复出现的错误模式，自动修改会话规则以预防同类错误。"},
 			}
 			var triggerIDs []int64
 			for _, td := range triggerDefs {
@@ -221,6 +228,7 @@ func EnableShadowAI(c *gin.Context) {
 		{reqConfig.ExtractInterval, "【定时提炼】记忆提炼：从最近对话中提取有价值的用户偏好、习惯、纠正内容，写入结构化记忆。"},
 		{reqConfig.DeepScanInterval, "【深度巡检】全面检查所有会话健康度、Schema演进、记忆一致性。"},
 		{reqConfig.SelfCleanInterval, "【自我清理】归档工作日志，清理过期临时数据，更新 shadow/status.md。"},
+		{reqConfig.ErrorCorrectionInterval, "【错误纠正】错误纠正：识别反复出现的错误模式，自动修改会话规则以预防同类错误。"},
 	}
 
 	var triggerIDs []int64
@@ -1097,12 +1105,14 @@ curl -X POST http://localhost:{{AI_HUB_PORT}}/api/v1/shadow-ai/activity \
 - ` + "`" + `extract` + "`" + ` — 定时提炼
 - ` + "`" + `deep_scan` + "`" + ` — 深度巡检
 - ` + "`" + `self_clean` + "`" + ` — 自我清理
+- ` + "`" + `error_correction` + "`" + ` — 错误纠正
 
 **summary 格式建议：**
 - 巡检：` + "`" + `巡检 #8：发现 3 个新增错误，2 个警告` + "`" + `
 - 提炼：` + "`" + `提炼 #2：从 5 个会话提取记忆，更新 domain/lessons` + "`" + `
 - 深扫：` + "`" + `深扫 #1：检查 50 个会话，3 个健康度低于 0.7` + "`" + `
 - 清理：` + "`" + `清理 #1：归档日志 500 行，清理临时数据` + "`" + `
+- 纠正：` + "`" + `纠正 #1：修复会话 #123 的路径错误规则，基于 3 次同类错误` + "`" + `
 
 ## 工作流程清单
 
@@ -1137,6 +1147,82 @@ curl -X POST http://localhost:{{AI_HUB_PORT}}/api/v1/shadow-ai/activity \
      -H 'Content-Type: application/json' \
      -d '{"type": "extract", "summary": "提炼 #N：从 X 个会话提取记忆，更新 domain/lessons"}'
    ` + "`" + `
+
+### 【错误纠正】触发时（每30分钟）
+
+**目标：** 自动识别反复出现的错误模式，修改会话规则以预防同类错误。
+
+**执行步骤：**
+
+1. 扫描所有会话的错误统计：
+   ` + "```bash" + `
+   ai-hub sessions --with-errors
+   ` + "```" + `
+
+2. 对每个有错误的会话，读取错误详情：
+   ` + "```bash" + `
+   ai-hub errors <session_id>
+   ` + "```" + `
+
+3. 分析错误模式（必须满足以下条件才能修改规则）：
+   - 同一会话至少出现 3 次同类错误
+   - 错误类型明确（如：路径错误、类型错误、API调用错误等）
+   - 可以通过规则约束来预防
+
+4. 设计规则修改方案：
+   - 基于错误证据，提炼出禁止事项或注意事项
+   - 规则描述要具体、可执行
+   - 示例：「禁止使用相对路径，必须使用绝对路径或 filepath.Join」
+
+5. 读取现有规则并修改：
+   ` + "```bash" + `
+   # 读取现有规则
+   ai-hub rules get <session_id>
+
+   # 追加新规则（不删除现有规则）
+   ai-hub rules set <session_id> --content "原规则内容
+
+## 错误纠正规则（由影子AI自动添加）
+
+### 规则 #1 - 路径处理（2026-03-23 添加）
+- 原因：反复出现路径错误（错误ID: #456, #457, #458）
+- 规则：禁止使用相对路径，必须使用绝对路径或 filepath.Join
+- 预期效果：减少路径相关错误
+"
+   ` + "```" + `
+
+6. 记录修改历史到 memory/shadow/rule-changes.md：
+   ` + "```bash" + `
+   # 读取现有历史
+   curl -s http://localhost:{{AI_HUB_PORT}}/api/v1/files/content?scope=global&path=memory/shadow/rule-changes.md
+
+   # 追加新记录后写回
+   curl -X PUT http://localhost:{{AI_HUB_PORT}}/api/v1/files/content \
+     -H 'Content-Type: application/json' \
+     -d '{
+       "scope": "global",
+       "path": "memory/shadow/rule-changes.md",
+       "content": "原内容 + 新记录"
+     }'
+   ` + "```" + `
+
+7. 更新 memory/shadow/status.md（更新"最后纠正"时间）
+
+8. 追加一条到 memory/shadow/work-log.md
+
+9. 【必须】记录活动到数据库（验证返回 ok: true）：
+   ` + "```bash" + `
+   curl -X POST http://localhost:{{AI_HUB_PORT}}/api/v1/shadow-ai/activity \
+     -H 'Content-Type: application/json' \
+     -d '{"type": "error_correction", "summary": "纠正 #N：修复会话 #X 的 Y 类错误规则，基于 Z 次同类错误"}'
+   ` + "```" + `
+
+**重要原则：**
+- 必须基于具体错误证据（至少3次同类错误）
+- 只追加规则，不删除现有规则
+- 修改后必须记录到 rule-changes.md
+- 每次修改后观察至少1小时，评估效果
+- 如果同一会话在1小时内再次出现同类错误，说明规则无效，需要重新设计
 
 ### 【深度巡检】触发时（每6小时）
 
