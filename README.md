@@ -58,13 +58,27 @@ ai-hub-windows-amd64.exe
 
 ### 从源码编译
 
+**⚠️ 重要：必须使用 Makefile 编译，禁止直接运行 `go build`**
+
 ```bash
 git clone https://github.com/cih1996/ai-hub.git
 cd ai-hub
 cd web && npm install && cd ..
-make          # 编译当前平台
-make release  # 交叉编译所有平台
+
+# 编译当前平台（输出到 dist/）
+make build
+
+# 生产环境编译（包含版本信息）
+make release
+
+# 交叉编译所有平台
+make release-all
 ```
+
+**为什么必须使用 Makefile？**
+- Makefile 配置所有编译产物输出到 `dist/` 目录
+- 直接运行 `go build` 会在根目录生成二进制文件，影响工作目录整洁
+- ❌ 禁止使用 `go build` 或 `go build -o ai-hub`
 
 ## 架构
 
