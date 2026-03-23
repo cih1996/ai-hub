@@ -1300,3 +1300,48 @@ func generateShadowRules(sessionID int64) string {
 	// Return rules with session ID replaced
 	return strings.ReplaceAll(defaultRules, "{{SESSION_ID}}", strconv.FormatInt(sessionID, 10))
 }
+
+// GetShadowAIRules returns the shadow AI rules content
+func GetShadowAIRules(c *gin.Context) {
+	rulesPath := filepath.Join(core.GetDataDir(), "shadow-ai", "rules.md")
+	
+	data, err := os.ReadFile(rulesPath)
+	if err != nil {
+		// File not exist, return default rules
+		if os.IsNotExist(err) {
+			defaultRules := getDefaultShadowRules()
+			c.JSON(http.StatusOK, gin.H{"content": defaultRules})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	
+	c.JSON(http.StatusOK, gin.H{"content": string(data)})
+}
+
+// UpdateShadowAIRules saves the shadow AI rules content
+func UpdateShadowAIRules(c *gin.Context) {
+	var req struct {
+		Content string `json:"content" binding:"required"`
+	}
+	
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	
+	rulesDir := filepath.Join(core.GetDataDir(), "shadow-ai")
+	if err := os.MkdirAll(rulesDir, 0755); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	
+	rulesPath := filepath.Join(rulesDir, "rules.md")
+	if err := os.WriteFile(rulesPath, []byte(req.Content), 0644); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	
+	c.JSON(http.StatusOK, gin.H{"ok": true, "message": "规则已保存"})
+}
