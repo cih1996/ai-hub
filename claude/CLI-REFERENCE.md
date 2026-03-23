@@ -25,6 +25,15 @@ ai-hub sessions <id> move --group <name> # 将会话移动到指定团队
 ai-hub send <session_id> "消息内容"       # 发消息（0=新建会话）
 ai-hub send <session_id> "消息" --remote <url>  # 发送到远程实例（跨系统协作）
 
+创建新会话规范：
+- 同团队创建（推荐）：不传 --group，自动继承当前团队
+  ai-hub send 0 "消息"
+  ai-hub send 0 "消息" --group "$AI_HUB_GROUP_NAME"
+- 跨团队创建（允许）：手动指定团队名称
+  ai-hub send 0 "消息" --group "其他团队名称"
+  ai-hub send 0 "消息" --group "新团队名称"
+- 避免冗余：当前团队不要手动输入，用自动继承更简洁
+
 ## 错误统计
 
 ai-hub errors                            # 所有会话错误统计概览
