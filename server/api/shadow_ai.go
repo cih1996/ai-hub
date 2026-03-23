@@ -81,28 +81,29 @@ func EnableShadowAI(c *gin.Context) {
 	}
 
 	// Accept optional config override
-	var reqConfig ShadowAIConfig
-	if err := c.ShouldBindJSON(&reqConfig); err != nil {
-		reqConfig = defaultShadowConfig
-	}
-	// Fill defaults for zero values
-	if reqConfig.PatrolInterval == "" {
-		reqConfig.PatrolInterval = defaultShadowConfig.PatrolInterval
-	}
-	if reqConfig.ExtractInterval == "" {
-		reqConfig.ExtractInterval = defaultShadowConfig.ExtractInterval
-	}
-	if reqConfig.DeepScanInterval == "" {
-		reqConfig.DeepScanInterval = defaultShadowConfig.DeepScanInterval
-	}
-	if reqConfig.SelfCleanInterval == "" {
-		reqConfig.SelfCleanInterval = defaultShadowConfig.SelfCleanInterval
-	}
-	if reqConfig.ErrorCorrectionInterval == "" {
-		reqConfig.ErrorCorrectionInterval = defaultShadowConfig.ErrorCorrectionInterval
-	}
-	if reqConfig.ContextResetThreshold <= 0 {
-		reqConfig.ContextResetThreshold = defaultShadowConfig.ContextResetThreshold
+	// Strategy: start with defaults, then merge non-zero user values
+	reqConfig := defaultShadowConfig
+	var userConfig ShadowAIConfig
+	if err := c.ShouldBindJSON(&userConfig); err == nil {
+		// Merge non-zero values from user config
+		if userConfig.PatrolInterval != "" {
+			reqConfig.PatrolInterval = userConfig.PatrolInterval
+		}
+		if userConfig.ExtractInterval != "" {
+			reqConfig.ExtractInterval = userConfig.ExtractInterval
+		}
+		if userConfig.DeepScanInterval != "" {
+			reqConfig.DeepScanInterval = userConfig.DeepScanInterval
+		}
+		if userConfig.SelfCleanInterval != "" {
+			reqConfig.SelfCleanInterval = userConfig.SelfCleanInterval
+		}
+		if userConfig.ErrorCorrectionInterval != "" {
+			reqConfig.ErrorCorrectionInterval = userConfig.ErrorCorrectionInterval
+		}
+		if userConfig.ContextResetThreshold > 0 {
+			reqConfig.ContextResetThreshold = userConfig.ContextResetThreshold
+		}
 	}
 
 	// === Re-enable path: reuse existing session if available ===
@@ -143,8 +144,9 @@ func EnableShadowAI(c *gin.Context) {
 					UpdatedAt:   now.Format("2006-01-02 15:04:05"),
 				}
 				if err := store.CreateTrigger(t); err != nil {
-					log.Printf("[shadow-ai] failed to create trigger: %v", err)
-					continue
+					log.Printf("[shadow-ai] failed to create trigger (interval=%s): %v", td.interval, err)
+					c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to create trigger: %v", err)})
+					return
 				}
 				triggerIDs = append(triggerIDs, t.ID)
 			}
