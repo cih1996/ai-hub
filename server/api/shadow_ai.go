@@ -128,7 +128,7 @@ func EnableShadowAI(c *gin.Context) {
 				{reqConfig.ExtractInterval, "【定时提炼】记忆提炼：从最近对话中提取有价值的用户偏好、习惯、纠正内容，写入结构化记忆。"},
 				{reqConfig.DeepScanInterval, "【深度巡检】全面检查所有会话健康度、Schema演进、记忆一致性。"},
 				{reqConfig.SelfCleanInterval, "【自我清理】归档工作日志，清理过期临时数据，更新 shadow/status.md。"},
-			{reqConfig.ErrorCorrectionInterval, "【错误纠正】错误纠正：识别反复出现的错误模式，自动修改会话规则以预防同类错误。"},
+				{reqConfig.ErrorCorrectionInterval, "【错误纠正】错误纠正：识别反复出现的错误模式，自动修改会话规则以预防同类错误。"},
 			}
 			var triggerIDs []int64
 			for _, td := range triggerDefs {
@@ -662,8 +662,9 @@ func initShadowMemoryFiles(sessionID int64, now time.Time, config ShadowAIConfig
 - 提炼间隔: %s
 - 深扫间隔: %s
 - 清理间隔: %s
+- 错误纠正间隔: %s
 - 重置阈值: %d
-`, config.PatrolInterval, config.ExtractInterval, config.DeepScanInterval, config.SelfCleanInterval, config.ContextResetThreshold),
+`, config.PatrolInterval, config.ExtractInterval, config.DeepScanInterval, config.SelfCleanInterval, config.ErrorCorrectionInterval, config.ContextResetThreshold),
 	}
 
 	for name, content := range files {
@@ -722,8 +723,9 @@ func ensureShadowMemoryFiles(sessionID int64, now time.Time, config ShadowAIConf
 - 提炼间隔: %s
 - 深扫间隔: %s
 - 清理间隔: %s
+- 错误纠正间隔: %s
 - 重置阈值: %d
-`, config.PatrolInterval, config.ExtractInterval, config.DeepScanInterval, config.SelfCleanInterval, config.ContextResetThreshold),
+`, config.PatrolInterval, config.ExtractInterval, config.DeepScanInterval, config.SelfCleanInterval, config.ErrorCorrectionInterval, config.ContextResetThreshold),
 	}
 
 	// Only create files that don't exist
