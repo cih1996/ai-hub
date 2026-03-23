@@ -36,6 +36,10 @@ const config = ref<ShadowAIConfig>({
 const loading = ref(false)
 const saving = ref(false)
 const showAdvanced = ref(false)
+const showRulesEditor = ref(false)
+const rulesContent = ref('')
+const loadingRules = ref(false)
+const savingRules = ref(false)
 
 const rules = {
   patrol_interval: { min: 1, max: 1440, message: '巡检间隔必须在 1-1440 分钟之间' },
@@ -136,6 +140,49 @@ function formatDuration(minutes: number): string {
   const mins = minutes % 60
   if (mins === 0) return `${hours} 小时`
   return `${hours} 小时 ${mins} 分钟`
+}
+
+async function loadRules() {
+  loadingRules.value = true
+  try {
+    const res = await fetch('/api/v1/shadow-ai/rules')
+    const data = await res.json()
+    rulesContent.value = data.content || ''
+  } catch (err) {
+    console.error('Failed to load rules:', err)
+    alert('加载规则失败')
+  } finally {
+    loadingRules.value = false
+  }
+}
+
+async function saveRules() {
+  if (!rulesContent.value.trim()) {
+    alert('规则内容不能为空')
+    return
+  }
+
+  savingRules.value = true
+  try {
+    await fetch('/api/v1/shadow-ai/rules', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: rulesContent.value }),
+    })
+    alert('规则已保存\n\n提示：需要重启影子AI才能使新规则生效')
+  } catch (err) {
+    console.error('Failed to save rules:', err)
+    alert('保存失败')
+  } finally {
+    savingRules.value = false
+  }
+}
+
+async function toggleRulesEditor() {
+  showRulesEditor.value = !showRulesEditor.value
+  if (showRulesEditor.value && !rulesContent.value) {
+    await loadRules()
+  }
 }
 
 onMounted(() => {
@@ -285,6 +332,40 @@ onMounted(() => {
             <span class="info-value">
               {{ status?.uptime_seconds ? Math.floor(status.uptime_seconds / 3600) + ' 小时' : '-' }}
             </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 规则编辑 -->
+      <div class="config-section">
+        <div class="section-header clickable" @click="toggleRulesEditor">
+          <h3>规则编辑</h3>
+          <svg class="toggle-icon" :class="{ expanded: showRulesEditor }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="9 18 15 12 9 6"/>
+          </svg>
+        </div>
+
+        <div v-if="showRulesEditor" class="rules-editor">
+          <div v-if="loadingRules" class="loading-text">加载中...</div>
+          <div v-else>
+            <p class="editor-hint">
+              编辑影子AI的规则内容。保存后需要重启影子AI才能使新规则生效。
+            </p>
+            <textarea
+              v-model="rulesContent"
+              class="rules-textarea"
+              placeholder="规则内容..."
+              rows="20"
+            ></textarea>
+            <div class="form-actions">
+              <button
+                class="save-btn"
+                @click="saveRules"
+                :disabled="savingRules || loadingRules"
+              >
+                {{ savingRules ? '保存中...' : '保存规则' }}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -527,6 +608,41 @@ onMounted(() => {
   font-size: 14px;
   color: var(--text-primary);
   font-family: monospace;
+}
+
+.rules-editor {
+  padding-top: 12px;
+}
+
+.editor-hint {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.rules-textarea {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  line-height: 1.5;
+  resize: vertical;
+  transition: all 0.2s;
+}
+
+.rules-textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.loading-text {
+  padding: 20px;
+  text-align: center;
+  color: var(--text-secondary);
 }
 
 @media (max-width: 768px) {
