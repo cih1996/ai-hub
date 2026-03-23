@@ -337,6 +337,23 @@ onMounted(() => {
   color: white !important;
 }
 
+/* Light theme 适配：激活状态使用深色文字 */
+[data-theme="light"] .category-item.active {
+  color: var(--text-primary) !important;
+}
+
+[data-theme="light"] .category-item.active .category-label {
+  color: var(--text-primary) !important;
+}
+
+[data-theme="light"] .category-item.active .category-icon {
+  color: var(--text-primary) !important;
+}
+
+[data-theme="light"] .category-item.active .data-badge {
+  color: var(--text-primary) !important;
+}
+
 /* 右侧内容区域 */
 .content-area {
   flex: 1;
