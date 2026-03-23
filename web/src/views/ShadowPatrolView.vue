@@ -108,7 +108,7 @@ onMounted(() => {
       <div class="stats-grid">
         <div class="stat-card">
           <div class="stat-icon">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="11" cy="11" r="8"/>
               <path d="m21 21-4.35-4.35"/>
             </svg>
@@ -118,7 +118,12 @@ onMounted(() => {
         </div>
 
         <div class="stat-card">
-          <div class="stat-icon">⏰</div>
+          <div class="stat-icon">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <polyline points="12 6 12 12 16 14"/>
+            </svg>
+          </div>
           <div class="stat-value small">{{ lastPatrolTime }}</div>
           <div class="stat-label">最近巡检时间</div>
         </div>
@@ -312,6 +317,9 @@ onMounted(() => {
 }
 
 .refresh-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   padding: 6px 12px;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -568,5 +576,35 @@ onMounted(() => {
 .page-info {
   font-size: 14px;
   color: var(--text-secondary);
+}
+
+@media (max-width: 768px) {
+  .shadow-patrol {
+    padding: 16px;
+  }
+
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .section-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .history-item {
+    gap: 12px;
+  }
+
+  .history-header {
+    padding: 12px;
+  }
+
+  .history-summary {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
 }
 </style>

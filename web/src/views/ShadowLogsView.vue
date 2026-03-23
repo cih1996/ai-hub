@@ -134,7 +134,13 @@ onBeforeUnmount(() => {
             :class="['log-item', { active: selectedLog === file.key }]"
             @click="selectLog(file.key)"
           >
-            <span class="log-icon">📄</span>
+            <svg class="log-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+              <line x1="16" y1="13" x2="8" y2="13"/>
+              <line x1="16" y1="17" x2="8" y2="17"/>
+              <polyline points="10 9 9 9 8 9"/>
+            </svg>
             <span class="log-label">{{ file.label }}</span>
           </div>
         </div>
@@ -166,7 +172,10 @@ onBeforeUnmount(() => {
               :disabled="loading"
               title="立即刷新"
             >
-              <span class="btn-icon">↻</span>
+              <svg class="btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="23 4 23 10 17 10"/>
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+              </svg>
               刷新
             </button>
             <button
@@ -175,7 +184,11 @@ onBeforeUnmount(() => {
               :disabled="!content"
               title="导出日志"
             >
-              <span class="btn-icon">⬇</span>
+              <svg class="btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
               导出
             </button>
             <button
@@ -184,7 +197,12 @@ onBeforeUnmount(() => {
               :disabled="!content || loading"
               title="清空日志"
             >
-              <span class="btn-icon">🗑</span>
+              <svg class="btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="3 6 5 6 21 6"/>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                <line x1="10" y1="11" x2="10" y2="17"/>
+                <line x1="14" y1="11" x2="14" y2="17"/>
+              </svg>
               清空
             </button>
           </div>
@@ -347,13 +365,14 @@ onBeforeUnmount(() => {
 }
 
 .action-btn.danger:hover:not(:disabled) {
-  background: #fee;
+  background: rgba(239, 68, 68, 0.1);
   border-color: #ef4444;
   color: #ef4444;
 }
 
 .btn-icon {
-  font-size: 14px;
+  width: 16px;
+  height: 16px;
 }
 
 .content-body {
@@ -486,5 +505,34 @@ onBeforeUnmount(() => {
 
 .error-hint {
   color: #ef4444;
+}
+
+@media (max-width: 768px) {
+  .logs-container {
+    flex-direction: column;
+  }
+
+  .logs-sidebar {
+    width: 100%;
+    max-height: 200px;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .content-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .header-actions {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+
+  .action-btn {
+    flex: 1;
+    justify-content: center;
+  }
 }
 </style>

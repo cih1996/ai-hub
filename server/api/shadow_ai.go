@@ -20,11 +20,12 @@ import (
 
 // ShadowAIConfig holds the shadow AI configuration
 type ShadowAIConfig struct {
-	PatrolInterval        string `json:"patrol_interval"`         // e.g. "10m"
-	ExtractInterval       string `json:"extract_interval"`        // e.g. "1h"
-	DeepScanInterval      string `json:"deep_scan_interval"`      // e.g. "6h"
-	SelfCleanInterval     string `json:"self_clean_interval"`     // e.g. "24h"
-	ContextResetThreshold int    `json:"context_reset_threshold"` // e.g. 50
+	PatrolInterval          string `json:"patrol_interval"`           // e.g. "10m"
+	ExtractInterval         string `json:"extract_interval"`          // e.g. "1h"
+	DeepScanInterval        string `json:"deep_scan_interval"`        // e.g. "6h"
+	SelfCleanInterval       string `json:"self_clean_interval"`       // e.g. "24h"
+	ErrorCorrectionInterval string `json:"error_correction_interval"` // e.g. "30m"
+	ContextResetThreshold   int    `json:"context_reset_threshold"`   // e.g. 50
 }
 
 // ShadowAIStatus holds the shadow AI status response
@@ -40,11 +41,12 @@ type ShadowAIStatus struct {
 }
 
 var defaultShadowConfig = ShadowAIConfig{
-	PatrolInterval:        "10m",
-	ExtractInterval:       "1h",
-	DeepScanInterval:      "6h",
-	SelfCleanInterval:     "24h",
-	ContextResetThreshold: 50,
+	PatrolInterval:          "10m",
+	ExtractInterval:         "1h",
+	DeepScanInterval:        "6h",
+	SelfCleanInterval:       "24h",
+	ErrorCorrectionInterval: "30m",
+	ContextResetThreshold:   50,
 }
 
 // Trigger content prefixes for matching triggers to config intervals
@@ -56,6 +58,7 @@ var triggerPrefixes = []struct {
 	{"【定时提炼】", "extract"},
 	{"【深度巡检】", "deep_scan"},
 	{"【自我清理】", "self_clean"},
+	{"【错误纠正】", "error_correction"},
 }
 
 // GetShadowAIStatus handles GET /api/v1/shadow-ai/status
@@ -78,25 +81,29 @@ func EnableShadowAI(c *gin.Context) {
 	}
 
 	// Accept optional config override
-	var reqConfig ShadowAIConfig
-	if err := c.ShouldBindJSON(&reqConfig); err != nil {
-		reqConfig = defaultShadowConfig
-	}
-	// Fill defaults for zero values
-	if reqConfig.PatrolInterval == "" {
-		reqConfig.PatrolInterval = defaultShadowConfig.PatrolInterval
-	}
-	if reqConfig.ExtractInterval == "" {
-		reqConfig.ExtractInterval = defaultShadowConfig.ExtractInterval
-	}
-	if reqConfig.DeepScanInterval == "" {
-		reqConfig.DeepScanInterval = defaultShadowConfig.DeepScanInterval
-	}
-	if reqConfig.SelfCleanInterval == "" {
-		reqConfig.SelfCleanInterval = defaultShadowConfig.SelfCleanInterval
-	}
-	if reqConfig.ContextResetThreshold <= 0 {
-		reqConfig.ContextResetThreshold = defaultShadowConfig.ContextResetThreshold
+	// Strategy: start with defaults, then merge non-zero user values
+	reqConfig := defaultShadowConfig
+	var userConfig ShadowAIConfig
+	if err := c.ShouldBindJSON(&userConfig); err == nil {
+		// Merge non-zero values from user config
+		if userConfig.PatrolInterval != "" {
+			reqConfig.PatrolInterval = userConfig.PatrolInterval
+		}
+		if userConfig.ExtractInterval != "" {
+			reqConfig.ExtractInterval = userConfig.ExtractInterval
+		}
+		if userConfig.DeepScanInterval != "" {
+			reqConfig.DeepScanInterval = userConfig.DeepScanInterval
+		}
+		if userConfig.SelfCleanInterval != "" {
+			reqConfig.SelfCleanInterval = userConfig.SelfCleanInterval
+		}
+		if userConfig.ErrorCorrectionInterval != "" {
+			reqConfig.ErrorCorrectionInterval = userConfig.ErrorCorrectionInterval
+		}
+		if userConfig.ContextResetThreshold > 0 {
+			reqConfig.ContextResetThreshold = userConfig.ContextResetThreshold
+		}
 	}
 
 	// === Re-enable path: reuse existing session if available ===
@@ -122,6 +129,7 @@ func EnableShadowAI(c *gin.Context) {
 				{reqConfig.ExtractInterval, "【定时提炼】记忆提炼：从最近对话中提取有价值的用户偏好、习惯、纠正内容，写入结构化记忆。"},
 				{reqConfig.DeepScanInterval, "【深度巡检】全面检查所有会话健康度、Schema演进、记忆一致性。"},
 				{reqConfig.SelfCleanInterval, "【自我清理】归档工作日志，清理过期临时数据，更新 shadow/status.md。"},
+				{reqConfig.ErrorCorrectionInterval, "【错误纠正】错误纠正：识别反复出现的错误模式，自动修改会话规则以预防同类错误。"},
 			}
 			var triggerIDs []int64
 			for _, td := range triggerDefs {
@@ -136,8 +144,9 @@ func EnableShadowAI(c *gin.Context) {
 					UpdatedAt:   now.Format("2006-01-02 15:04:05"),
 				}
 				if err := store.CreateTrigger(t); err != nil {
-					log.Printf("[shadow-ai] failed to create trigger: %v", err)
-					continue
+					log.Printf("[shadow-ai] failed to create trigger (interval=%s): %v", td.interval, err)
+					c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to create trigger: %v", err)})
+					return
 				}
 				triggerIDs = append(triggerIDs, t.ID)
 			}
@@ -151,7 +160,10 @@ func EnableShadowAI(c *gin.Context) {
 			log.Printf("[shadow-ai] failed to update rules: %v", err)
 		}
 
-			// Update config and status
+		// Ensure all shadow memory files exist (create missing ones)
+		ensureShadowMemoryFiles(existing.SessionID, now, reqConfig)
+
+		// Update config and status
 			saveShadowSettings(true, existing.SessionID, reqConfig)
 
 			log.Printf("[shadow-ai] re-enabled: session=%d, triggers=%v", existing.SessionID, triggerIDs)
@@ -218,6 +230,7 @@ func EnableShadowAI(c *gin.Context) {
 		{reqConfig.ExtractInterval, "【定时提炼】记忆提炼：从最近对话中提取有价值的用户偏好、习惯、纠正内容，写入结构化记忆。"},
 		{reqConfig.DeepScanInterval, "【深度巡检】全面检查所有会话健康度、Schema演进、记忆一致性。"},
 		{reqConfig.SelfCleanInterval, "【自我清理】归档工作日志，清理过期临时数据，更新 shadow/status.md。"},
+		{reqConfig.ErrorCorrectionInterval, "【错误纠正】错误纠正：识别反复出现的错误模式，自动修改会话规则以预防同类错误。"},
 	}
 
 	var triggerIDs []int64
@@ -630,14 +643,30 @@ func initShadowMemoryFiles(sessionID int64, now time.Time, config ShadowAIConfig
 
 		"patrol-result.md": "# 最近巡检结果\n\n暂无巡检记录。\n",
 
+		"rule-changes.md": `# 影子AI规则修改历史
+
+暂无规则修改记录。
+
+## 记录格式示例
+
+` + "```markdown" + `
+## 2026-03-23 02:30:00
+- 会话ID: 123
+- 原因: 反复出现路径错误（错误ID: #456, #457, #458）
+- 修改: 添加"禁止使用相对路径"规则
+- 预期效果: 减少路径相关错误
+` + "```" + `
+`,
+
 		"config.md": fmt.Sprintf(`# 影子AI运行配置
 
 - 巡检间隔: %s
 - 提炼间隔: %s
 - 深扫间隔: %s
 - 清理间隔: %s
+- 错误纠正间隔: %s
 - 重置阈值: %d
-`, config.PatrolInterval, config.ExtractInterval, config.DeepScanInterval, config.SelfCleanInterval, config.ContextResetThreshold),
+`, config.PatrolInterval, config.ExtractInterval, config.DeepScanInterval, config.SelfCleanInterval, config.ErrorCorrectionInterval, config.ContextResetThreshold),
 	}
 
 	for name, content := range files {
@@ -647,6 +676,76 @@ func initShadowMemoryFiles(sessionID int64, now time.Time, config ShadowAIConfig
 		}
 	}
 	log.Printf("[shadow-ai] initialized %d memory files", len(files))
+}
+
+// ensureShadowMemoryFiles checks and creates missing shadow memory files (for re-enable path)
+func ensureShadowMemoryFiles(sessionID int64, now time.Time, config ShadowAIConfig) {
+	memDir := filepath.Join(core.GetDataDir(), "memory", "shadow")
+	os.MkdirAll(memDir, 0755)
+
+	// Define all required files with their default content
+	files := map[string]string{
+		"status.md": fmt.Sprintf(`# 影子AI状态
+
+- 启动时间: %s
+- 会话ID: %d
+- 状态: 已启动
+- 最后巡检: 无
+- 最后提炼: 无
+- 最后深扫: 无
+- 最后清理: 无
+`, now.Format("2006-01-02 15:04:05"), sessionID),
+
+		"work-log.md": fmt.Sprintf(`# 影子AI工作日志
+
+## %s
+- [%s] 系统初始化完成，会话 #%d
+`, now.Format("2006-01-02"), now.Format("15:04:05"), sessionID),
+
+		"patrol-result.md": "# 最近巡检结果\n\n暂无巡检记录。\n",
+
+		"rule-changes.md": `# 影子AI规则修改历史
+
+暂无规则修改记录。
+
+## 记录格式示例
+
+` + "```markdown" + `
+## 2026-03-23 02:30:00
+- 会话ID: 123
+- 原因: 反复出现路径错误（错误ID: #456, #457, #458）
+- 修改: 添加"禁止使用相对路径"规则
+- 预期效果: 减少路径相关错误
+` + "```" + `
+`,
+
+		"config.md": fmt.Sprintf(`# 影子AI运行配置
+
+- 巡检间隔: %s
+- 提炼间隔: %s
+- 深扫间隔: %s
+- 清理间隔: %s
+- 错误纠正间隔: %s
+- 重置阈值: %d
+`, config.PatrolInterval, config.ExtractInterval, config.DeepScanInterval, config.SelfCleanInterval, config.ErrorCorrectionInterval, config.ContextResetThreshold),
+	}
+
+	// Only create files that don't exist
+	createdCount := 0
+	for name, content := range files {
+		path := filepath.Join(memDir, name)
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+				log.Printf("[shadow-ai] failed to create missing file %s: %v", name, err)
+			} else {
+				createdCount++
+				log.Printf("[shadow-ai] created missing file: %s", name)
+			}
+		}
+	}
+	if createdCount > 0 {
+		log.Printf("[shadow-ai] ensured %d missing memory files", createdCount)
+	}
 }
 
 // lastNLines returns the last n lines of a string
@@ -662,9 +761,9 @@ func lastNLines(s string, n int) string {
 	return strings.Join(lines[len(lines)-n:], "\n")
 }
 
-// generateShadowRules creates the preset rules for the shadow AI session
-func generateShadowRules(sessionID int64) string {
-	return fmt.Sprintf(`# 影子AI — 全局记忆管理者 & 会话健康守护者
+// getDefaultShadowRules returns the default shadow AI rules template
+func getDefaultShadowRules() string {
+	return `# 影子AI — 全局记忆管理者 & 会话健康守护者
 
 ## 身份定义
 你是影子AI（Shadow AI），系统级智能代理。你的职责是：
@@ -836,7 +935,7 @@ curl -X POST http://localhost:{{AI_HUB_PORT}}/api/v1/injection-router \
 # 影子AI状态
 
 - 启动时间: 2026-03-22 03:00:00
-- 会话ID: %d
+- 会话ID: {{SESSION_ID}}
 - 状态: 运行中
 - 最后巡检: 2026-03-22 04:32:27（第8次）
 - 最后提炼: 2026-03-22 04:12:27（第2次）
@@ -871,7 +970,7 @@ curl -X PUT http://localhost:{{AI_HUB_PORT}}/api/v1/files/content \
 # 影子AI工作日志
 
 ## 2026-03-22
-- [03:00:59] 系统初始化完成，会话 #%d
+- [03:00:59] 系统初始化完成，会话 #{{SESSION_ID}}
 - [03:22:27] 巡检 #1：发现 20 个会话有错误，3 个严重
 - [04:01:32] 提炼 #1：从 5 个会话提取记忆，更新 domain/lessons
 - [04:22:27] 巡检 #2：无新增异常，系统静默
@@ -946,14 +1045,50 @@ curl -X PUT http://localhost:{{AI_HUB_PORT}}/api/v1/files/content \
 - 可以设置健康度（PUT /sessions/:id/health）
 - 可以写入结构化记忆（PUT /structured-memory/:category）
 - 可以管理注入路由（POST/PUT/DELETE /injection-router）
-- **禁止**修改其他会话的规则
+- **可以**修改其他会话的规则（用于错误纠正和优化）
 - **禁止**删除其他会话的消息
+
+### 会话规则修改指南
+
+**使用场景：**
+- 发现会话反复犯同类错误，需要在规则中添加禁止事项
+- 会话健康度持续低于阈值，需要调整规则优化交互
+- 用户偏好发生变化，需要更新会话规则
+
+**操作步骤：**
+
+1. 读取现有规则：
+` + "`" + `bash
+ai-hub rules get <session_id>
+` + "`" + `
+
+2. 分析问题并设计修改方案（必须基于具体错误证据）
+
+3. 修改规则（追加模式，不要删除现有规则）：
+` + "`" + `bash
+ai-hub rules set <session_id> --content "原规则内容 + 新增规则"
+` + "`" + `
+
+4. 记录修改历史到 memory/shadow/rule-changes.md：
+` + "`" + `markdown
+## 2026-03-23 02:30:00
+- 会话ID: 123
+- 原因: 反复出现路径错误（错误ID: #456, #457, #458）
+- 修改: 添加"禁止使用相对路径"规则
+- 预期效果: 减少路径相关错误
+` + "`" + `
+
+**修改原则：**
+- 必须基于具体错误证据（至少3次同类错误）
+- 只追加规则，不删除现有规则
+- 修改后必须记录到 rule-changes.md
+- 每次修改后观察至少1小时，评估效果
 
 ## 自我管理
 - 不依赖上下文历史，全靠记忆库
 - 每次唤醒先从记忆库恢复状态
 - 上下文阈值已设置为自动重置
-- 你的会话ID是 %d
+- 你的会话ID是 {{SESSION_ID}}
 
 ## 活动记录（重要：每次任务完成后必须记录）
 
@@ -974,12 +1109,14 @@ curl -X POST http://localhost:{{AI_HUB_PORT}}/api/v1/shadow-ai/activity \
 - ` + "`" + `extract` + "`" + ` — 定时提炼
 - ` + "`" + `deep_scan` + "`" + ` — 深度巡检
 - ` + "`" + `self_clean` + "`" + ` — 自我清理
+- ` + "`" + `error_correction` + "`" + ` — 错误纠正
 
 **summary 格式建议：**
 - 巡检：` + "`" + `巡检 #8：发现 3 个新增错误，2 个警告` + "`" + `
 - 提炼：` + "`" + `提炼 #2：从 5 个会话提取记忆，更新 domain/lessons` + "`" + `
 - 深扫：` + "`" + `深扫 #1：检查 50 个会话，3 个健康度低于 0.7` + "`" + `
 - 清理：` + "`" + `清理 #1：归档日志 500 行，清理临时数据` + "`" + `
+- 纠正：` + "`" + `纠正 #1：修复会话 #123 的路径错误规则，基于 3 次同类错误` + "`" + `
 
 ## 工作流程清单
 
@@ -1014,6 +1151,82 @@ curl -X POST http://localhost:{{AI_HUB_PORT}}/api/v1/shadow-ai/activity \
      -H 'Content-Type: application/json' \
      -d '{"type": "extract", "summary": "提炼 #N：从 X 个会话提取记忆，更新 domain/lessons"}'
    ` + "`" + `
+
+### 【错误纠正】触发时（每30分钟）
+
+**目标：** 自动识别反复出现的错误模式，修改会话规则以预防同类错误。
+
+**执行步骤：**
+
+1. 扫描所有会话的错误统计：
+   ` + "```bash" + `
+   ai-hub sessions --with-errors
+   ` + "```" + `
+
+2. 对每个有错误的会话，读取错误详情：
+   ` + "```bash" + `
+   ai-hub errors <session_id>
+   ` + "```" + `
+
+3. 分析错误模式（必须满足以下条件才能修改规则）：
+   - 同一会话至少出现 3 次同类错误
+   - 错误类型明确（如：路径错误、类型错误、API调用错误等）
+   - 可以通过规则约束来预防
+
+4. 设计规则修改方案：
+   - 基于错误证据，提炼出禁止事项或注意事项
+   - 规则描述要具体、可执行
+   - 示例：「禁止使用相对路径，必须使用绝对路径或 filepath.Join」
+
+5. 读取现有规则并修改：
+   ` + "```bash" + `
+   # 读取现有规则
+   ai-hub rules get <session_id>
+
+   # 追加新规则（不删除现有规则）
+   ai-hub rules set <session_id> --content "原规则内容
+
+## 错误纠正规则（由影子AI自动添加）
+
+### 规则 #1 - 路径处理（2026-03-23 添加）
+- 原因：反复出现路径错误（错误ID: #456, #457, #458）
+- 规则：禁止使用相对路径，必须使用绝对路径或 filepath.Join
+- 预期效果：减少路径相关错误
+"
+   ` + "```" + `
+
+6. 记录修改历史到 memory/shadow/rule-changes.md：
+   ` + "```bash" + `
+   # 读取现有历史
+   curl -s http://localhost:{{AI_HUB_PORT}}/api/v1/files/content?scope=global&path=memory/shadow/rule-changes.md
+
+   # 追加新记录后写回
+   curl -X PUT http://localhost:{{AI_HUB_PORT}}/api/v1/files/content \
+     -H 'Content-Type: application/json' \
+     -d '{
+       "scope": "global",
+       "path": "memory/shadow/rule-changes.md",
+       "content": "原内容 + 新记录"
+     }'
+   ` + "```" + `
+
+7. 更新 memory/shadow/status.md（更新"最后纠正"时间）
+
+8. 追加一条到 memory/shadow/work-log.md
+
+9. 【必须】记录活动到数据库（验证返回 ok: true）：
+   ` + "```bash" + `
+   curl -X POST http://localhost:{{AI_HUB_PORT}}/api/v1/shadow-ai/activity \
+     -H 'Content-Type: application/json' \
+     -d '{"type": "error_correction", "summary": "纠正 #N：修复会话 #X 的 Y 类错误规则，基于 Z 次同类错误"}'
+   ` + "```" + `
+
+**重要原则：**
+- 必须基于具体错误证据（至少3次同类错误）
+- 只追加规则，不删除现有规则
+- 修改后必须记录到 rule-changes.md
+- 每次修改后观察至少1小时，评估效果
+- 如果同一会话在1小时内再次出现同类错误，说明规则无效，需要重新设计
 
 ### 【深度巡检】触发时（每6小时）
 
@@ -1050,5 +1263,40 @@ curl -X POST http://localhost:{{AI_HUB_PORT}}/api/v1/shadow-ai/activity \
 - ai-hub search "关键词"          # 搜索记忆
 - ai-hub write "文件.md" --level session --content "内容"  # 写入记忆
 - ai-hub read "文件.md" --level session   # 读取记忆
-`, sessionID)
+`
+}
+
+// generateShadowRules creates the preset rules for the shadow AI session
+// It reads from ~/.ai-hub/shadow-ai/rules.md if exists, otherwise creates default rules
+func generateShadowRules(sessionID int64) string {
+	// Build rules file path
+	rulesPath := filepath.Join(core.GetDataDir(), "shadow-ai", "rules.md")
+
+	// Try to read existing rules file
+	if data, err := os.ReadFile(rulesPath); err == nil {
+		// File exists, replace {{SESSION_ID}} placeholder
+		content := string(data)
+		content = strings.ReplaceAll(content, "{{SESSION_ID}}", strconv.FormatInt(sessionID, 10))
+		return content
+	}
+
+	// File doesn't exist, create default rules
+	defaultRules := getDefaultShadowRules()
+
+	// Create directory if not exists
+	if err := os.MkdirAll(filepath.Dir(rulesPath), 0755); err != nil {
+		log.Printf("Failed to create shadow-ai directory: %v", err)
+		// Fallback to in-memory rules
+		return strings.ReplaceAll(defaultRules, "{{SESSION_ID}}", strconv.FormatInt(sessionID, 10))
+	}
+
+	// Write default rules to file
+	if err := os.WriteFile(rulesPath, []byte(defaultRules), 0644); err != nil {
+		log.Printf("Failed to write default shadow rules: %v", err)
+		// Fallback to in-memory rules
+		return strings.ReplaceAll(defaultRules, "{{SESSION_ID}}", strconv.FormatInt(sessionID, 10))
+	}
+
+	// Return rules with session ID replaced
+	return strings.ReplaceAll(defaultRules, "{{SESSION_ID}}", strconv.FormatInt(sessionID, 10))
 }

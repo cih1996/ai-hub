@@ -132,7 +132,9 @@ onMounted(() => {
       <div class="category-info">
         <div class="info-card">
           <div class="info-header">
-            <span class="info-icon">📌</span>
+            <svg class="info-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+            </svg>
             <span class="info-title">固定分类（始终注入）</span>
           </div>
           <div class="info-content">
@@ -142,7 +144,13 @@ onMounted(() => {
 
         <div class="info-card">
           <div class="info-header">
-            <span class="info-icon">🔀</span>
+            <svg class="info-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="16 3 21 3 21 8"/>
+              <line x1="4" y1="20" x2="21" y2="3"/>
+              <polyline points="21 16 21 21 16 21"/>
+              <line x1="15" y1="15" x2="21" y2="21"/>
+              <line x1="4" y1="4" x2="9" y2="9"/>
+            </svg>
             <span class="info-title">条件分类（按关键词注入）</span>
           </div>
           <div class="info-content">
@@ -155,7 +163,11 @@ onMounted(() => {
     <!-- 操作栏 -->
     <div class="action-bar">
       <button class="create-btn" @click="openCreateDialog">
-        ➕ 新增路由
+        <svg class="btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="5" x2="12" y2="19"/>
+          <line x1="5" y1="12" x2="19" y2="12"/>
+        </svg>
+        新增路由
       </button>
     </div>
 
@@ -192,10 +204,20 @@ onMounted(() => {
             <td class="time-cell">{{ new Date(route.created_at).toLocaleString('zh-CN') }}</td>
             <td class="actions-cell">
               <button class="action-btn edit" @click="openEditDialog(route)">
-                ✏️ 编辑
+                <svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                </svg>
+                编辑
               </button>
               <button class="action-btn delete" @click="deleteRoute(route)">
-                🗑️ 删除
+                <svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="3 6 5 6 21 6"/>
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                  <line x1="10" y1="11" x2="10" y2="17"/>
+                  <line x1="14" y1="11" x2="14" y2="17"/>
+                </svg>
+                删除
               </button>
             </td>
           </tr>
@@ -329,12 +351,25 @@ onMounted(() => {
   color: #10b981;
 }
 
+[data-theme="light"] .category-tag.fixed {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+[data-theme="light"] .category-tag.conditional {
+  background: #ecfdf5;
+  color: #059669;
+}
+
 /* 操作栏 */
 .action-bar {
   margin-bottom: 16px;
 }
 
 .create-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 10px 20px;
   background: var(--primary);
   color: white;
@@ -435,6 +470,9 @@ onMounted(() => {
 }
 
 .action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   padding: 6px 12px;
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -454,9 +492,17 @@ onMounted(() => {
   color: #3b82f6;
 }
 
+.action-btn.edit:hover {
+  background: rgba(59, 130, 246, 0.1);
+}
+
 .action-btn.delete {
   border-color: #ef4444;
   color: #ef4444;
+}
+
+.action-btn.delete:hover {
+  background: rgba(239, 68, 68, 0.1);
 }
 
 /* 对话框 */
@@ -590,5 +636,26 @@ onMounted(() => {
 
 .save-btn:hover {
   opacity: 0.9;
+}
+
+@media (max-width: 768px) {
+  .shadow-router {
+    padding: 16px;
+  }
+
+  .routes-table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  .dialog {
+    width: 95%;
+  }
+
+  .action-bar {
+    display: flex;
+    justify-content: flex-end;
+  }
 }
 </style>

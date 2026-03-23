@@ -167,12 +167,9 @@ onMounted(() => {
       <div class="metrics-grid">
         <div class="metric-card">
           <div class="metric-icon">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-              <polyline points="14 2 14 8 20 8"/>
-              <line x1="16" y1="13" x2="8" y2="13"/>
-              <line x1="16" y1="17" x2="8" y2="17"/>
-              <polyline points="10 9 9 9 8 9"/>
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+              <circle cx="12" cy="7" r="4"></circle>
             </svg>
           </div>
           <div class="metric-value">{{ metrics?.memory_count || 0 }}</div>
@@ -180,25 +177,43 @@ onMounted(() => {
         </div>
 
         <div class="metric-card">
-          <div class="metric-icon">🔀</div>
+          <div class="metric-icon">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+          </div>
           <div class="metric-value">{{ metrics?.router_count || 0 }}</div>
           <div class="metric-label">注入路由</div>
         </div>
 
         <div class="metric-card">
-          <div class="metric-icon">💚</div>
+          <div class="metric-icon">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 11.08V12a10.06 10.06 0 1 1-5.93-9.14"></path>
+              <polyline points="22 4 12 14.01 9 11.01"></polyline>
+            </svg>
+          </div>
           <div class="metric-content">
             <div class="health-stats">
               <div class="health-item">
-                <span class="health-badge healthy">{{ metrics?.session_health?.healthy || 0 }}</span>
+                <span class="health-badge healthy">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                  {{ metrics?.session_health?.healthy || 0 }}
+                </span>
                 <span class="health-label">健康</span>
               </div>
               <div class="health-item">
-                <span class="health-badge warning">{{ metrics?.session_health?.warning || 0 }}</span>
+                <span class="health-badge warning">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                  {{ metrics?.session_health?.warning || 0 }}
+                </span>
                 <span class="health-label">警告</span>
               </div>
               <div class="health-item">
-                <span class="health-badge error">{{ metrics?.session_health?.error || 0 }}</span>
+                <span class="health-badge error">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
+                  {{ metrics?.session_health?.error || 0 }}
+                </span>
                 <span class="health-label">错误</span>
               </div>
             </div>
@@ -284,9 +299,15 @@ onMounted(() => {
 
 <style scoped>
 .shadow-overview {
-  padding: 24px;
+  padding: 16px;
   max-width: 1400px;
   margin: 0 auto;
+}
+
+@media (min-width: 768px) {
+  .shadow-overview {
+    padding: 24px;
+  }
 }
 
 .loading {
@@ -298,7 +319,13 @@ onMounted(() => {
 .overview-container {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 16px;
+}
+
+@media (min-width: 768px) {
+  .overview-container {
+    gap: 24px;
+  }
 }
 
 /* 状态卡片 */
@@ -306,14 +333,26 @@ onMounted(() => {
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 24px;
+  padding: 16px;
+}
+
+@media (min-width: 768px) {
+  .status-card {
+    padding: 24px;
+  }
 }
 
 .card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
+}
+
+@media (min-width: 768px) {
+  .card-header {
+    margin-bottom: 20px;
+  }
 }
 
 .card-header h3 {
@@ -324,15 +363,22 @@ onMounted(() => {
 }
 
 .toggle-btn {
-  padding: 8px 20px;
+  padding: 8px 16px;
   border: 1px solid var(--border);
   border-radius: 6px;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   transition: all 0.2s;
   background: var(--bg-primary);
   color: var(--text-primary);
+}
+
+@media (min-width: 768px) {
+  .toggle-btn {
+    padding: 8px 20px;
+    font-size: 14px;
+  }
 }
 
 .toggle-btn.enabled {
@@ -352,8 +398,20 @@ onMounted(() => {
 
 .card-body {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 20px;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
+@media (min-width: 640px) {
+  .card-body {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 1024px) {
+  .card-body {
+    grid-template-columns: repeat(4, 1fr);
+  }
 }
 
 .status-item {
@@ -380,9 +438,19 @@ onMounted(() => {
   color: #10b981;
 }
 
+[data-theme="light"] .status-badge.enabled {
+  background: #ecfdf5;
+  color: #059669;
+}
+
 .status-badge.disabled {
   background: rgba(107, 114, 128, 0.1);
   color: #6b7280;
+}
+
+[data-theme="light"] .status-badge.disabled {
+  background: #f3f4f6;
+  color: #4b5563;
 }
 
 .status-value {
@@ -416,8 +484,11 @@ onMounted(() => {
 }
 
 .metric-icon {
-  font-size: 32px;
+  color: var(--text-secondary);
   margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .metric-value {
@@ -451,13 +522,20 @@ onMounted(() => {
 
 .health-badge {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: 48px;
-  height: 48px;
+  gap: 2px;
+  width: 56px;
+  height: 56px;
   border-radius: 50%;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
+}
+
+.health-badge svg {
+  width: 20px;
+  height: 20px;
 }
 
 .health-badge.healthy {
@@ -465,14 +543,29 @@ onMounted(() => {
   color: #10b981;
 }
 
+[data-theme="light"] .health-badge.healthy {
+  background: #ecfdf5;
+  color: #059669;
+}
+
 .health-badge.warning {
   background: rgba(245, 158, 11, 0.1);
   color: #f59e0b;
 }
 
+[data-theme="light"] .health-badge.warning {
+  background: #fffbeb;
+  color: #d97706;
+}
+
 .health-badge.error {
   background: rgba(239, 68, 68, 0.1);
   color: #ef4444;
+}
+
+[data-theme="light"] .health-badge.error {
+  background: #fef2f2;
+  color: #dc2626;
 }
 
 .health-label {
@@ -491,14 +584,26 @@ onMounted(() => {
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 24px;
+  padding: 16px;
+}
+
+@media (min-width: 768px) {
+  .activities-section {
+    padding: 24px;
+  }
 }
 
 .section-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
+}
+
+@media (min-width: 768px) {
+  .section-header {
+    margin-bottom: 20px;
+  }
 }
 
 .section-header h3 {
@@ -548,12 +653,22 @@ onMounted(() => {
 
 .activity-header {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 16px;
   cursor: pointer;
   background: var(--bg-primary);
   transition: all 0.2s;
+}
+
+@media (min-width: 640px) {
+  .activity-header {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px;
+  }
 }
 
 .activity-header:hover {
@@ -564,6 +679,13 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
+  width: 100%;
+}
+
+@media (min-width: 640px) {
+  .activity-left {
+    width: auto;
+  }
 }
 
 .activity-type {
@@ -571,17 +693,33 @@ onMounted(() => {
   border-radius: 12px;
   font-size: 12px;
   font-weight: 500;
+  white-space: nowrap;
 }
 
 .activity-time {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-secondary);
+}
+
+@media (min-width: 640px) {
+  .activity-time {
+    font-size: 13px;
+  }
 }
 
 .activity-right {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  width: 100%;
   gap: 12px;
+}
+
+@media (min-width: 640px) {
+  .activity-right {
+    width: auto;
+    justify-content: flex-end;
+  }
 }
 
 .activity-summary {
