@@ -79,6 +79,14 @@ type Message struct {
 	CreatedAt        time.Time `json:"created_at"`
 }
 
+// ChatAttachment 聊天多模态附件，仅用于发送链路。
+type ChatAttachment struct {
+	Type     string `json:"type"`      // image
+	MimeType string `json:"mime_type"` // image/png
+	Data     string `json:"data"`      // base64 payload without data: prefix
+	Name     string `json:"name,omitempty"`
+}
+
 // Trigger 定时触发器
 type Trigger struct {
 	ID          int64  `json:"id"`

@@ -520,7 +520,7 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  async function sendMessage(content: string) {
+  async function sendMessage(content: string, attachments?: api.ChatAttachmentPayload[]) {
     if (streaming.value) return
     clearUsageLimitWarning()
 
@@ -540,7 +540,7 @@ export const useChatStore = defineStore('chat', () => {
     try {
       const pid = currentSessionId.value === 0 ? pendingProviderId.value : undefined
       const gname = currentSessionId.value === 0 ? pendingGroupName.value : undefined
-      const resp = await api.sendChat(currentSessionId.value, content, workDir.value || undefined, undefined, pid || undefined, gname || undefined)
+      const resp = await api.sendChat(currentSessionId.value, content, workDir.value || undefined, undefined, pid || undefined, gname || undefined, attachments)
       // If it was a new session (id=0), update to the real session ID
       if (currentSessionId.value === 0 && resp.session_id) {
         pendingProviderId.value = ''  // clear after session created

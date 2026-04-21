@@ -298,21 +298,39 @@ func HandleChat(c *gin.Context) {
 // Validates/creates session, saves user message, kicks off streaming in background, returns immediately.
 func SendChat(c *gin.Context) {
 	var req struct {
-		SessionID    int64  `json:"session_id"`
-		Content      string `json:"content"`
-		WorkDir      string `json:"work_dir"`
-		GroupName    string `json:"group_name"`
-		SessionRules string `json:"session_rules"`
-		ProviderID   string `json:"provider_id"`
+		SessionID    int64                  `json:"session_id"`
+		Content      string                 `json:"content"`
+		WorkDir      string                 `json:"work_dir"`
+		GroupName    string                 `json:"group_name"`
+		SessionRules string                 `json:"session_rules"`
+		ProviderID   string                 `json:"provider_id"`
+		Attachments  []model.ChatAttachment `json:"attachments"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: " + err.Error()})
 		return
 	}
-	if strings.TrimSpace(req.Content) == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "content is required"})
+	if strings.TrimSpace(req.Content) == "" && len(req.Attachments) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "content or attachments is required"})
 		return
 	}
+	for _, att := range req.Attachments {
+		if att.Type != "image" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported attachment type: " + att.Type})
+			return
+		}
+		if !strings.HasPrefix(att.MimeType, "image/") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid attachment mime_type: " + att.MimeType})
+			return
+		}
+		if strings.TrimSpace(att.Data) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "attachment data is required"})
+			return
+		}
+	}
+
+	storedContent := buildStoredUserContent(req.Content, req.Attachments)
+	queryContent := buildClaudeQuery(req.Content, req.Attachments)
 
 	var session *model.Session
 	isNewSession := req.SessionID == 0
@@ -337,7 +355,7 @@ func SendChat(c *gin.Context) {
 			providerID = provider.ID
 		}
 		var err error
-		session, err = store.CreateSessionWithMessage(providerID, req.Content, req.WorkDir, req.GroupName)
+		session, err = store.CreateSessionWithMessage(providerID, storedContent, req.WorkDir, req.GroupName)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "create session failed: " + err.Error()})
 			return
@@ -350,7 +368,7 @@ func SendChat(c *gin.Context) {
 		go core.FireHooks(core.HookEvent{
 			Type:            "session.created",
 			SourceSessionID: session.ID,
-			Content:         req.Content,
+			Content:         storedContent,
 		})
 
 		// Write session rules before starting stream (avoids race condition with putSessionRules)
@@ -368,7 +386,7 @@ func SendChat(c *gin.Context) {
 		}
 
 		// Attention system V2: use shadow session flow when enabled
-		originalContent := req.Content
+		originalContent := queryContent
 		if session.AttentionEnabled {
 			// Check if session is already streaming
 			if IsSessionStreaming(session.ID) {
@@ -391,7 +409,7 @@ func SendChat(c *gin.Context) {
 			userMsg := &model.Message{
 				SessionID: session.ID,
 				Role:      "user",
-				Content:   req.Content,
+				Content:   storedContent,
 			}
 			if err := store.AddMessage(userMsg); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "save message failed: " + err.Error()})
@@ -409,7 +427,7 @@ func SendChat(c *gin.Context) {
 		userMsg := &model.Message{
 			SessionID: session.ID,
 			Role:      "user",
-			Content:   req.Content,
+			Content:   storedContent,
 		}
 		if err := store.AddMessage(userMsg); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "save message failed: " + err.Error()})
@@ -418,16 +436,98 @@ func SendChat(c *gin.Context) {
 	}
 
 	// Fire message.received hooks (for both new and existing sessions)
-	go fireMessageReceivedHook(session.ID, req.Content)
+	go fireMessageReceivedHook(session.ID, storedContent)
 
 	// Kick off streaming in background — results are pushed via WS broadcast
 	triggerMsgID := store.GetLastUserMessageID(session.ID)
-	go runStream(session, req.Content, isNewSession, triggerMsgID)
+	go runStream(session, queryContent, isNewSession, triggerMsgID)
 
 	c.JSON(http.StatusOK, gin.H{
 		"session_id": session.ID,
 		"status":     "started",
 	})
+}
+
+func buildStoredUserContent(content string, attachments []model.ChatAttachment) string {
+	text := strings.TrimSpace(content)
+	if len(attachments) == 0 {
+		return text
+	}
+
+	parts := make([]string, 0, len(attachments))
+	for _, att := range attachments {
+		if att.Type != "image" {
+			continue
+		}
+		name := strings.TrimSpace(att.Name)
+		if name == "" {
+			name = "图片"
+		}
+		parts = append(parts, fmt.Sprintf("[图片附件: %s]", name))
+	}
+	if len(parts) == 0 {
+		return text
+	}
+	if text == "" {
+		return strings.Join(parts, "\n")
+	}
+	return text + "\n\n" + strings.Join(parts, "\n")
+}
+
+func buildAnthropicQueryPayload(query string) []map[string]any {
+	trimmed := strings.TrimSpace(query)
+	if trimmed == "" {
+		return []map[string]any{{"type": "text", "text": ""}}
+	}
+	if !strings.HasPrefix(trimmed, "{") {
+		return []map[string]any{{"type": "text", "text": query}}
+	}
+	var payload struct {
+		Type    string           `json:"type"`
+		Content []map[string]any `json:"content"`
+	}
+	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil || payload.Type != "multimodal" || len(payload.Content) == 0 {
+		return []map[string]any{{"type": "text", "text": query}}
+	}
+	return payload.Content
+}
+
+func buildClaudeQuery(content string, attachments []model.ChatAttachment) string {
+	if len(attachments) == 0 {
+		return strings.TrimSpace(content)
+	}
+	blocks := buildAnthropicQueryPayload(strings.TrimSpace(content))
+	if len(blocks) == 1 {
+		if t, ok := blocks[0]["type"].(string); ok && t == "text" {
+			if txt, ok := blocks[0]["text"].(string); ok && strings.TrimSpace(txt) == "" {
+				blocks = []map[string]any{}
+			}
+		}
+	}
+	for _, att := range attachments {
+		if att.Type != "image" {
+			continue
+		}
+		blocks = append(blocks, map[string]any{
+			"type": "image",
+			"source": map[string]any{
+				"type":       "base64",
+				"media_type": att.MimeType,
+				"data":       att.Data,
+			},
+		})
+	}
+	if len(blocks) == 0 {
+		return strings.TrimSpace(content)
+	}
+	payload, err := json.Marshal(map[string]any{
+		"type":    "multimodal",
+		"content": blocks,
+	})
+	if err != nil {
+		return strings.TrimSpace(content)
+	}
+	return string(payload)
 }
 
 // runStream executes the AI streaming in background, pushing events via WS to subscribed clients
@@ -764,6 +864,20 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 		Query:        query,
 		CapturedAt:   time.Now(),
 	})
+	if anthropicPayload := buildAnthropicQueryPayload(query); anthropicPayload != nil {
+		if rawPayload, err := json.Marshal(map[string]any{
+			"messages": []map[string]any{{
+				"role":    "user",
+				"content": anthropicPayload,
+			}},
+		}); err == nil {
+			lastRawRequests.Store(sessID, RawRequestSnapshot{
+				SystemPrompt: req.SystemPrompt,
+				Query:        string(rawPayload),
+				CapturedAt:   time.Now(),
+			})
+		}
+	}
 	var fullResponse string
 
 	// Steps accumulator for metadata persistence

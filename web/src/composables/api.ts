@@ -112,10 +112,17 @@ export const toggleAttention = (id: number, enabled: boolean) =>
   request<{ ok: boolean; attention_enabled: boolean; session_id: number }>(`/sessions/${id}/attention`, { method: 'PUT', body: JSON.stringify({ enabled }) })
 
 // Chat
-export const sendChat = (sessionId: number, content: string, workDir?: string, sessionRules?: string, providerId?: string, groupName?: string) =>
+export interface ChatAttachmentPayload {
+  type: 'image'
+  mime_type: string
+  data: string
+  name?: string
+}
+
+export const sendChat = (sessionId: number, content: string, workDir?: string, sessionRules?: string, providerId?: string, groupName?: string, attachments?: ChatAttachmentPayload[]) =>
   request<{ session_id: number; status: string }>('/chat/send', {
     method: 'POST',
-    body: JSON.stringify({ session_id: sessionId, content, work_dir: workDir || '', session_rules: sessionRules || '', provider_id: providerId || '', group_name: groupName || '' }),
+    body: JSON.stringify({ session_id: sessionId, content, work_dir: workDir || '', session_rules: sessionRules || '', provider_id: providerId || '', group_name: groupName || '', attachments: attachments || [] }),
   })
 
 // Status

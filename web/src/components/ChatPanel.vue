@@ -27,7 +27,7 @@ interface Attachment {
   name: string
   preview?: string  // base64 data URL for images
   file?: File
-  path?: string     // for pasted file paths
+  mimeType?: string
 }
 const attachments = ref<Attachment[]>([])
 
@@ -620,30 +620,33 @@ function formatUsageLine(u: { input_tokens: number; output_tokens: number; cache
   return parts.join(' / ')
 }
 
-function send() {
+async function buildImageAttachments(): Promise<api.ChatAttachmentPayload[]> {
+  const result: api.ChatAttachmentPayload[] = []
+  for (const att of attachments.value) {
+    if (att.type !== 'image' || !att.preview) continue
+    const commaIndex = att.preview.indexOf(',')
+    if (commaIndex === -1) continue
+    const header = att.preview.slice(0, commaIndex)
+    const data = att.preview.slice(commaIndex + 1)
+    const mimeMatch = header.match(/^data:(image\/[^;]+);base64$/i)
+    const mimeType = att.mimeType || mimeMatch?.[1] || 'image/png'
+    result.push({
+      type: 'image',
+      mime_type: mimeType,
+      data,
+      name: att.name,
+    })
+  }
+  return result
+}
+
+async function send() {
   const text = input.value.trim()
   const hasAttachments = attachments.value.length > 0
   if ((!text && !hasAttachments) || store.streaming) return
 
-  // Build message content with attachments
-  let content = text
-  if (hasAttachments) {
-    const attachmentParts: string[] = []
-    for (const att of attachments.value) {
-      if (att.type === 'image' && att.preview) {
-        // Embed image as base64
-        attachmentParts.push(`![${att.name}](${att.preview})`)
-      } else if (att.path) {
-        // File path reference
-        attachmentParts.push(`[附件: ${att.name}](file://${att.path})`)
-      }
-    }
-    if (attachmentParts.length > 0) {
-      content = (text ? text + '\n\n' : '') + attachmentParts.join('\n')
-    }
-  }
-
-  store.sendMessage(content)
+  const imageAttachments = await buildImageAttachments()
+  store.sendMessage(text, imageAttachments)
   input.value = ''
   attachments.value = []
   stepsExpanded.value = false
@@ -675,6 +678,7 @@ function addFileAsAttachment(file: File) {
     type: isImage ? 'image' : 'file',
     name: file.name,
     file,
+    mimeType: file.type || undefined,
   }
 
   if (isImage) {
@@ -693,7 +697,6 @@ function handlePaste(e: ClipboardEvent) {
   const items = e.clipboardData?.items
   if (!items) return
 
-  // Check for images in clipboard
   for (const item of Array.from(items)) {
     if (item.type.startsWith('image/')) {
       e.preventDefault()
@@ -704,6 +707,7 @@ function handlePaste(e: ClipboardEvent) {
           type: 'image',
           name: `粘贴图片_${Date.now()}.png`,
           file,
+          mimeType: file.type || item.type || 'image/png',
         }
         const reader = new FileReader()
         reader.onload = () => {
@@ -716,36 +720,6 @@ function handlePaste(e: ClipboardEvent) {
       return
     }
   }
-
-  // Check for file path in text
-  const text = e.clipboardData?.getData('text')
-  if (text && isFilePath(text)) {
-    e.preventDefault()
-    const path = text.trim()
-    const name = path.split('/').pop() || path
-    const isImage = /\.(png|jpg|jpeg|gif|webp|svg|bmp)$/i.test(name)
-
-    const att: Attachment = {
-      id: generateId(),
-      type: isImage ? 'image' : 'file',
-      name,
-      path,
-    }
-
-    // For image paths, try to load preview via static mount
-    if (isImage) {
-      // Just show the path, actual preview would need server support
-      att.preview = undefined
-    }
-
-    attachments.value.push(att)
-  }
-}
-
-function isFilePath(text: string): boolean {
-  const trimmed = text.trim()
-  // Unix absolute path or Windows path
-  return /^\/[^\s]+/.test(trimmed) || /^[A-Za-z]:\\[^\s]+/.test(trimmed)
 }
 
 function openFileDialog() {
