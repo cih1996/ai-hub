@@ -1226,8 +1226,8 @@ function formatToolInput(raw: string): string {
               v-if="msg.role === 'assistant'"
               class="message-content md-content"
               v-html="renderMd(msg.content)"
-            />
-            <div v-else class="message-content md-content" v-html="renderMd(msg.content)" />
+            ></div>
+            <div v-else class="message-content md-content" v-html="renderMd(msg.content)"></div>
             <!-- Retry button: only for the last user message, always visible -->
             <button
               v-if="msg.role === 'user' && msg.id === lastUserMsgId && !store.streaming"
@@ -1316,7 +1316,7 @@ function formatToolInput(raw: string): string {
               </div>
             </div>
             <!-- Show streaming content when available -->
-            <div v-else-if="store.streamingContent" class="message-content md-content" v-html="renderMd(store.streamingContent)" />
+            <div v-else-if="store.streamingContent" class="message-content md-content" v-html="renderMd(store.streamingContent)"></div>
           </div>
         </div>
 
@@ -1445,7 +1445,7 @@ function formatToolInput(raw: string): string {
                 v-model="sessionRulesContent"
                 class="rules-textarea session-rules-textarea"
                 placeholder="输入会话角色规则（Markdown 格式）...&#10;&#10;例如：&#10;你是一名测试工程师，负责..."
-              />
+              ></textarea>
               <div class="rules-editor-actions session-rules-actions">
                 <button
                   class="btn-delete-rule"
@@ -1540,7 +1540,7 @@ function formatToolInput(raw: string): string {
                   v-model="memoryFileContent"
                   class="rules-textarea memory-textarea"
                   placeholder="输入记忆内容..."
-                />
+                ></textarea>
                 <div class="rules-editor-actions memory-actions">
                   <button class="btn-delete-rule" @click="memoryCreating = false">取消</button>
                   <button
@@ -1558,7 +1558,7 @@ function formatToolInput(raw: string): string {
                     class="rules-textarea memory-textarea"
                     :readonly="!memoryEditing"
                     :placeholder="memoryEditing ? '编辑记忆内容...' : ''"
-                  />
+                  ></textarea>
                   <div class="rules-editor-actions memory-actions">
                     <button class="btn-delete-rule" @click="deleteMemoryFile">删除</button>
                     <template v-if="memoryEditing">
@@ -2939,3 +2939,5 @@ function formatToolInput(raw: string): string {
 }
 
 
+
+</style>
