@@ -144,6 +144,7 @@ export interface FileItem {
   name: string
   path: string
   exists: boolean
+  size?: number
 }
 export const listFiles = (scope: string) =>
   request<FileItem[]>(`/files?scope=${scope}`)
