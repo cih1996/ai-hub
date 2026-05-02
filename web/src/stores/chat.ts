@@ -26,9 +26,6 @@ export const useChatStore = defineStore('chat', () => {
   // Prevents pre-subscribe chunks from accumulating before the buffer replay fires.
   let _suppressChunksFor = 0
 
-  // Attention mode v2 status tracking
-  const attentionStatus = ref('')  // Current status message
-  const attentionActive = ref(false)  // Whether attention mode is currently running
 
   const workDir = ref('')
   const pendingProviderId = ref('')  // provider selected in new-chat dialog
@@ -163,32 +160,11 @@ export const useChatStore = defineStore('chat', () => {
             streamingContent.value = ''
             thinkingContent.value = ''
             toolCalls.value = []
-            // Clear attention status when session becomes idle
-            attentionActive.value = false
-            attentionStatus.value = ''
             api.getMessagesPaginated(msg.session_id, 50).then((resp) => {
               messages.value = resp.messages
               hasMoreMessages.value = resp.has_more
             })
           }
-        }
-        return
-      }
-
-      // attention_status: attention mode status update
-      if (msg.type === 'attention_status') {
-        if (msg.session_id === currentSessionId.value) {
-          attentionActive.value = true
-          attentionStatus.value = msg.content
-        }
-        return
-      }
-
-      // attention_clear: clear attention mode status
-      if (msg.type === 'attention_clear') {
-        if (msg.session_id === currentSessionId.value) {
-          attentionActive.value = false
-          attentionStatus.value = ''
         }
         return
       }
@@ -705,8 +681,5 @@ export const useChatStore = defineStore('chat', () => {
     clearUsageLimitWarning,
     inputFocusTrigger,
     triggerInputFocus,
-    // Attention mode v2
-    attentionActive,
-    attentionStatus,
   }
 })

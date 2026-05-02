@@ -63,8 +63,8 @@ func GetSession(id int64) (*model.Session, error) {
 func UpdateSession(s *model.Session) error {
 	s.UpdatedAt = time.Now()
 	_, err := DB.Exec(
-		`UPDATE sessions SET title=?, icon=?, provider_id=?, group_name=?, attention_enabled=?, auto_reset_threshold=?, updated_at=? WHERE id=?`,
-		s.Title, s.Icon, s.ProviderID, s.GroupName, s.AttentionEnabled, s.AutoResetThreshold, s.UpdatedAt, s.ID,
+		`UPDATE sessions SET title=?, icon=?, provider_id=?, group_name=?, auto_reset_threshold=?, updated_at=? WHERE id=?`,
+		s.Title, s.Icon, s.ProviderID, s.GroupName, s.AutoResetThreshold, s.UpdatedAt, s.ID,
 	)
 	return err
 }
@@ -142,7 +142,12 @@ func GetMessagesPaginated(sessionID int64, beforeID int64, limit int) ([]model.M
 	if limit <= 0 {
 		limit = 50
 	}
-	var rows interface{ Next() bool; Scan(...interface{}) error; Close() error; Err() error }
+	var rows interface {
+		Next() bool
+		Scan(...interface{}) error
+		Close() error
+		Err() error
+	}
 	var err error
 	if beforeID > 0 {
 		// Subquery: get the last `limit` rows before beforeID, then re-order ASC
@@ -390,22 +395,6 @@ func UpdateLastCompressMsgID(sessionID int64, msgID int64) error {
 	return err
 }
 
-// UpdateAttentionEnabled toggles the attention system for a session.
-func UpdateAttentionEnabled(sessionID int64, enabled bool) error {
-	val := 0
-	if enabled {
-		val = 1
-	}
-	_, err := DB.Exec(`UPDATE sessions SET attention_enabled=?, updated_at=? WHERE id=?`, val, time.Now(), sessionID)
-	return err
-}
-
-// UpdateAttentionRules updates the attention rules for a session.
-func UpdateAttentionRules(sessionID int64, rules string) error {
-	_, err := DB.Exec(`UPDATE sessions SET attention_rules=?, updated_at=? WHERE id=?`, rules, time.Now(), sessionID)
-	return err
-}
-
 func truncateTitle(s string) string {
 	for i, c := range s {
 		if c == '\n' || c == '\r' {
@@ -418,165 +407,6 @@ func truncateTitle(s string) string {
 		return string(runes[:50]) + "..."
 	}
 	return s
-}
-
-// ========== Shadow Session Functions (Attention Mode v2) ==========
-
-// CreateShadowSession creates a shadow session for attention mode execution.
-// It copies essential fields from the parent session and marks it as shadow.
-func CreateShadowSession(parentID int64) (*model.Session, error) {
-	parent, err := GetSession(parentID)
-	if err != nil {
-		return nil, fmt.Errorf("parent session not found: %w", err)
-	}
-
-	shadow := &model.Session{
-		Title:            "[Shadow] " + parent.Title,
-		ProviderID:       parent.ProviderID,
-		WorkDir:          parent.WorkDir,
-		GroupName:        parent.GroupName,
-		AttentionEnabled: false, // Shadow sessions don't have attention mode
-		IsShadow:         true,
-		ParentID:         parentID,
-	}
-
-	if err := CreateSession(shadow); err != nil {
-		return nil, err
-	}
-
-	return shadow, nil
-}
-
-// CreateShadowSessionWithTitle creates a shadow session with a custom title suffix
-func CreateShadowSessionWithTitle(parentID int64, titleSuffix string) (*model.Session, error) {
-	parent, err := GetSession(parentID)
-	if err != nil {
-		return nil, fmt.Errorf("parent session not found: %w", err)
-	}
-
-	shadow := &model.Session{
-		Title:            fmt.Sprintf("[%s] %s", titleSuffix, parent.Title),
-		ProviderID:       parent.ProviderID,
-		WorkDir:          parent.WorkDir,
-		GroupName:        parent.GroupName,
-		AttentionEnabled: false,
-		IsShadow:         true,
-		ParentID:         parentID,
-	}
-
-	if err := CreateSession(shadow); err != nil {
-		return nil, err
-	}
-
-	return shadow, nil
-}
-
-// CopyRecentMessagesToShadow copies the last N messages from parent to shadow session.
-// This provides context for the shadow session to work with.
-func CopyRecentMessagesToShadow(parentID, shadowID int64, limit int) error {
-	if limit <= 0 {
-		limit = 20 // Default to last 20 messages
-	}
-
-	// Get recent messages from parent (oldest first for correct order)
-	rows, err := DB.Query(`
-		SELECT role, content, metadata FROM messages
-		WHERE session_id = ?
-		ORDER BY id DESC LIMIT ?
-	`, parentID, limit)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	// Collect messages in reverse order (to insert oldest first)
-	type msg struct {
-		role, content, metadata string
-	}
-	var msgs []msg
-	for rows.Next() {
-		var m msg
-		if err := rows.Scan(&m.role, &m.content, &m.metadata); err != nil {
-			return err
-		}
-		msgs = append(msgs, m)
-	}
-
-	// Insert in reverse order (oldest first)
-	for i := len(msgs) - 1; i >= 0; i-- {
-		m := msgs[i]
-		_, err := DB.Exec(`
-			INSERT INTO messages (session_id, role, content, metadata, created_at)
-			VALUES (?, ?, ?, ?, ?)
-		`, shadowID, m.role, m.content, m.metadata, time.Now())
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// DeleteShadowSession deletes a shadow session and all its messages.
-func DeleteShadowSession(shadowID int64) error {
-	// Verify it's actually a shadow session
-	session, err := GetSession(shadowID)
-	if err != nil {
-		return err
-	}
-	if !session.IsShadow {
-		return fmt.Errorf("session %d is not a shadow session", shadowID)
-	}
-
-	// Delete messages first (foreign key constraint)
-	if _, err := DB.Exec(`DELETE FROM messages WHERE session_id = ?`, shadowID); err != nil {
-		return err
-	}
-
-	// Delete the session
-	if _, err := DB.Exec(`DELETE FROM sessions WHERE id = ?`, shadowID); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// GetShadowSessionByParent finds an active shadow session for a parent session.
-// Returns nil if no shadow session exists.
-func GetShadowSessionByParent(parentID int64) (*model.Session, error) {
-	var s model.Session
-	err := DB.QueryRow(`
-		SELECT id, title, icon, provider_id, claude_session_id, work_dir, group_name,
-		       last_compress_msg_id, attention_enabled, attention_rules, is_shadow, parent_id,
-		       health_score, health_updated_at, correction_count, drift_count, auto_reset_threshold,
-		       created_at, updated_at
-		FROM sessions
-		WHERE parent_id = ? AND is_shadow = 1
-		ORDER BY created_at DESC LIMIT 1
-	`, parentID).Scan(&s.ID, &s.Title, &s.Icon, &s.ProviderID, &s.ClaudeSessionID, &s.WorkDir, &s.GroupName,
-		&s.LastCompressMsgID, &s.AttentionEnabled, &s.AttentionRules, &s.IsShadow, &s.ParentID,
-		&s.HealthScore, &s.HealthUpdatedAt, &s.CorrectionCount, &s.DriftCount, &s.AutoResetThreshold,
-		&s.CreatedAt, &s.UpdatedAt)
-	if err != nil {
-		return nil, err
-	}
-	return &s, nil
-}
-
-// CleanupOldShadowSessions deletes shadow sessions older than the specified duration.
-func CleanupOldShadowSessions(maxAge time.Duration) (int64, error) {
-	cutoff := time.Now().Add(-maxAge)
-
-	// First delete messages
-	DB.Exec(`DELETE FROM messages WHERE session_id IN (SELECT id FROM sessions WHERE is_shadow = 1 AND created_at < ?)`, cutoff)
-
-	// Then delete sessions
-	result, err := DB.Exec(`DELETE FROM sessions WHERE is_shadow = 1 AND created_at < ?`, cutoff)
-	if err != nil {
-		return 0, err
-	}
-
-	return result.RowsAffected()
 }
 
 // ========== Health Score Functions (Issue #213) ==========

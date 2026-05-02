@@ -26,8 +26,6 @@ export interface Session {
   process_state: string
   error_count: number
   warning_count: number
-  attention_enabled: boolean
-  attention_rules: string
   health_score: string
   health_updated_at: string
   correction_count: number
@@ -43,7 +41,6 @@ export interface Message {
   role: 'user' | 'assistant'
   content: string
   metadata?: string
-  attention_context?: string
   created_at: string
 }
 
@@ -60,7 +57,7 @@ export interface StepsMetadata {
 }
 
 export interface WSMessage {
-  type: 'chat' | 'stop' | 'subscribe' | 'error' | 'chunk' | 'thinking' | 'tool_start' | 'tool_input' | 'tool_result' | 'done' | 'session_created' | 'streaming_status' | 'session_update' | 'session_title_update' | 'process_update' | 'message_queued' | 'token_usage' | 'attention_update' | 'attention_status' | 'attention_clear' | 'context_reset'
+  type: 'chat' | 'stop' | 'subscribe' | 'error' | 'chunk' | 'thinking' | 'tool_start' | 'tool_input' | 'tool_result' | 'done' | 'session_created' | 'streaming_status' | 'session_update' | 'session_title_update' | 'process_update' | 'message_queued' | 'token_usage' | 'context_reset'
   session_id: number
   content: string
   tool_id?: string

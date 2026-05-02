@@ -67,7 +67,7 @@ func migrate() error {
 	// Messages: add metadata column
 	DB.Exec(`ALTER TABLE messages ADD COLUMN metadata TEXT NOT NULL DEFAULT ''`)
 
-	// Messages: add attention_context column
+	// Messages: legacy attention_context column retained for existing databases
 	DB.Exec(`ALTER TABLE messages ADD COLUMN attention_context TEXT NOT NULL DEFAULT ''`)
 
 	// Sessions: add group_name column
@@ -135,10 +135,10 @@ func migrate() error {
 		value TEXT NOT NULL DEFAULT ''
 	)`)
 
-	// Sessions: add attention_enabled column (attention system)
+	// Sessions: legacy attention_enabled column retained for existing databases
 	DB.Exec(`ALTER TABLE sessions ADD COLUMN attention_enabled INTEGER NOT NULL DEFAULT 0`)
 
-	// Sessions: add attention_rules column (attention system phase 2)
+	// Sessions: legacy attention_rules column retained for existing databases
 	DB.Exec(`ALTER TABLE sessions ADD COLUMN attention_rules TEXT NOT NULL DEFAULT ''`)
 
 	// Sessions: add icon column
@@ -183,7 +183,7 @@ func migrate() error {
 	// Groups: add icon column
 	DB.Exec(`ALTER TABLE groups ADD COLUMN icon TEXT NOT NULL DEFAULT ''`)
 
-	// Sessions: add shadow session fields (attention mode v2)
+	// Sessions: legacy shadow-session columns retained; new shadow sessions are no longer created
 	DB.Exec(`ALTER TABLE sessions ADD COLUMN is_shadow INTEGER NOT NULL DEFAULT 0`)
 	DB.Exec(`ALTER TABLE sessions ADD COLUMN parent_id INTEGER NOT NULL DEFAULT 0`)
 
@@ -226,7 +226,7 @@ func migrate() error {
 	// Sessions: add auto_reset_threshold column (Issue #214: context reset)
 	DB.Exec(`ALTER TABLE sessions ADD COLUMN auto_reset_threshold INTEGER NOT NULL DEFAULT 0`)
 
-	// Shadow AI activities table (Issue #215: shadow AI frontend refactor)
+	// Legacy shadow AI activities table retained for archive compatibility
 	DB.Exec(`CREATE TABLE IF NOT EXISTS shadow_activities (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		timestamp TEXT NOT NULL,

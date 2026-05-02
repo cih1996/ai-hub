@@ -108,20 +108,6 @@ function showToast(msg: string, type: 'success' | 'error' = 'success') {
   toastTimer = setTimeout(() => { toastVisible.value = false }, 2500)
 }
 
-// Toggle attention mode
-async function toggleAttention() {
-  const session = store.currentSession
-  if (!session) return
-  try {
-    const newState = !session.attention_enabled
-    await api.toggleAttention(session.id, newState)
-    session.attention_enabled = newState
-    showToast(newState ? '注意力模式已开启' : '注意力模式已关闭', 'success')
-  } catch (e: unknown) {
-    showToast('切换失败: ' + (e instanceof Error ? e.message : String(e)), 'error')
-  }
-}
-
 // Session rules modal state
 const showSessionRulesModal = ref(false)
 const sessionRulesContent = ref('')
@@ -146,17 +132,6 @@ const memoryFileSaving = ref(false)
 const memoryEditing = ref(false)
 const memoryCreating = ref(false)
 const memoryNewFileName = ref('')
-
-// Attention context modal state
-const showAttentionContextModal = ref(false)
-const attentionContextContent = ref('')
-const attentionContextMsgId = ref(0)
-
-function showAttentionContext(msg: Message) {
-  attentionContextContent.value = msg.attention_context || ''
-  attentionContextMsgId.value = msg.id
-  showAttentionContextModal.value = true
-}
 
 // Raw request modal state
 const showRawRequestModal = ref(false)
@@ -1253,17 +1228,6 @@ function formatToolInput(raw: string): string {
               v-html="renderMd(msg.content)"
             />
             <div v-else class="message-content md-content" v-html="renderMd(msg.content)" />
-            <!-- Attention context badge (for user messages with attention context) -->
-            <button
-              v-if="msg.role === 'user' && msg.attention_context"
-              class="attention-badge"
-              @click="showAttentionContext(msg)"
-              title="查看注意力模式预处理内容"
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>
-              </svg>
-            </button>
             <!-- Retry button: only for the last user message, always visible -->
             <button
               v-if="msg.role === 'user' && msg.id === lastUserMsgId && !store.streaming"
@@ -1336,12 +1300,6 @@ function formatToolInput(raw: string): string {
           </div>
         </div>
 
-        <!-- Attention mode status (simplified: only show during preprocessing) -->
-        <div v-if="store.attentionActive" class="attention-status-simple">
-          <span class="attention-pulse-dot"></span>
-          <span class="attention-status-text">{{ store.attentionStatus }}</span>
-        </div>
-
         <!-- Streaming message (combines waiting state and content) -->
         <div v-if="store.streaming" class="message assistant flex-row">
           <div class="message-avatar">
@@ -1386,23 +1344,7 @@ function formatToolInput(raw: string): string {
       </div>
 
       <div class="input-row">
-        <div class="input-wrapper" :class="{ disabled: store.streaming, 'attention-active': store.currentSession?.attention_enabled }">
-          <button
-            class="btn-attention"
-            :class="{ active: store.currentSession?.attention_enabled }"
-            @click="toggleAttention"
-            :title="store.currentSession?.attention_enabled ? '关闭注意力模式' : '开启注意力模式'"
-          >
-            <svg class="attention-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="10"/>
-              <circle cx="12" cy="12" r="6"/>
-              <circle cx="12" cy="12" r="2"/>
-              <line x1="12" y1="2" x2="12" y2="4"/>
-              <line x1="12" y1="20" x2="12" y2="22"/>
-              <line x1="2" y1="12" x2="4" y2="12"/>
-              <line x1="20" y1="12" x2="22" y2="12"/>
-            </svg>
-          </button>
+        <div class="input-wrapper" :class="{ disabled: store.streaming }">
           <button
             class="btn-attach"
             @click="openFileDialog"
@@ -1433,7 +1375,7 @@ function formatToolInput(raw: string): string {
             @focus="store.triggerInputFocus()"
             @compositionstart="isComposing = true"
             @compositionend="isComposing = false"
-            :placeholder="store.streaming ? 'AI is responding...' : (store.currentSession?.attention_enabled ? '注意力模式：AI 会先规划再执行...' : '输入消息... (可粘贴图片)')"
+            :placeholder="store.streaming ? 'AI is responding...' : '输入消息... (可粘贴图片)'"
             rows="1"
           />
           <div class="input-actions">
@@ -1451,33 +1393,6 @@ function formatToolInput(raw: string): string {
         </div>
       </div>
     </div>
-
-    <!-- Attention context modal -->
-    <Teleport to="body">
-      <div v-if="showAttentionContextModal" class="modal-overlay" @click="showAttentionContextModal = false">
-        <div class="attention-context-modal" @click.stop>
-          <div class="rules-modal-header">
-            <div class="attention-context-icon">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>
-              </svg>
-            </div>
-            <div class="rules-modal-title-group">
-              <span class="rules-modal-title">注意力模式预处理</span>
-              <span class="rules-modal-dir">消息 #{{ attentionContextMsgId }}</span>
-            </div>
-            <button class="rules-modal-close" @click="showAttentionContextModal = false">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M18 6L6 18M6 6l12 12"/>
-              </svg>
-            </button>
-          </div>
-          <div class="attention-context-body">
-            <div class="attention-context-content md-content" v-html="renderMd(attentionContextContent)" />
-          </div>
-        </div>
-      </div>
-    </Teleport>
 
     <!-- Session rules modal -->
     <Teleport to="body">
@@ -2595,68 +2510,6 @@ function formatToolInput(raw: string): string {
   max-width: 720px; margin: 0 auto;
   display: flex; align-items: flex-end;
 }
-.btn-attention {
-  flex-shrink: 0;
-  position: relative;
-  width: 32px; height: 32px;
-  display: flex; align-items: center; justify-content: center;
-  border-radius: var(--radius);
-  background: transparent;
-  border: none;
-  transition: all var(--transition);
-  cursor: pointer;
-  margin-right: 4px;
-}
-.btn-attention:hover {
-  background: var(--accent-soft);
-}
-.btn-attention.active {
-  background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
-  border-radius: var(--radius);
-}
-.btn-attention .attention-icon {
-  color: var(--text-secondary);
-  transition: color var(--transition);
-}
-.btn-attention:hover .attention-icon {
-  color: var(--accent);
-}
-.btn-attention.active .attention-icon {
-  color: white;
-}
-.input-wrapper {
-  flex: 1;
-  display: flex; align-items: flex-end; gap: 4px;
-  background: var(--bg-secondary); border: 1px solid var(--border);
-  border-radius: var(--radius-lg); padding: 8px 12px;
-  transition: border-color var(--transition), box-shadow var(--transition);
-}
-.input-wrapper:focus-within { border-color: var(--accent); }
-.input-wrapper.attention-active {
-  border-color: #f59e0b;
-  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.2);
-}
-.input-wrapper.disabled { opacity: 0.7; }
-.input-wrapper.disabled textarea { cursor: not-allowed; }
-.input-wrapper textarea {
-  flex: 1; resize: none; font-size: 14px; line-height: 1.5;
-  padding: 4px 0; max-height: 200px;
-  background: transparent; color: var(--text-primary);
-}
-.input-wrapper textarea::placeholder { color: var(--text-muted); }
-.input-actions { flex-shrink: 0; display: flex; align-items: center; }
-.btn-send, .btn-stop {
-  width: 32px; height: 32px;
-  display: flex; align-items: center; justify-content: center;
-  border-radius: var(--radius); transition: all var(--transition);
-}
-.btn-send { color: var(--accent); }
-.btn-send:hover:not(:disabled) { background: var(--accent-soft); }
-.btn-send:disabled { color: var(--text-muted); cursor: not-allowed; }
-.btn-stop { color: var(--danger); }
-.btn-stop:hover { background: rgba(239, 68, 68, 0.1); }
-
-/* Attach button */
 .btn-attach {
   flex-shrink: 0;
   width: 32px; height: 32px;
@@ -3085,112 +2938,4 @@ function formatToolInput(raw: string): string {
   .message { gap: 8px; margin-bottom: 16px; }
 }
 
-/* Attention mode - simplified status */
-.attention-status-simple {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 8px 0;
-  padding: 8px 12px;
-  background: rgba(255, 149, 0, 0.08);
-  border-radius: var(--radius);
-  animation: attention-fade-in 0.3s ease;
-}
 
-@keyframes attention-fade-in {
-  from { opacity: 0; transform: translateY(-4px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.attention-pulse-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #ff9500;
-  animation: attention-pulse-dot 1.5s ease-in-out infinite;
-}
-
-@keyframes attention-pulse-dot {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.5; transform: scale(0.8); }
-}
-
-.attention-status-simple .attention-status-text {
-  font-size: 13px;
-  color: #ff9500;
-  font-weight: 500;
-}
-
-/* Attention badge on user messages */
-.attention-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  margin-top: 4px;
-  margin-right: 8px;
-  padding: 0;
-  border: none;
-  border-radius: 50%;
-  background: rgba(255, 149, 0, 0.12);
-  color: #ff9500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.attention-badge:hover {
-  background: rgba(255, 149, 0, 0.25);
-  transform: scale(1.1);
-}
-
-/* Attention context modal */
-.attention-context-modal {
-  width: 600px;
-  max-width: 95vw;
-  max-height: 80vh;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.attention-context-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  background: rgba(255, 149, 0, 0.15);
-  color: #ff9500;
-}
-
-.attention-context-body {
-  flex: 1;
-  padding: 16px 20px;
-  overflow-y: auto;
-  min-height: 0;
-}
-
-.attention-context-content {
-  font-size: 13px;
-  line-height: 1.6;
-  color: var(--text-primary);
-}
-
-.attention-context-content pre {
-  background: var(--bg-tertiary);
-  padding: 12px;
-  border-radius: var(--radius);
-  overflow-x: auto;
-  font-size: 12px;
-}
-
-.attention-detail-content code {
-  font-family: 'SF Mono', Monaco, monospace;
-  font-size: 11px;
-}
-</style>
