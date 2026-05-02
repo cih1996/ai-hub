@@ -191,17 +191,53 @@ func (s *ActiveStream) Cancel() {
 }
 
 var (
-	claudeClient    = core.NewClaudeCodeClient()
-	activeStreams   = make(map[int64]*ActiveStream)
-	activeStreamsMu sync.RWMutex
-	forceFreshMu    sync.Mutex
-	forceFreshRun   = make(map[int64]bool) // sessionID -> next run must start fresh (no --resume)
+	claudeClient       = core.NewClaudeCodeClient()
+	activeStreams      = make(map[int64]*ActiveStream)
+	activeStreamsMu    sync.RWMutex
+	forceFreshMu       sync.Mutex
+	forceFreshRun      = make(map[int64]bool) // sessionID -> next run must start fresh (no --resume)
+	queueRetryMu       sync.Mutex
+	queueRetryCursor   = make(map[int64]int64) // sessionID -> trigger cursor to reuse after a queued batch failed
+	runningQueueCursor = make(map[int64]int64) // sessionID -> original trigger cursor for current queued batch
 )
+
+const streamNoOutputTimeout = 60 * time.Second
 
 func markForceFreshRun(sessionID int64) {
 	forceFreshMu.Lock()
 	forceFreshRun[sessionID] = true
 	forceFreshMu.Unlock()
+}
+
+func markQueueBatchRunning(sessionID int64, originalCursor int64) {
+	if originalCursor <= 0 {
+		return
+	}
+	queueRetryMu.Lock()
+	runningQueueCursor[sessionID] = originalCursor
+	queueRetryMu.Unlock()
+}
+
+func queueBatchSucceeded(sessionID int64) {
+	queueRetryMu.Lock()
+	delete(runningQueueCursor, sessionID)
+	delete(queueRetryCursor, sessionID)
+	queueRetryMu.Unlock()
+}
+
+func queueBatchFailed(sessionID int64) {
+	queueRetryMu.Lock()
+	if cursor := runningQueueCursor[sessionID]; cursor > 0 {
+		queueRetryCursor[sessionID] = cursor
+	}
+	delete(runningQueueCursor, sessionID)
+	queueRetryMu.Unlock()
+}
+
+func takeQueueRetryCursor(sessionID int64) int64 {
+	queueRetryMu.Lock()
+	defer queueRetryMu.Unlock()
+	return queueRetryCursor[sessionID]
 }
 
 func consumeForceFreshRun(sessionID int64) bool {
@@ -534,6 +570,8 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	streamErr := error(nil)
+
 	// Start with a no-op send — a client will attach via "subscribe"
 	stream := &ActiveStream{sendFn: func(WSMessage) {}, cancelFn: cancel}
 
@@ -541,12 +579,19 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 	activeStreamsMu.Lock()
 	activeStreams[session.ID] = stream
 	activeStreamsMu.Unlock()
+	log.Printf("[chat-run] start session=%d triggerMsgID=%d isNew=%v", session.ID, triggerMsgID, isNewSession)
 	broadcast(WSMessage{Type: "session_update", SessionID: session.ID, Content: "streaming"})
 	defer func() {
 		activeStreamsMu.Lock()
 		delete(activeStreams, session.ID)
 		activeStreamsMu.Unlock()
 		broadcast(WSMessage{Type: "session_update", SessionID: session.ID, Content: "idle"})
+		if streamErr != nil {
+			queueBatchFailed(session.ID)
+		} else {
+			queueBatchSucceeded(session.ID)
+		}
+		log.Printf("[chat-run] end session=%d triggerMsgID=%d err=%v", session.ID, triggerMsgID, streamErr)
 		// Process any messages that were queued while streaming
 		processQueuedMessages(session.ID, triggerMsgID)
 	}()
@@ -558,6 +603,7 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 		provider, err = store.GetDefaultProvider()
 		if err != nil {
 			errMsg := "provider not found and no default provider configured"
+			streamErr = fmt.Errorf(errMsg)
 			broadcast(WSMessage{Type: "error", SessionID: session.ID, Content: errMsg})
 			return
 		}
@@ -579,6 +625,7 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 		Metadata:  "",
 	}
 	if err := store.AddMessage(assistantMsg); err != nil {
+		streamErr = fmt.Errorf("failed to save assistant message: %w", err)
 		log.Printf("[chat] session=%d failed to pre-insert assistant message: %v", session.ID, err)
 		broadcast(WSMessage{Type: "error", SessionID: session.ID, Content: "failed to save message"})
 		return
@@ -605,9 +652,10 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 		isResume = false
 	}
 	fullResponse, metadataJSON, usageInput, usageOutput, usageCacheCreation, usageCacheRead, err = streamClaudeCode(ctx, provider, query, session.ClaudeSessionID, isResume, stream.Send, session.ID, session.WorkDir, session.GroupName, progressMsgID)
+	streamErr = err
 
-	log.Printf("[chat-flow] session=%d streamClaudeCode returned: err=%v, fullResponse_len=%d, metadata_len=%d",
-		session.ID, err, len(fullResponse), len(metadataJSON))
+	log.Printf("[chat-flow] session=%d triggerMsgID=%d progressMsgID=%d streamClaudeCode returned: err=%v, fullResponse_len=%d, metadata_len=%d",
+		session.ID, triggerMsgID, progressMsgID, err, len(fullResponse), len(metadataJSON))
 
 	if err != nil {
 		log.Printf("[chat] session=%d provider=%s error: %v", session.ID, provider.Name, err)
@@ -647,6 +695,16 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 			// No content received — update the pre-inserted message with error instead of deleting
 			errContent := "❌ " + err.Error()
 			store.UpdateMessageContent(progressMsgID, errContent, "")
+			if strings.TrimSpace(errContent) != "" {
+				if logErr := store.AddConversationLog(&model.ConversationLog{
+					SessionID: session.ID,
+					MessageID: progressMsgID,
+					Role:      "assistant",
+					Content:   errContent,
+				}); logErr != nil {
+					log.Printf("[chat] session=%d failed to archive assistant error log: %v", session.ID, logErr)
+				}
+			}
 			broadcast(WSMessage{Type: "chunk", SessionID: session.ID, Content: errContent})
 		}
 		broadcast(WSMessage{Type: "error", SessionID: session.ID, Content: err.Error()})
@@ -700,6 +758,8 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 		store.DeleteMessage(progressMsgID)
 	}
 
+	streamErr = nil
+
 	// Broadcast done so even reconnected/new WS clients receive it (stream.Send is single-client)
 	log.Printf("[chat-flow] session=%d broadcasting done event", session.ID)
 	broadcast(WSMessage{Type: "done", SessionID: session.ID, Content: metadataJSON})
@@ -736,13 +796,23 @@ func detectMessageSource(content string) string {
 // processQueuedMessages checks for user messages that arrived after triggerMsgID,
 // merges them, and kicks off a new runStream to process them.
 func processQueuedMessages(sessionID int64, triggerMsgID int64) {
+	originalTriggerMsgID := triggerMsgID
+	if retryCursor := takeQueueRetryCursor(sessionID); retryCursor > 0 && retryCursor < triggerMsgID {
+		log.Printf("[queue] session %d: retrying queued batch from cursor %d instead of %d", sessionID, retryCursor, triggerMsgID)
+		triggerMsgID = retryCursor
+	}
 	pending, err := store.GetPendingUserMessages(sessionID, triggerMsgID)
-	if err != nil || len(pending) == 0 {
+	if err != nil {
+		log.Printf("[queue] session %d: failed to load pending messages after %d: %v", sessionID, triggerMsgID, err)
+		return
+	}
+	if len(pending) == 0 {
 		return
 	}
 
 	// Guard: if another stream already started (race), bail out
 	if IsSessionStreaming(sessionID) {
+		log.Printf("[queue] session %d: skip processing %d queued message(s), session already streaming", sessionID, len(pending))
 		return
 	}
 
@@ -756,11 +826,12 @@ func processQueuedMessages(sessionID int64, triggerMsgID int64) {
 	// messages and conversation_logs keep the original user inputs.
 	merged := buildMergedQueuedInput(pending)
 
-	// Use the last pending message ID as the cursor for the next round.
-	// Original queued messages remain in messages/logs even if the next run fails.
+	// Use the last pending message ID as the cursor for the next round only after success.
+	// On failure, the original cursor is stored so the same batch can be retried.
 	newTriggerMsgID := pending[len(pending)-1].ID
+	markQueueBatchRunning(sessionID, triggerMsgID)
 
-	log.Printf("[queue] session %d: processing %d queued message(s), triggerMsgID %d -> %d", sessionID, len(pending), triggerMsgID, newTriggerMsgID)
+	log.Printf("[queue] session %d: processing %d queued message(s), triggerMsgID %d(original=%d) -> %d", sessionID, len(pending), triggerMsgID, originalTriggerMsgID, newTriggerMsgID)
 	go runStream(session, merged, false, newTriggerMsgID)
 }
 
@@ -920,6 +991,28 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 		}
 	}
 	var fullResponse string
+	var streamErr error
+	lastOutputAt := time.Now()
+	watchdogCtx, watchdogCancel := context.WithCancel(ctx)
+	defer watchdogCancel()
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-watchdogCtx.Done():
+				return
+			case <-ticker.C:
+				if time.Since(lastOutputAt) > streamNoOutputTimeout {
+					streamErr = fmt.Errorf("stream watchdog timeout: no output for %s", streamNoOutputTimeout)
+					log.Printf("[watchdog] session=%d no output for %s, cancelling stream", sessID, streamNoOutputTimeout)
+					watchdogCancel()
+					core.Pool.ForceKill(sessID)
+					return
+				}
+			}
+		}
+	}()
 
 	// Steps accumulator for metadata persistence
 	var steps []StepInfo
@@ -936,7 +1029,8 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 	var lastSaveTime time.Time
 	var lastSaveLen int
 
-	err := claudeClient.StreamPersistent(ctx, req, func(line string) {
+	err := claudeClient.StreamPersistent(watchdogCtx, req, func(line string) {
+		lastOutputAt = time.Now()
 		// Debug: log raw line type for troubleshooting (especially Windows)
 		if len(line) > 0 {
 			// Parse type first to decide log level
@@ -994,6 +1088,7 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 					}
 				}
 			}
+			streamErr = fmt.Errorf("claude api error: %s", errMsg)
 			log.Printf("[claude] API error: %s", errMsg)
 			send(WSMessage{Type: "error", SessionID: sessID, Content: errMsg})
 
@@ -1183,6 +1278,7 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 				}
 				log.Printf("[claude] session %d: result error: subtype=%s is_error=%v errors=%v result=%s",
 					sessID, wrapper.Subtype, wrapper.IsError, errMsgs, wrapper.Result)
+				streamErr = fmt.Errorf("claude result error: %s", errContent)
 
 				// Auto-recovery: "No conversation found" → reset claude_session_id
 				for _, msg := range errMsgs {
@@ -1247,6 +1343,13 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 	})
 
 	// Build metadata JSON from accumulated steps
+	watchdogCancel()
+	if err == nil && streamErr != nil {
+		err = streamErr
+	}
+	if err != nil && strings.Contains(err.Error(), "context canceled") && streamErr != nil {
+		err = streamErr
+	}
 	var metadataJSON string
 	if thinkingSummary != "" {
 		steps = append([]StepInfo{{Type: "thinking", Name: "Thinking", Status: "done"}}, steps...)

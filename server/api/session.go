@@ -761,37 +761,53 @@ func maybeAutoReset(session *model.Session) {
 		return
 	}
 
-	// Don't reset if currently streaming
+	// Don't reset if currently streaming; runStream may have just spawned queued processing.
 	if IsSessionStreaming(session.ID) {
+		log.Printf("[auto-reset] session %d: skipped, currently streaming", session.ID)
 		return
 	}
 
-	log.Printf("[auto-reset] session %d: message count %d exceeds threshold %d, triggering reset",
+	lastUserID := store.GetLastUserMessageID(session.ID)
+	pending, err := store.GetPendingUserMessages(session.ID, lastUserID)
+	if err != nil {
+		log.Printf("[auto-reset] session %d: pending check failed: %v", session.ID, err)
+		return
+	}
+	if len(pending) > 0 {
+		log.Printf("[auto-reset] session %d: skipped, pending_count=%d", session.ID, len(pending))
+		return
+	}
+
+	log.Printf("[auto-reset] session %d: message count %d exceeds threshold %d, scheduling guarded reset",
 		session.ID, count, session.AutoResetThreshold)
 
-	// Step 1: Send a notification to save state
-	saveMsg := &model.Message{
-		SessionID: session.ID,
-		Role:      "user",
-		Content:   "【系统】你的上下文即将重置（消息数已达阈值），请将重要工作状态写入记忆库。",
-	}
-	store.AddMessage(saveMsg)
+	go func(threshold int, expectedLastUserID int64) {
+		// Short guard window: if a queued/user turn starts right after scheduling, do not reset.
+		time.Sleep(2 * time.Second)
 
-	// Step 2: Wait briefly for AI to process (handled via goroutine in chat.go)
-	// For now, we proceed with the reset directly since the save message
-	// will be picked up and processed by the trigger/chat system.
-	// The actual reset happens after a short delay.
-	go func() {
-		// Wait up to 30 seconds for the AI to potentially save state
-		maxWait := 30 // seconds
-		for i := 0; i < maxWait; i++ {
-			if !IsSessionStreaming(session.ID) && i > 5 {
-				break
-			}
-			time.Sleep(1 * time.Second)
+		if IsSessionStreaming(session.ID) {
+			log.Printf("[auto-reset] session %d: abort reset, stream started", session.ID)
+			return
+		}
+		if store.GetLastUserMessageID(session.ID) != expectedLastUserID {
+			log.Printf("[auto-reset] session %d: abort reset, new user message detected", session.ID)
+			return
+		}
+		pending, err := store.GetPendingUserMessages(session.ID, expectedLastUserID)
+		if err != nil {
+			log.Printf("[auto-reset] session %d: abort reset, pending recheck failed: %v", session.ID, err)
+			return
+		}
+		if len(pending) > 0 {
+			log.Printf("[auto-reset] session %d: abort reset, pending_count=%d", session.ID, len(pending))
+			return
+		}
+		count, err := store.GetMessagesCount(session.ID)
+		if err != nil || count <= int64(threshold) {
+			return
 		}
 
-		// Execute reset (keep last 2 messages: the system save notification + potential AI reply)
+		// Execute reset only while idle and queue-free. Keep recent visible messages; full logs remain in conversation_logs.
 		deleted, err := store.ResetSessionMessages(session.ID, 2)
 		if err != nil {
 			log.Printf("[auto-reset] session %d: reset failed: %v", session.ID, err)
@@ -800,22 +816,15 @@ func maybeAutoReset(session *model.Session) {
 
 		log.Printf("[auto-reset] session %d: deleted %d messages", session.ID, deleted)
 
-		// Kill process and reset UUID
+		// Kill only idle pool process and reset UUID for next user turn.
 		core.Pool.Kill(session.ID)
 		newUUID := uuid.New().String()
 		store.UpdateClaudeSessionID(session.ID, newUUID)
 		markForceFreshRun(session.ID)
 		store.UpdateLastCompressMsgID(session.ID, 0)
-
-		// Send initialization message
-		initMsg := &model.Message{
-			SessionID: session.ID,
-			Role:      "user",
-			Content:   "【系统】上下文已重置（消息数超过自动重置阈值），请从记忆库读取工作状态继续。",
-		}
-		store.AddMessage(initMsg)
+		setPendingRecoverySeed(session.ID, "【系统】上下文已自动重置（消息数超过自动重置阈值）。请从记忆库读取工作状态继续。")
 
 		// Broadcast to WS
 		broadcast(WSMessage{Type: "context_reset", SessionID: session.ID, Content: fmt.Sprintf("auto_reset:deleted:%d", deleted)})
-	}()
+	}(session.AutoResetThreshold, lastUserID)
 }

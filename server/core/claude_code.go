@@ -236,7 +236,7 @@ func (c *ClaudeCodeClient) StreamPersistent(ctx context.Context, req ClaudeCodeR
 	}
 
 	err = proc.SendAndStream(ctx, req.Query, onData)
-	if err == nil || ctx.Err() != nil {
+	if err == nil || ctx.Err() != nil || isStreamWatchdogError(err) {
 		return err
 	}
 
@@ -296,6 +296,10 @@ func (c *ClaudeCodeClient) StreamPersistent(ctx context.Context, req ClaudeCodeR
 		return err
 	}
 	return err
+}
+
+func isStreamWatchdogError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "stream watchdog timeout")
 }
 
 func maskKey(key string) string {
