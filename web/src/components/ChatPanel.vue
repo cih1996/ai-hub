@@ -2510,6 +2510,50 @@ function formatToolInput(raw: string): string {
   max-width: 720px; margin: 0 auto;
   display: flex; align-items: flex-end;
 }
+.input-wrapper {
+  flex: 1;
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 8px 12px;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+.input-wrapper:focus-within { border-color: var(--accent); }
+.input-wrapper.disabled { opacity: 0.7; }
+.input-wrapper.disabled textarea { cursor: not-allowed; }
+.input-wrapper textarea {
+  flex: 1;
+  resize: none;
+  font-size: 14px;
+  line-height: 1.5;
+  padding: 4px 0;
+  max-height: 200px;
+  background: transparent;
+  color: var(--text-primary);
+}
+.input-wrapper textarea::placeholder { color: var(--text-muted); }
+.input-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+.btn-send, .btn-stop {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius);
+  transition: all var(--transition);
+}
+.btn-send { color: var(--accent); }
+.btn-send:hover:not(:disabled) { background: var(--accent-soft); }
+.btn-send:disabled { color: var(--text-muted); cursor: not-allowed; }
+.btn-stop { color: var(--danger); }
+.btn-stop:hover { background: rgba(239, 68, 68, 0.1); }
 .btn-attach {
   flex-shrink: 0;
   width: 32px; height: 32px;
