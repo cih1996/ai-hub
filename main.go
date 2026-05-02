@@ -207,6 +207,7 @@ func main() {
 		v1.PUT("/sessions/:id", api.UpdateSession)
 		v1.DELETE("/sessions/:id", api.DeleteSession)
 		v1.GET("/sessions/:id/messages", api.GetMessages)
+		v1.GET("/sessions/:id/logs", api.GetConversationLogs)
 		v1.DELETE("/sessions/:id/messages", api.TruncateMessages)
 		v1.POST("/sessions/:id/compress", api.CompressSession)
 		v1.POST("/sessions/:id/reset", api.ResetSession)

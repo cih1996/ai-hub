@@ -44,6 +44,15 @@ export interface Message {
   created_at: string
 }
 
+export interface ConversationLog {
+  id: number
+  session_id: number
+  message_id: number
+  role: 'user' | 'assistant'
+  content: string
+  created_at: string
+}
+
 export interface StepInfo {
   type: 'thinking' | 'tool'
   name?: string

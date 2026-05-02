@@ -79,6 +79,16 @@ type Message struct {
 	CreatedAt        time.Time `json:"created_at"`
 }
 
+// ConversationLog 全量对话日志（仅归档用户输入和 AI 最终输出）
+type ConversationLog struct {
+	ID        int64     `json:"id"`
+	SessionID int64     `json:"session_id"`
+	MessageID int64     `json:"message_id"`
+	Role      string    `json:"role"` // "user" | "assistant"
+	Content   string    `json:"content"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // ChatAttachment 聊天多模态附件，仅用于发送链路。
 type ChatAttachment struct {
 	Type     string `json:"type"`      // image

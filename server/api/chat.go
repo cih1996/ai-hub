@@ -396,9 +396,18 @@ func SendChat(c *gin.Context) {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "save message failed: " + err.Error()})
 				return
 			}
+			if err := store.AddConversationLog(&model.ConversationLog{
+				SessionID: session.ID,
+				MessageID: userMsg.ID,
+				Role:      "user",
+				Content:   storedContent,
+			}); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "save conversation log failed: " + err.Error()})
+				return
+			}
 			log.Printf("[chat] session %d is streaming, message queued (msg_id=%d)", session.ID, userMsg.ID)
-			// Broadcast queued message so frontend displays it
-			broadcast(WSMessage{Type: "message_queued", SessionID: session.ID, Content: queryContent})
+			// Broadcast queued message so frontend displays the original text only.
+			broadcast(WSMessage{Type: "message_queued", SessionID: session.ID, Content: storedContent})
 			c.JSON(http.StatusOK, gin.H{
 				"session_id": session.ID,
 				"status":     "queued",
@@ -412,6 +421,15 @@ func SendChat(c *gin.Context) {
 		}
 		if err := store.AddMessage(userMsg); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "save message failed: " + err.Error()})
+			return
+		}
+		if err := store.AddConversationLog(&model.ConversationLog{
+			SessionID: session.ID,
+			MessageID: userMsg.ID,
+			Role:      "user",
+			Content:   storedContent,
+		}); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "save conversation log failed: " + err.Error()})
 			return
 		}
 	}
@@ -607,6 +625,16 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 				content = "[任务已执行，详见执行步骤]"
 			}
 			store.UpdateMessageContent(progressMsgID, content, metadataJSON)
+			if strings.TrimSpace(content) != "" {
+				if err := store.AddConversationLog(&model.ConversationLog{
+					SessionID: session.ID,
+					MessageID: progressMsgID,
+					Role:      "assistant",
+					Content:   content,
+				}); err != nil {
+					log.Printf("[chat] session=%d failed to archive assistant log: %v", session.ID, err)
+				}
+			}
 			extractAndSaveErrors(session.ID, progressMsgID, content)
 			// Save token usage even on error (partial response)
 			if usageInput > 0 || usageOutput > 0 || usageCacheCreation > 0 || usageCacheRead > 0 {
@@ -642,6 +670,16 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 		}
 		// Final update of the pre-inserted assistant message
 		store.UpdateMessageContent(progressMsgID, content, metadataJSON)
+		if strings.TrimSpace(content) != "" {
+			if err := store.AddConversationLog(&model.ConversationLog{
+				SessionID: session.ID,
+				MessageID: progressMsgID,
+				Role:      "assistant",
+				Content:   content,
+			}); err != nil {
+				log.Printf("[chat] session=%d failed to archive assistant log: %v", session.ID, err)
+			}
+		}
 		extractAndSaveErrors(session.ID, progressMsgID, content)
 		// Save and broadcast token usage
 		if usageInput > 0 || usageOutput > 0 || usageCacheCreation > 0 || usageCacheRead > 0 {
@@ -667,6 +705,34 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 	broadcast(WSMessage{Type: "done", SessionID: session.ID, Content: metadataJSON})
 }
 
+func buildMergedQueuedInput(pending []model.Message) string {
+	if len(pending) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("以下是你处理上一条消息期间收到的 %d 条新消息，请按顺序综合处理：", len(pending)))
+	for i, m := range pending {
+		sb.WriteString("\n\n")
+		if i > 0 {
+			sb.WriteString("---\n\n")
+		}
+		sb.WriteString(fmt.Sprintf("[消息 %d | message_id=%d | 来源=%s]\n", i+1, m.ID, detectMessageSource(m.Content)))
+		sb.WriteString(m.Content)
+	}
+	return sb.String()
+}
+
+func detectMessageSource(content string) string {
+	firstLine := strings.TrimSpace(strings.SplitN(content, "\n", 2)[0])
+	if firstLine == "" {
+		return "用户"
+	}
+	if strings.HasPrefix(firstLine, "【") && strings.Contains(firstLine, "】") {
+		return firstLine
+	}
+	return "用户"
+}
+
 // processQueuedMessages checks for user messages that arrived after triggerMsgID,
 // merges them, and kicks off a new runStream to process them.
 func processQueuedMessages(sessionID int64, triggerMsgID int64) {
@@ -686,15 +752,12 @@ func processQueuedMessages(sessionID int64, triggerMsgID int64) {
 		return
 	}
 
-	// Merge all pending messages into one query
-	var contents []string
-	for _, m := range pending {
-		contents = append(contents, m.Content)
-	}
-	merged := strings.Join(contents, "\n\n---\n\n")
+	// Merge all pending messages into one query. Do not persist this wrapper;
+	// messages and conversation_logs keep the original user inputs.
+	merged := buildMergedQueuedInput(pending)
 
-	// Use the last pending message ID as triggerMsgID for the next round
-	// This prevents infinite retry if streaming fails without saving assistant message
+	// Use the last pending message ID as the cursor for the next round.
+	// Original queued messages remain in messages/logs even if the next run fails.
 	newTriggerMsgID := pending[len(pending)-1].ID
 
 	log.Printf("[queue] session %d: processing %d queued message(s), triggerMsgID %d -> %d", sessionID, len(pending), triggerMsgID, newTriggerMsgID)

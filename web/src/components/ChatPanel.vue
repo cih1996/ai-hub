@@ -4,7 +4,7 @@ import type { Ref } from 'vue'
 import { marked } from 'marked'
 import { useChatStore } from '../stores/chat'
 import * as api from '../composables/api'
-import type { StepsMetadata, Message } from '../types'
+import type { StepsMetadata, ConversationLog } from '../types'
 import IconPicker from './IconPicker.vue'
 
 const isMobile = inject<Ref<boolean>>('isMobile', ref(false))
@@ -147,8 +147,8 @@ const rawRequestTab = ref<'messages' | 'fullchat' | 'raw' | 'system' | 'query'>(
 // Track which rows are expanded in the visual Messages tab
 const expandedRows = ref<Set<number>>(new Set())
 
-// Full chat history state (lazy-loaded in fullchat tab)
-const fullChatMessages = ref<Message[]>([])
+// Full conversation log state (lazy-loaded in fullchat tab)
+const fullChatMessages = ref<ConversationLog[]>([])
 const fullChatHasMore = ref(false)
 const fullChatTotal = ref(0)
 const fullChatLoading = ref(false)
@@ -163,10 +163,10 @@ async function loadFullChat() {
     const beforeId = fullChatMessages.value.length > 0
       ? fullChatMessages.value[fullChatMessages.value.length - 1]!.id
       : undefined
-    const res = await api.getMessagesPaginated(sid, 30, beforeId)
+    const res = await api.getConversationLogsPaginated(sid, 30, beforeId)
     // API returns ASC order within the batch; we want newest-first display,
-    // so reverse each batch and append (older messages go to the end)
-    const batch = [...res.messages].reverse()
+    // so reverse each batch and append (older logs go to the end)
+    const batch = [...res.logs].reverse()
     fullChatMessages.value.push(...batch)
     fullChatHasMore.value = res.has_more
     if (res.total != null) fullChatTotal.value = res.total
@@ -375,11 +375,11 @@ async function openRawRequest() {
   expandedFullChatRows.value = new Set()
   try {
     rawRequestData.value = await api.getLastRawRequest(sid)
-    // Default to Messages tab if proxy data is available (it's the most informative)
-    rawRequestTab.value = rawRequestData.value?.anthropic_request?.messages ? 'messages' : 'system'
+    // Default to full log for sessions after context reset or when raw request is unavailable.
+    rawRequestTab.value = rawRequestData.value?.anthropic_request?.messages ? 'messages' : 'fullchat'
   } catch {
     rawRequestData.value = null
-    rawRequestTab.value = 'system'
+    rawRequestTab.value = 'fullchat'
   } finally {
     rawRequestLoading.value = false
   }
@@ -1594,28 +1594,32 @@ function formatToolInput(raw: string): string {
             </button>
           </div>
           <div v-if="rawRequestLoading" class="raw-req-loading">加载中...</div>
-          <div v-else-if="!rawRequestData" class="raw-req-loading">暂无数据（请先发送一条消息）</div>
           <template v-else>
             <div class="raw-req-meta">
-              <template v-if="getActualMsgCount(rawRequestData.anthropic_request) !== null">
+              <template v-if="rawRequestData && getActualMsgCount(rawRequestData.anthropic_request) !== null">
                 <span class="raw-req-meta-actual">实际发送 {{ getActualMsgCount(rawRequestData.anthropic_request) }} 条消息</span>
               </template>
-              <template v-else>
+              <template v-else-if="rawRequestData">
                 <span>上下文 {{ rawRequestData.context_count }} 条</span>
               </template>
-              <span>·</span>
-              <span>{{ new Date(rawRequestData.captured_at).toLocaleString('zh-CN') }}</span>
+              <template v-else>
+                <span>全量日志归档</span>
+              </template>
+              <template v-if="rawRequestData">
+                <span>·</span>
+                <span>{{ new Date(rawRequestData.captured_at).toLocaleString('zh-CN') }}</span>
+              </template>
             </div>
             <div class="raw-req-tabs">
               <button :class="['raw-req-tab', rawRequestTab === 'messages' && 'active']" @click="rawRequestTab = 'messages'"
-                v-if="rawRequestData.anthropic_request?.messages">
+                v-if="rawRequestData?.anthropic_request?.messages">
                 Messages <span class="raw-req-tab-badge">{{ parsedMessageRows.length }}</span>
               </button>
               <button :class="['raw-req-tab', rawRequestTab === 'fullchat' && 'active']" @click="rawRequestTab = 'fullchat'">
-                完整对话 <span v-if="fullChatTotal" class="raw-req-tab-badge">{{ fullChatTotal }}</span>
+                全量日志 <span v-if="fullChatTotal" class="raw-req-tab-badge">{{ fullChatTotal }}</span>
               </button>
               <button :class="['raw-req-tab', rawRequestTab === 'raw' && 'active']" @click="rawRequestTab = 'raw'"
-                v-if="rawRequestData.anthropic_request?.messages">
+                v-if="rawRequestData?.anthropic_request?.messages">
                 Raw
               </button>
               <button :class="['raw-req-tab', rawRequestTab === 'system' && 'active']" @click="rawRequestTab = 'system'">
@@ -1694,21 +1698,21 @@ function formatToolInput(raw: string): string {
                         <span :class="['fullchat-role-badge', msg.role === 'user' ? 'role-user' : 'role-assistant']">
                           {{ msg.role === 'user' ? 'user' : 'assistant' }}
                         </span>
-                        <span class="fullchat-id">#{{ msg.id }}</span>
+                        <span class="fullchat-id">#{{ msg.id }} · msg#{{ msg.message_id }}</span>
                         <span class="fullchat-preview" v-if="!expandedFullChatRows.has(msg.id)">{{ previewText(msg.content, 60) }}</span>
                         <span class="fullchat-expand-icon">{{ expandedFullChatRows.has(msg.id) ? '▼' : '▶' }}</span>
                       </div>
                       <pre v-if="expandedFullChatRows.has(msg.id)" class="fullchat-full-content" @click.stop>{{ stripErrorTags(msg.content) }}</pre>
                     </div>
                     <div v-if="fullChatLoading" class="fullchat-status">加载更多...</div>
-                    <div v-else-if="!fullChatHasMore && fullChatMessages.length > 0" class="fullchat-status">已加载全部 {{ fullChatTotal }} 条消息</div>
+                    <div v-else-if="!fullChatHasMore && fullChatMessages.length > 0" class="fullchat-status">已加载全部 {{ fullChatTotal }} 条日志</div>
                   </template>
                 </div>
               </template>
-              <template v-else-if="rawRequestTab === 'raw'">
+              <template v-else-if="rawRequestTab === 'raw' && rawRequestData">
                 <pre class="raw-req-pre">{{ formatAnthropicMessages(rawRequestData.anthropic_request) }}</pre>
               </template>
-              <template v-else>
+              <template v-else-if="rawRequestData">
                 <pre class="raw-req-pre">{{ rawRequestTab === 'system' ? rawRequestData.system_prompt : rawRequestData.query }}</pre>
               </template>            </div>
           </template>

@@ -1,4 +1,4 @@
-import type { Provider, Session, Message, Trigger, Channel, TokenUsage, TokenUsageStats, CompressSettings } from '../types'
+import type { Provider, Session, Message, ConversationLog, Trigger, Channel, TokenUsage, TokenUsageStats, CompressSettings } from '../types'
 
 const BASE = '/api/v1'
 
@@ -49,6 +49,15 @@ export const getMessagesPaginated = (sessionId: number, limit = 50, beforeId?: n
   if (beforeId && beforeId > 0) params.set('before_id', String(beforeId))
   return request<{ messages: Message[]; has_more: boolean; total?: number }>(
     `/sessions/${sessionId}/messages?${params.toString()}`
+  )
+}
+
+// Paginated conversation logs: archived user inputs and final AI outputs only.
+export const getConversationLogsPaginated = (sessionId: number, limit = 50, beforeId?: number) => {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (beforeId && beforeId > 0) params.set('before_id', String(beforeId))
+  return request<{ logs: ConversationLog[]; has_more: boolean; total?: number }>(
+    `/sessions/${sessionId}/logs?${params.toString()}`
   )
 }
 

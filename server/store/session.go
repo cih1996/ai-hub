@@ -116,7 +116,7 @@ func DeleteMessage(id int64) error {
 
 func GetMessages(sessionID int64) ([]model.Message, error) {
 	rows, err := DB.Query(
-		`SELECT id, session_id, role, content, metadata, attention_context, created_at FROM messages WHERE session_id = ? ORDER BY created_at`,
+		`SELECT id, session_id, role, content, metadata, attention_context, created_at FROM messages WHERE session_id = ? ORDER BY id ASC`,
 		sessionID,
 	)
 	if err != nil {
@@ -321,6 +321,14 @@ func CreateSessionWithMessage(providerID string, content string, workDir string,
 	if err := AddMessage(msg); err != nil {
 		return nil, fmt.Errorf("add message: %w", err)
 	}
+	if err := AddConversationLog(&model.ConversationLog{
+		SessionID: s.ID,
+		MessageID: msg.ID,
+		Role:      "user",
+		Content:   content,
+	}); err != nil {
+		return nil, fmt.Errorf("add conversation log: %w", err)
+	}
 	return s, nil
 }
 
@@ -330,7 +338,7 @@ func GetPendingUserMessages(sessionID int64, triggerMsgID int64) ([]model.Messag
 	rows, err := DB.Query(`
 		SELECT id, session_id, role, content, metadata, created_at FROM messages
 		WHERE session_id = ? AND role = 'user' AND id > ?
-		ORDER BY created_at`,
+		ORDER BY id ASC`,
 		sessionID, triggerMsgID,
 	)
 	if err != nil {

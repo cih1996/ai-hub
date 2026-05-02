@@ -310,6 +310,63 @@ func GetMessages(c *gin.Context) {
 	c.JSON(http.StatusOK, msgs)
 }
 
+// GetConversationLogs handles GET /api/v1/sessions/:id/logs
+func GetConversationLogs(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid session id"})
+		return
+	}
+	if _, err := store.GetSession(id); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return
+	}
+
+	total, _ := store.GetConversationLogsCount(id)
+	limit := 50
+	if limitStr := c.Query("limit"); limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			limit = l
+		}
+	}
+	beforeID := int64(0)
+	if beforeIDStr := c.Query("before_id"); beforeIDStr != "" {
+		if bid, err := strconv.ParseInt(beforeIDStr, 10, 64); err == nil && bid > 0 {
+			beforeID = bid
+		}
+	}
+
+	var logs []model.ConversationLog
+	if search := c.Query("search"); strings.TrimSpace(search) != "" {
+		logs, err = store.SearchConversationLogs(id, search, limit)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if logs == nil {
+			logs = []model.ConversationLog{}
+		}
+		c.JSON(http.StatusOK, gin.H{"logs": logs, "has_more": false, "total": total})
+		return
+	}
+
+	logs, err = store.GetConversationLogsPaginated(id, beforeID, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if logs == nil {
+		logs = []model.ConversationLog{}
+	}
+	hasMore := false
+	if len(logs) >= limit && len(logs) > 0 {
+		oldestID := logs[0].ID
+		countBefore, _ := store.GetConversationLogsCountBefore(id, oldestID)
+		hasMore = countBefore > 0
+	}
+	c.JSON(http.StatusOK, gin.H{"logs": logs, "has_more": hasMore, "total": total})
+}
+
 // GetMessageWithContext returns a single message with surrounding context.
 // GET /api/v1/sessions/:id/messages/:msg_id?context=2
 func GetMessageWithContext(c *gin.Context) {
