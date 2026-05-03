@@ -26,9 +26,6 @@ export const useChatStore = defineStore('chat', () => {
   // Prevents pre-subscribe chunks from accumulating before the buffer replay fires.
   let _suppressChunksFor = 0
 
-  // Attention mode v2 status tracking
-  const attentionStatus = ref('')  // Current status message
-  const attentionActive = ref(false)  // Whether attention mode is currently running
 
   const workDir = ref('')
   const pendingProviderId = ref('')  // provider selected in new-chat dialog
@@ -163,32 +160,11 @@ export const useChatStore = defineStore('chat', () => {
             streamingContent.value = ''
             thinkingContent.value = ''
             toolCalls.value = []
-            // Clear attention status when session becomes idle
-            attentionActive.value = false
-            attentionStatus.value = ''
             api.getMessagesPaginated(msg.session_id, 50).then((resp) => {
               messages.value = resp.messages
               hasMoreMessages.value = resp.has_more
             })
           }
-        }
-        return
-      }
-
-      // attention_status: attention mode status update
-      if (msg.type === 'attention_status') {
-        if (msg.session_id === currentSessionId.value) {
-          attentionActive.value = true
-          attentionStatus.value = msg.content
-        }
-        return
-      }
-
-      // attention_clear: clear attention mode status
-      if (msg.type === 'attention_clear') {
-        if (msg.session_id === currentSessionId.value) {
-          attentionActive.value = false
-          attentionStatus.value = ''
         }
         return
       }
@@ -520,7 +496,7 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  async function sendMessage(content: string) {
+  async function sendMessage(content: string, attachments?: api.ChatAttachmentPayload[]) {
     if (streaming.value) return
     clearUsageLimitWarning()
 
@@ -540,7 +516,7 @@ export const useChatStore = defineStore('chat', () => {
     try {
       const pid = currentSessionId.value === 0 ? pendingProviderId.value : undefined
       const gname = currentSessionId.value === 0 ? pendingGroupName.value : undefined
-      const resp = await api.sendChat(currentSessionId.value, content, workDir.value || undefined, undefined, pid || undefined, gname || undefined)
+      const resp = await api.sendChat(currentSessionId.value, content, workDir.value || undefined, undefined, pid || undefined, gname || undefined, attachments)
       // If it was a new session (id=0), update to the real session ID
       if (currentSessionId.value === 0 && resp.session_id) {
         pendingProviderId.value = ''  // clear after session created
@@ -705,8 +681,5 @@ export const useChatStore = defineStore('chat', () => {
     clearUsageLimitWarning,
     inputFocusTrigger,
     triggerInputFocus,
-    // Attention mode v2
-    attentionActive,
-    attentionStatus,
   }
 })

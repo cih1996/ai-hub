@@ -440,6 +440,15 @@ func forwardToSession(sessionID int64, content string) {
 		log.Printf("[webhook] save message failed: %v", err)
 		return
 	}
+	if err := store.AddConversationLog(&model.ConversationLog{
+		SessionID: session.ID,
+		MessageID: msg.ID,
+		Role:      "user",
+		Content:   content,
+	}); err != nil {
+		log.Printf("[webhook] save conversation log failed: %v", err)
+		return
+	}
 	if IsSessionStreaming(session.ID) {
 		log.Printf("[webhook] session %d is streaming, message queued (msg_id=%d)", sessionID, msg.ID)
 		broadcast(WSMessage{Type: "message_queued", SessionID: session.ID, Content: content})

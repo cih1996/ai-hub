@@ -310,6 +310,63 @@ func GetMessages(c *gin.Context) {
 	c.JSON(http.StatusOK, msgs)
 }
 
+// GetConversationLogs handles GET /api/v1/sessions/:id/logs
+func GetConversationLogs(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid session id"})
+		return
+	}
+	if _, err := store.GetSession(id); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return
+	}
+
+	total, _ := store.GetConversationLogsCount(id)
+	limit := 50
+	if limitStr := c.Query("limit"); limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			limit = l
+		}
+	}
+	beforeID := int64(0)
+	if beforeIDStr := c.Query("before_id"); beforeIDStr != "" {
+		if bid, err := strconv.ParseInt(beforeIDStr, 10, 64); err == nil && bid > 0 {
+			beforeID = bid
+		}
+	}
+
+	var logs []model.ConversationLog
+	if search := c.Query("search"); strings.TrimSpace(search) != "" {
+		logs, err = store.SearchConversationLogs(id, search, limit)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if logs == nil {
+			logs = []model.ConversationLog{}
+		}
+		c.JSON(http.StatusOK, gin.H{"logs": logs, "has_more": false, "total": total})
+		return
+	}
+
+	logs, err = store.GetConversationLogsPaginated(id, beforeID, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if logs == nil {
+		logs = []model.ConversationLog{}
+	}
+	hasMore := false
+	if len(logs) >= limit && len(logs) > 0 {
+		oldestID := logs[0].ID
+		countBefore, _ := store.GetConversationLogsCountBefore(id, oldestID)
+		hasMore = countBefore > 0
+	}
+	c.JSON(http.StatusOK, gin.H{"logs": logs, "has_more": hasMore, "total": total})
+}
+
 // GetMessageWithContext returns a single message with surrounding context.
 // GET /api/v1/sessions/:id/messages/:msg_id?context=2
 func GetMessageWithContext(c *gin.Context) {
@@ -623,131 +680,6 @@ func SwitchProvider(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true, "provider_id": body.ProviderID, "provider_name": provider.Name})
 }
 
-// ToggleAttention handles PUT /api/v1/sessions/:id/attention
-// Toggles the attention system for a session.
-func ToggleAttention(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid session id"})
-		return
-	}
-
-	var body struct {
-		Enabled bool `json:"enabled"`
-	}
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	session, err := store.GetSession(id)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
-		return
-	}
-
-	if err := store.UpdateAttentionEnabled(id, body.Enabled); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	// Broadcast state change to all WS clients
-	state := "off"
-	if body.Enabled {
-		state = "on"
-	}
-	broadcast(WSMessage{Type: "attention_update", SessionID: id, Content: state})
-
-	c.JSON(http.StatusOK, gin.H{"ok": true, "attention_enabled": body.Enabled, "session_id": session.ID})
-}
-
-// GetAttentionRules returns the attention rules for a session.
-// Returns user custom rules (editable). System rules have been removed.
-func GetAttentionRules(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid session id"})
-		return
-	}
-
-	session, err := store.GetSession(id)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
-		return
-	}
-
-	// Parse stored JSON rules
-	rulesData := core.ParseAttentionRules(session.AttentionRules)
-
-	c.JSON(http.StatusOK, gin.H{
-		"session_id": session.ID,
-		// System built-in rules removed per user request
-		"system_activation_rule": "",
-		"system_review_rule":     "",
-		// User custom rules (editable)
-		"activation_custom": rulesData.ActivationCustom,
-		"review_custom":     rulesData.ReviewCustom,
-		// Legacy field for backward compatibility
-		"attention_rules": session.AttentionRules,
-	})
-}
-
-// UpdateAttentionRules updates the attention rules for a session.
-// Accepts both legacy format (rules string) and new format (activation_custom, review_custom).
-func UpdateAttentionRules(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid session id"})
-		return
-	}
-
-	var body struct {
-		Rules            string `json:"rules"`             // Legacy format
-		ActivationCustom string `json:"activation_custom"` // New format
-		ReviewCustom     string `json:"review_custom"`     // New format
-	}
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	session, err := store.GetSession(id)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
-		return
-	}
-
-	// Determine the rules to save
-	var rulesJSON string
-	if body.ActivationCustom != "" || body.ReviewCustom != "" {
-		// New format: serialize as JSON
-		rulesData := &core.AttentionRulesData{
-			ActivationCustom: body.ActivationCustom,
-			ReviewCustom:     body.ReviewCustom,
-		}
-		rulesJSON = core.SerializeAttentionRules(rulesData)
-	} else {
-		// Legacy format: store as-is (will be parsed as activation_custom)
-		rulesJSON = body.Rules
-	}
-
-	if err := store.UpdateAttentionRules(id, rulesJSON); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	// Broadcast rules change to all WS clients
-	broadcast(WSMessage{Type: "attention_rules_update", SessionID: id, Content: rulesJSON})
-
-	c.JSON(http.StatusOK, gin.H{
-		"ok":                rulesJSON != "",
-		"session_id":        session.ID,
-		"attention_rules":   rulesJSON,
-		"activation_custom": body.ActivationCustom,
-		"review_custom":     body.ReviewCustom,
-	})
-}
-
 // ResetSession handles POST /api/v1/sessions/:id/reset
 // Deletes all messages from a session but preserves the session itself (rules, team, triggers, health).
 // Optionally keeps the last N messages with keep_last parameter.
@@ -829,37 +761,53 @@ func maybeAutoReset(session *model.Session) {
 		return
 	}
 
-	// Don't reset if currently streaming
+	// Don't reset if currently streaming; runStream may have just spawned queued processing.
 	if IsSessionStreaming(session.ID) {
+		log.Printf("[auto-reset] session %d: skipped, currently streaming", session.ID)
 		return
 	}
 
-	log.Printf("[auto-reset] session %d: message count %d exceeds threshold %d, triggering reset",
+	lastUserID := store.GetLastUserMessageID(session.ID)
+	pending, err := store.GetPendingUserMessages(session.ID, lastUserID)
+	if err != nil {
+		log.Printf("[auto-reset] session %d: pending check failed: %v", session.ID, err)
+		return
+	}
+	if len(pending) > 0 {
+		log.Printf("[auto-reset] session %d: skipped, pending_count=%d", session.ID, len(pending))
+		return
+	}
+
+	log.Printf("[auto-reset] session %d: message count %d exceeds threshold %d, scheduling guarded reset",
 		session.ID, count, session.AutoResetThreshold)
 
-	// Step 1: Send a notification to save state
-	saveMsg := &model.Message{
-		SessionID: session.ID,
-		Role:      "user",
-		Content:   "【系统】你的上下文即将重置（消息数已达阈值），请将重要工作状态写入记忆库。",
-	}
-	store.AddMessage(saveMsg)
+	go func(threshold int, expectedLastUserID int64) {
+		// Short guard window: if a queued/user turn starts right after scheduling, do not reset.
+		time.Sleep(2 * time.Second)
 
-	// Step 2: Wait briefly for AI to process (handled via goroutine in chat.go)
-	// For now, we proceed with the reset directly since the save message
-	// will be picked up and processed by the trigger/chat system.
-	// The actual reset happens after a short delay.
-	go func() {
-		// Wait up to 30 seconds for the AI to potentially save state
-		maxWait := 30 // seconds
-		for i := 0; i < maxWait; i++ {
-			if !IsSessionStreaming(session.ID) && i > 5 {
-				break
-			}
-			time.Sleep(1 * time.Second)
+		if IsSessionStreaming(session.ID) {
+			log.Printf("[auto-reset] session %d: abort reset, stream started", session.ID)
+			return
+		}
+		if store.GetLastUserMessageID(session.ID) != expectedLastUserID {
+			log.Printf("[auto-reset] session %d: abort reset, new user message detected", session.ID)
+			return
+		}
+		pending, err := store.GetPendingUserMessages(session.ID, expectedLastUserID)
+		if err != nil {
+			log.Printf("[auto-reset] session %d: abort reset, pending recheck failed: %v", session.ID, err)
+			return
+		}
+		if len(pending) > 0 {
+			log.Printf("[auto-reset] session %d: abort reset, pending_count=%d", session.ID, len(pending))
+			return
+		}
+		count, err := store.GetMessagesCount(session.ID)
+		if err != nil || count <= int64(threshold) {
+			return
 		}
 
-		// Execute reset (keep last 2 messages: the system save notification + potential AI reply)
+		// Execute reset only while idle and queue-free. Keep recent visible messages; full logs remain in conversation_logs.
 		deleted, err := store.ResetSessionMessages(session.ID, 2)
 		if err != nil {
 			log.Printf("[auto-reset] session %d: reset failed: %v", session.ID, err)
@@ -868,22 +816,15 @@ func maybeAutoReset(session *model.Session) {
 
 		log.Printf("[auto-reset] session %d: deleted %d messages", session.ID, deleted)
 
-		// Kill process and reset UUID
+		// Kill only idle pool process and reset UUID for next user turn.
 		core.Pool.Kill(session.ID)
 		newUUID := uuid.New().String()
 		store.UpdateClaudeSessionID(session.ID, newUUID)
 		markForceFreshRun(session.ID)
 		store.UpdateLastCompressMsgID(session.ID, 0)
-
-		// Send initialization message
-		initMsg := &model.Message{
-			SessionID: session.ID,
-			Role:      "user",
-			Content:   "【系统】上下文已重置（消息数超过自动重置阈值），请从记忆库读取工作状态继续。",
-		}
-		store.AddMessage(initMsg)
+		setPendingRecoverySeed(session.ID, "【系统】上下文已自动重置（消息数超过自动重置阈值）。请从记忆库读取工作状态继续。")
 
 		// Broadcast to WS
 		broadcast(WSMessage{Type: "context_reset", SessionID: session.ID, Content: fmt.Sprintf("auto_reset:deleted:%d", deleted)})
-	}()
+	}(session.AutoResetThreshold, lastUserID)
 }

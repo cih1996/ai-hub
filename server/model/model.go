@@ -45,27 +45,27 @@ func isOllamaBaseURL(raw string) bool {
 
 // Session 会话
 type Session struct {
-	ID                int64     `json:"id"`
-	Title             string    `json:"title"`
-	Icon              string    `json:"icon"`                 // 图标文件名，如 avatar1.svg
-	ProviderID        string    `json:"provider_id"`
-	ClaudeSessionID   string    `json:"claude_session_id"`    // UUID for Claude Code CLI --session-id
-	WorkDir           string    `json:"work_dir"`             // 工作目录，空 = 系统默认(home)
-	GroupName         string    `json:"group_name"`           // 会话分组名称
-	LastCompressMsgID int64     `json:"last_compress_msg_id"` // 上次压缩时最新消息 ID，用于增量统计
-	AttentionEnabled  bool      `json:"attention_enabled"`    // 注意力系统开关
-	AttentionRules    string    `json:"attention_rules"`      // 注意力规则（会话级别）
-	// Shadow session fields (for attention mode)
-	IsShadow       bool  `json:"is_shadow"`        // 是否为影子会话
-	ParentID       int64 `json:"parent_id"`        // 本体会话 ID（影子会话专用）
+	ID                int64  `json:"id"`
+	Title             string `json:"title"`
+	Icon              string `json:"icon"` // 图标文件名，如 avatar1.svg
+	ProviderID        string `json:"provider_id"`
+	ClaudeSessionID   string `json:"claude_session_id"`    // UUID for Claude Code CLI --session-id
+	WorkDir           string `json:"work_dir"`             // 工作目录，空 = 系统默认(home)
+	GroupName         string `json:"group_name"`           // 会话分组名称
+	LastCompressMsgID int64  `json:"last_compress_msg_id"` // 上次压缩时最新消息 ID，用于增量统计
+	AttentionEnabled  bool   `json:"attention_enabled"`    // 保留旧字段，功能已下线
+	AttentionRules    string `json:"attention_rules"`      // 保留旧字段，功能已下线
+	// Retained legacy shadow-session fields; new shadow sessions are no longer created.
+	IsShadow bool  `json:"is_shadow"` // 保留旧字段，用于隐藏历史影子会话
+	ParentID int64 `json:"parent_id"` // 保留旧字段
 	// Health fields (Issue #213)
-	HealthScore     string `json:"health_score"`      // green | yellow | red (empty = unset)
-	HealthUpdatedAt string `json:"health_updated_at"` // 最后评估时间
-	CorrectionCount     int    `json:"correction_count"`       // 用户纠正次数
-	DriftCount          int    `json:"drift_count"`            // 规则偏离次数
-	AutoResetThreshold  int    `json:"auto_reset_threshold"`   // 消息数超阈值自动重置（0=不自动重置）
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	HealthScore        string    `json:"health_score"`         // green | yellow | red (empty = unset)
+	HealthUpdatedAt    string    `json:"health_updated_at"`    // 最后评估时间
+	CorrectionCount    int       `json:"correction_count"`     // 用户纠正次数
+	DriftCount         int       `json:"drift_count"`          // 规则偏离次数
+	AutoResetThreshold int       `json:"auto_reset_threshold"` // 消息数超阈值自动重置（0=不自动重置）
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
 }
 
 // Message 消息
@@ -75,8 +75,26 @@ type Message struct {
 	Role             string    `json:"role"` // "user" | "assistant"
 	Content          string    `json:"content"`
 	Metadata         string    `json:"metadata,omitempty"`          // JSON: 执行步骤持久化数据
-	AttentionContext string    `json:"attention_context,omitempty"` // 注意力模式预处理内容
+	AttentionContext string    `json:"attention_context,omitempty"` // 保留旧字段，功能已下线
 	CreatedAt        time.Time `json:"created_at"`
+}
+
+// ConversationLog 全量对话日志（仅归档用户输入和 AI 最终输出）
+type ConversationLog struct {
+	ID        int64     `json:"id"`
+	SessionID int64     `json:"session_id"`
+	MessageID int64     `json:"message_id"`
+	Role      string    `json:"role"` // "user" | "assistant"
+	Content   string    `json:"content"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// ChatAttachment 聊天多模态附件，仅用于发送链路。
+type ChatAttachment struct {
+	Type     string `json:"type"`      // image
+	MimeType string `json:"mime_type"` // image/png
+	Data     string `json:"data"`      // base64 payload without data: prefix
+	Name     string `json:"name,omitempty"`
 }
 
 // Trigger 定时触发器
@@ -169,7 +187,7 @@ type Service struct {
 	Port      int       `json:"port"`
 	LogPath   string    `json:"log_path"`
 	PID       int       `json:"pid"`
-	Status    string    `json:"status"`     // stopped / running / dead
+	Status    string    `json:"status"` // stopped / running / dead
 	AutoStart bool      `json:"auto_start"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -188,7 +206,7 @@ type Group struct {
 // Mount 静态资源挂载
 type Mount struct {
 	ID        int64     `json:"id"`
-	Alias     string    `json:"alias"`     // 访问别名，如 media
+	Alias     string    `json:"alias"`      // 访问别名，如 media
 	LocalPath string    `json:"local_path"` // 本地目录路径
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -198,9 +216,9 @@ type Mount struct {
 type Hook struct {
 	ID            int64  `json:"id"`
 	Event         string `json:"event"`          // session.created | message.received | message.count | session.error
-	Condition     string `json:"condition"`       // 条件表达式，如 content_match:xxx 或 count_gt:100
-	TargetSession int64  `json:"target_session"`  // 触发时发消息到哪个会话
-	Payload       string `json:"payload"`         // 消息模板，支持 {source_session_id} 等占位符
+	Condition     string `json:"condition"`      // 条件表达式，如 content_match:xxx 或 count_gt:100
+	TargetSession int64  `json:"target_session"` // 触发时发消息到哪个会话
+	Payload       string `json:"payload"`        // 消息模板，支持 {source_session_id} 等占位符
 	Enabled       bool   `json:"enabled"`
 	FiredCount    int    `json:"fired_count"`
 	CreatedAt     string `json:"created_at"`

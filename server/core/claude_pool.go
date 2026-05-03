@@ -99,6 +99,16 @@ func (p *ProcessPool) GetOrCreate(req ClaudeCodeRequest, isResume bool) (*Persis
 // Kill terminates the process for a given hub session ID.
 // If the process is busy, it sets pendingKill and defers actual kill until SendAndStream completes.
 func (p *ProcessPool) Kill(hubSessionID int64) {
+	p.killInternal(hubSessionID, false)
+}
+
+// ForceKill terminates a process immediately, including busy processes.
+// Used by watchdog/error recovery paths where waiting for SendAndStream would keep the session stuck.
+func (p *ProcessPool) ForceKill(hubSessionID int64) {
+	p.killInternal(hubSessionID, true)
+}
+
+func (p *ProcessPool) killInternal(hubSessionID int64, force bool) {
 	if p == nil {
 		return
 	}
@@ -109,7 +119,7 @@ func (p *ProcessPool) Kill(hubSessionID int64) {
 		return
 	}
 	proc.mu.Lock()
-	if proc.state == "busy" && !proc.dead {
+	if proc.state == "busy" && !proc.dead && !force {
 		proc.pendingKill = true
 		proc.mu.Unlock()
 		log.Printf("[pool] session %d is busy, deferred kill (pendingKill=true)", hubSessionID)
@@ -118,7 +128,7 @@ func (p *ProcessPool) Kill(hubSessionID int64) {
 	proc.mu.Unlock()
 	proc.kill()
 	delete(p.processes, hubSessionID)
-	log.Printf("[pool] killed process for session %d", hubSessionID)
+	log.Printf("[pool] killed process for session %d (force=%v)", hubSessionID, force)
 	if p.OnStateChange != nil {
 		go p.OnStateChange(hubSessionID, false, "")
 	}
@@ -372,8 +382,10 @@ func (proc *PersistentProcess) readLoop(stdout io.Reader) {
 	close(proc.doneCh)
 }
 
+const sendAndStreamMaxDuration = 60 * time.Second
+
 // SendAndStream writes a query to stdin and streams response events via onData
-func (proc *PersistentProcess) SendAndStream(ctx context.Context, query string, onData func(string)) error {
+func (proc *PersistentProcess) SendAndStream(ctx context.Context, query string, onData func(string)) (err error) {
 	proc.mu.Lock()
 	if proc.dead {
 		proc.mu.Unlock()
@@ -395,6 +407,9 @@ func (proc *PersistentProcess) SendAndStream(ctx context.Context, query string, 
 			proc.lastActive = time.Now()
 		}
 		proc.mu.Unlock()
+		if r := recover(); r != nil {
+			err = fmt.Errorf("stream panic recovered: %v", r)
+		}
 		// Execute deferred kill outside proc lock
 		if pending {
 			log.Printf("[pool] session %d: executing deferred kill after SendAndStream", proc.hubSessionID)
@@ -442,13 +457,27 @@ drained:
 		return fmt.Errorf("write stdin: %w", err)
 	}
 	// Read events until "result" type or process death.
-	// No timeout: long-running tasks (compilation, compacting, complex reasoning)
-	// are legitimate. Only user cancellation (ctx) or process death ends the loop.
+	// Watchdog caps a single turn that keeps retrying or emits only non-result events,
+	// preventing bad providers from leaving the session busy forever.
+	deadline := time.NewTimer(sendAndStreamMaxDuration)
+	defer deadline.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			proc.kill()
 			return ctx.Err()
+		case <-deadline.C:
+			proc.kill()
+			Pool.mu.Lock()
+			if current, ok := Pool.processes[proc.hubSessionID]; ok && current == proc {
+				delete(Pool.processes, proc.hubSessionID)
+			}
+			Pool.mu.Unlock()
+			if Pool.OnStateChange != nil {
+				go Pool.OnStateChange(proc.hubSessionID, false, "")
+			}
+			log.Printf("[pool] session %d: stream exceeded %s without result, killed stuck CLI process", proc.hubSessionID, sendAndStreamMaxDuration)
+			return fmt.Errorf("stream watchdog timeout: no result for %s", sendAndStreamMaxDuration)
 		case line, ok := <-proc.eventCh:
 			if !ok {
 				return fmt.Errorf("event channel closed")
@@ -514,11 +543,11 @@ func (proc *PersistentProcess) kill() {
 
 // ProcessInfo holds runtime info about a persistent process
 type ProcessInfo struct {
-	HubSessionID   int64  `json:"hub_session_id"`
-	Pid            int    `json:"pid"`
-	State          string `json:"state"`
-	UptimeSec      int64  `json:"uptime_sec"`
-	IdleSec        int64  `json:"idle_sec"`
+	HubSessionID    int64  `json:"hub_session_id"`
+	Pid             int    `json:"pid"`
+	State           string `json:"state"`
+	UptimeSec       int64  `json:"uptime_sec"`
+	IdleSec         int64  `json:"idle_sec"`
 	LastEventAgeSec int64  `json:"last_event_age_sec"` // seconds since last stdout event
 }
 

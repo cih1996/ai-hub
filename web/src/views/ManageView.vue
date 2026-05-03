@@ -7,6 +7,7 @@ interface FileItem {
   name: string
   path: string
   exists: boolean
+  size?: number
 }
 
 const fileLabels: Record<string, string> = {}
@@ -15,13 +16,21 @@ function getLabel(f: FileItem): string {
   return fileLabels[f.path] || fileLabels[f.name] || f.name.replace(/\.md$/, '')
 }
 
-const tabs: { key: string; label: string; desc: string }[] = [
-  { key: 'rules', label: '全局', desc: '~/.ai-hub/rules/' },
+function formatFileSize(size?: number): string {
+  const bytes = size ?? 0
+  const kb = bytes / 1024
+  if (kb < 0.1 && bytes > 0) return '<0.1K'
+  if (kb < 10) return `${kb.toFixed(1)}K`
+  return `${Math.round(kb)}K`
+}
+
+const tabs: { key: Scope; label: string; desc: string }[] = [
+  { key: 'rules', label: '规则', desc: '~/.ai-hub/rules/' },
   { key: 'memory', label: '记忆', desc: '~/.ai-hub/memory/' },
-  { key: 'notes', label: '笔记', desc: '~/.ai-hub/notes/' },
+  { key: 'knowledge', label: '知识库', desc: '~/.ai-hub/knowledge/' },
 ]
 
-type Scope = 'rules' | 'memory' | 'notes'
+type Scope = 'rules' | 'memory' | 'knowledge' | 'notes'
 
 const activeTab = ref<Scope>('rules')
 const activeTabDesc = ref('~/.ai-hub/rules/')
@@ -187,7 +196,7 @@ async function createNew() {
   if (!name) return
   if (!name.endsWith('.md')) name += '.md'
   const scope = activeTab.value
-  const path = scope === 'rules' && name === 'CLAUDE.md' ? 'CLAUDE.md' : scope + '/' + name
+  const path = scope === 'rules' ? name : scope + '/' + name
   try {
     await createFileApi(scope, path, '')
     showNewDialog.value = false
@@ -305,7 +314,10 @@ onBeforeUnmount(() => {
           >
             <div class="file-info">
               <span class="file-label">{{ getLabel(f) }}</span>
-              <span class="file-subpath">{{ f.name }}</span>
+              <span class="file-subpath">
+                <span class="file-name">{{ f.name }}</span>
+                <span class="file-size">{{ formatFileSize(f.size) }}</span>
+              </span>
             </div>
             <button class="btn-delete-file" @click.stop="deleteFile(f)" title="删除">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -388,7 +400,28 @@ onBeforeUnmount(() => {
 .file-item.ghost.active { opacity: 1; }
 .file-info { flex: 1; min-width: 0; }
 .file-label { display: block; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.file-subpath { display: block; font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.file-subpath {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-top: 1px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.file-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-size {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-muted);
+  opacity: 0.72;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
 .btn-delete-file {
   opacity: 0; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;
   border-radius: var(--radius-sm); color: var(--text-muted); transition: all var(--transition); flex-shrink: 0;

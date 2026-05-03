@@ -1,4 +1,4 @@
-import type { Provider, Session, Message, Trigger, Channel, TokenUsage, TokenUsageStats, CompressSettings } from '../types'
+import type { Provider, Session, Message, ConversationLog, Trigger, Channel, TokenUsage, TokenUsageStats, CompressSettings } from '../types'
 
 const BASE = '/api/v1'
 
@@ -49,6 +49,15 @@ export const getMessagesPaginated = (sessionId: number, limit = 50, beforeId?: n
   if (beforeId && beforeId > 0) params.set('before_id', String(beforeId))
   return request<{ messages: Message[]; has_more: boolean; total?: number }>(
     `/sessions/${sessionId}/messages?${params.toString()}`
+  )
+}
+
+// Paginated conversation logs: archived user inputs and final AI outputs only.
+export const getConversationLogsPaginated = (sessionId: number, limit = 50, beforeId?: number) => {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (beforeId && beforeId > 0) params.set('before_id', String(beforeId))
+  return request<{ logs: ConversationLog[]; has_more: boolean; total?: number }>(
+    `/sessions/${sessionId}/logs?${params.toString()}`
   )
 }
 
@@ -107,15 +116,19 @@ export const truncateMessages = (sessionId: number, fromMsgId: number) =>
 export const switchProvider = (id: number, providerId: string) =>
   request<{ ok: boolean; provider_id: string; provider_name: string }>(`/sessions/${id}/provider`, { method: 'PUT', body: JSON.stringify({ provider_id: providerId }) })
 
-// Toggle attention mode
-export const toggleAttention = (id: number, enabled: boolean) =>
-  request<{ ok: boolean; attention_enabled: boolean; session_id: number }>(`/sessions/${id}/attention`, { method: 'PUT', body: JSON.stringify({ enabled }) })
 
 // Chat
-export const sendChat = (sessionId: number, content: string, workDir?: string, sessionRules?: string, providerId?: string, groupName?: string) =>
+export interface ChatAttachmentPayload {
+  type: 'image'
+  mime_type: string
+  data: string
+  name?: string
+}
+
+export const sendChat = (sessionId: number, content: string, workDir?: string, sessionRules?: string, providerId?: string, groupName?: string, attachments?: ChatAttachmentPayload[]) =>
   request<{ session_id: number; status: string }>('/chat/send', {
     method: 'POST',
-    body: JSON.stringify({ session_id: sessionId, content, work_dir: workDir || '', session_rules: sessionRules || '', provider_id: providerId || '', group_name: groupName || '' }),
+    body: JSON.stringify({ session_id: sessionId, content, work_dir: workDir || '', session_rules: sessionRules || '', provider_id: providerId || '', group_name: groupName || '', attachments: attachments || [] }),
   })
 
 // Status
@@ -140,6 +153,7 @@ export interface FileItem {
   name: string
   path: string
   exists: boolean
+  size?: number
 }
 export const listFiles = (scope: string) =>
   request<FileItem[]>(`/files?scope=${scope}`)
@@ -469,44 +483,6 @@ export const updateSchemaApi = (name: string, definition: object, writers?: numb
   request<SchemaItem>('/schemas/' + encodeURIComponent(name), { method: 'PUT', body: JSON.stringify({ definition, ...(writers !== undefined ? { writers } : {}) }) })
 export const deleteSchemaApi = (name: string) =>
   request<{ ok: boolean }>('/schemas/' + encodeURIComponent(name), { method: 'DELETE' })
-
-// Shadow AI
-export interface ShadowAIConfig {
-  patrol_interval: string
-  extract_interval: string
-  deep_scan_interval: string
-  self_clean_interval: string
-  context_reset_threshold: number
-}
-export interface ShadowAIStatus {
-  enabled: boolean
-  session_id: number
-  status: string
-  config: ShadowAIConfig
-  triggers?: Array<{
-    id: number
-    content: string
-    trigger_time: string
-    enabled: boolean
-    status: string
-    fired_count: number
-  }>
-}
-export const getShadowAIStatus = () => request<ShadowAIStatus>('/shadow-ai/status')
-export const enableShadowAI = (config?: Partial<ShadowAIConfig>) =>
-  request<{ ok: boolean; session_id: number; triggers: number[] }>('/shadow-ai/enable', {
-    method: 'POST',
-    body: JSON.stringify(config || {}),
-  })
-export const disableShadowAI = () =>
-  request<{ ok: boolean; message: string }>('/shadow-ai/disable', { method: 'POST' })
-export const updateShadowAIConfig = (config: Partial<ShadowAIConfig>) =>
-  request<{ ok: boolean; config: ShadowAIConfig }>('/shadow-ai/config', {
-    method: 'PUT',
-    body: JSON.stringify(config),
-  })
-export const getShadowAILogs = (lines = 50) =>
-  request<{ content: string; exists: boolean }>(`/shadow-ai/logs?lines=${lines}`)
 
 // Structured Memory
 export interface StructuredCategory {

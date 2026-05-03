@@ -37,6 +37,7 @@ type FileInfo struct {
 	Name   string `json:"name"`
 	Path   string `json:"path"`
 	Exists bool   `json:"exists"`
+	Size   int64  `json:"size"`
 }
 
 type FileContentRequest struct {
@@ -57,6 +58,8 @@ func scopeDir(base, scope string) string {
 		return filepath.Join(base, "rules")
 	case "notes":
 		return filepath.Join(base, "notes")
+	case "knowledge":
+		return filepath.Join(base, "knowledge")
 	default:
 		return ""
 	}
@@ -108,7 +111,12 @@ func ListFiles(c *gin.Context) {
 		for _, e := range entries {
 			if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") && !seen[e.Name()] {
 				seen[e.Name()] = true
-				files = append(files, FileInfo{Name: e.Name(), Path: e.Name(), Exists: true})
+				info, _ := e.Info()
+				size := int64(0)
+				if info != nil {
+					size = info.Size()
+				}
+				files = append(files, FileInfo{Name: e.Name(), Path: e.Name(), Exists: true, Size: size})
 			}
 		}
 	} else {
@@ -123,7 +131,12 @@ func ListFiles(c *gin.Context) {
 			p := scope + "/" + e.Name()
 			if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") && !seen[p] {
 				seen[p] = true
-				files = append(files, FileInfo{Name: e.Name(), Path: p, Exists: true})
+				info, _ := e.Info()
+				size := int64(0)
+				if info != nil {
+					size = info.Size()
+				}
+				files = append(files, FileInfo{Name: e.Name(), Path: p, Exists: true, Size: size})
 			}
 		}
 	}
@@ -266,19 +279,19 @@ func GetTemplateVars(c *gin.Context) {
 	}
 	vars := core.TemplateVars()
 	descs := map[string]string{
-		"HOME_DIR":      "用户主目录",
-		"CLAUDE_DIR":    "AI Hub 数据目录",
-		"MEMORY_DIR":    "记忆文件目录",
-		"KNOWLEDGE_DIR": "知识库文件目录",
-		"RULES_DIR":     "规则文件目录",
-		"OS":            "操作系统",
-		"PORT":          "服务运行端口",
-		"DATE":          "当前日期",
-		"DATETIME":      "当前本地时间",
-		"TIME_BEIJING":  "当前北京时间",
-		"AI_HUB_SESSION_ID": "当前会话ID（运行时注入）",
-		"AI_HUB_PORT":       "当前服务端口（运行时注入）",
-		"AI_HUB_GROUP_NAME": "当前团队名（运行时注入）",
+		"HOME_DIR":                    "用户主目录",
+		"CLAUDE_DIR":                  "AI Hub 数据目录",
+		"MEMORY_DIR":                  "记忆文件目录",
+		"KNOWLEDGE_DIR":               "知识库文件目录",
+		"RULES_DIR":                   "规则文件目录",
+		"OS":                          "操作系统",
+		"PORT":                        "服务运行端口",
+		"DATE":                        "当前日期",
+		"DATETIME":                    "当前本地时间",
+		"TIME_BEIJING":                "当前北京时间",
+		"AI_HUB_SESSION_ID":           "当前会话ID（运行时注入）",
+		"AI_HUB_PORT":                 "当前服务端口（运行时注入）",
+		"AI_HUB_GROUP_NAME":           "当前团队名（运行时注入）",
 		"AI_HUB_SESSION_MESSAGES_API": "当前会话消息接口（运行时注入）",
 	}
 	order := []string{

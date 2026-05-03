@@ -207,15 +207,13 @@ func main() {
 		v1.PUT("/sessions/:id", api.UpdateSession)
 		v1.DELETE("/sessions/:id", api.DeleteSession)
 		v1.GET("/sessions/:id/messages", api.GetMessages)
+		v1.GET("/sessions/:id/logs", api.GetConversationLogs)
 		v1.DELETE("/sessions/:id/messages", api.TruncateMessages)
 		v1.POST("/sessions/:id/compress", api.CompressSession)
 		v1.POST("/sessions/:id/reset", api.ResetSession)
 		v1.GET("/sessions/:id/last-request", api.GetLastRawRequest)
 		v1.GET("/sessions/:id/messages/:msg_id", api.GetMessageWithContext)
 		v1.PUT("/sessions/:id/provider", api.SwitchProvider)
-		v1.PUT("/sessions/:id/attention", api.ToggleAttention)
-		v1.GET("/sessions/:id/attention-rules", api.GetAttentionRules)
-		v1.PUT("/sessions/:id/attention-rules", api.UpdateAttentionRules)
 
 		// AI error tracking
 		v1.GET("/sessions/:id/errors", api.GetSessionErrors)
@@ -396,18 +394,6 @@ func main() {
 		v1.GET("/changelog", api.GetChangelog)
 		v1.POST("/changelog/rollback", api.RollbackChangelog)
 
-		// Shadow AI (Issue #215)
-		v1.GET("/shadow-ai/status", api.GetShadowAIStatus)
-		v1.POST("/shadow-ai/enable", api.EnableShadowAI)
-		v1.POST("/shadow-ai/disable", api.DisableShadowAI)
-		v1.PUT("/shadow-ai/config", api.UpdateShadowAIConfig)
-		v1.GET("/shadow-ai/logs", api.GetShadowAILogs)
-		v1.GET("/shadow-ai/metrics", api.GetShadowAIMetrics)
-		v1.GET("/shadow-ai/activities", api.GetShadowAIActivities)
-		v1.POST("/shadow-ai/activity", api.CreateShadowAIActivity)
-		v1.GET("/shadow-ai/rules", api.GetShadowAIRules)
-		v1.PUT("/shadow-ai/rules", api.UpdateShadowAIRules)
-
 		// Anthropic API reverse proxy for precise token metering (Issue #72)
 		v1.Any("/proxy/s/:session_id/anthropic/*path", api.HandleAnthropicProxy)
 		v1.Any("/proxy/anthropic/*path", api.HandleAnthropicProxy) // legacy compat
@@ -475,6 +461,16 @@ func main() {
 	}
 	r.NoRoute(func(c *gin.Context) {
 		urlPath := c.Request.URL.Path
+		// API routes must never fall back to the SPA. This keeps removed or unknown
+		// backend endpoints explicit instead of returning index.html with HTTP 200.
+		if strings.HasPrefix(urlPath, "/api/") {
+			if strings.HasPrefix(urlPath, "/api/v1/shadow-ai") || strings.Contains(urlPath, "/attention") {
+				c.JSON(http.StatusGone, gin.H{"error": "feature removed", "message": "该功能已下线"})
+				return
+			}
+			c.JSON(http.StatusNotFound, gin.H{"error": "api endpoint not found"})
+			return
+		}
 		// Try serving static file directly
 		if urlPath != "/" && urlPath != "/index.html" {
 			name := urlPath[1:] // strip leading /
@@ -1301,7 +1297,6 @@ func addWindowsPathConfig(installDir string) {
 	fmt.Printf("Added %s to user PATH\n", installDir)
 	fmt.Println("Note: Restart your terminal for PATH changes to take effect")
 }
-
 
 // checkPortAvailable checks if a port is available for binding
 func checkPortAvailable(port int) error {

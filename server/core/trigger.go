@@ -9,7 +9,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 )
 
@@ -118,39 +117,6 @@ func fireTrigger(t *model.Trigger, port int) error {
 	return nil
 }
 
-// extractActivityType extracts activity type from trigger content
-func extractActivityType(content string) string {
-	if strings.Contains(content, "【定时巡检】") {
-		return "patrol"
-	}
-	if strings.Contains(content, "【定时提炼】") {
-		return "extract"
-	}
-	if strings.Contains(content, "【深度巡检】") {
-		return "deep_scan"
-	}
-	if strings.Contains(content, "【自我清理】") {
-		return "self_clean"
-	}
-	return ""
-}
-
-// getActivityLabel returns Chinese label for activity type
-func getActivityLabel(actType string) string {
-	switch actType {
-	case "patrol":
-		return "巡检"
-	case "extract":
-		return "提炼"
-	case "deep_scan":
-		return "深扫"
-	case "self_clean":
-		return "清理"
-	default:
-		return actType
-	}
-}
-
 func StartTriggerLoop(port int) {
 	ticker := time.NewTicker(1 * time.Minute)
 	go func() {
@@ -205,26 +171,6 @@ func checkTriggers(port int) {
 				t.Status = "failed"
 				store.UpdateTrigger(t)
 				continue
-			}
-
-			// Auto-record shadow AI activity
-			log.Printf("[trigger] checking shadow AI activity recording for session=%d", t.SessionID)
-			if session, err := store.GetSession(t.SessionID); err == nil && session != nil && session.IsShadow {
-				actType := extractActivityType(t.Content)
-				if actType != "" {
-					timestamp := now.Format(time.RFC3339)
-					summary := fmt.Sprintf("%s触发 #%d", getActivityLabel(actType), t.FiredCount+1)
-
-					_, err := store.DB.Exec(
-						"INSERT INTO shadow_activities (timestamp, type, summary, created_at) VALUES (?, ?, ?, ?)",
-						timestamp, actType, summary, timestamp,
-					)
-					if err != nil {
-						log.Printf("[trigger] failed to record activity: %v", err)
-					} else {
-						log.Printf("[trigger] recorded activity: session=%d type=%s count=%d", t.SessionID, actType, t.FiredCount+1)
-					}
-				}
 			}
 
 			t.FiredCount++
