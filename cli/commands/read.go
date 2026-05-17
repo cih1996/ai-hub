@@ -56,9 +56,10 @@ Examples:
 	reqBody := map[string]interface{}{
 		"scope":     scope,
 		"file_name": filename,
+		"type":      "memory",
 	}
 
-	respData, err := c.POST("/vector/read", reqBody)
+	respData, err := c.POST("/files/scoped/read", reqBody)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 1

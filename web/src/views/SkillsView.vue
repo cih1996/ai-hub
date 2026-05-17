@@ -91,6 +91,7 @@ onMounted(load)
           <div class="card-body">
             <div class="card-name">{{ s.name }}</div>
             <div class="card-desc">{{ s.description || '—' }}</div>
+            <div v-if="s.when_to_use" class="card-when">触发：{{ s.when_to_use }}</div>
             <div class="card-meta">
               <span class="tag" :class="'tag-' + s.source">{{ sourceLabels[s.source] || s.source }}</span>
             </div>
@@ -140,6 +141,7 @@ onMounted(load)
 .card-body { flex: 1; min-width: 0; }
 .card-name { font-size: 14px; font-weight: 500; color: var(--text-primary); }
 .card-desc { font-size: 12px; color: var(--text-secondary); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card-when { font-size: 11px; color: var(--accent); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0.8; }
 .card-meta { margin-top: 6px; display: flex; gap: 6px; }
 .tag { font-size: 11px; padding: 2px 8px; border-radius: 9999px; }
 .tag-user { background: var(--accent-soft); color: var(--accent); }

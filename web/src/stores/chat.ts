@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed, nextTick } from 'vue'
-import type { Session, Message, Provider, WSMessage, ToolCall, StepsMetadata, TokenUsage } from '../types'
+import type { Session, Message, Provider, WSMessage, ToolCall, StepsMetadata, TokenUsage, ContextUsage } from '../types'
 import * as api from '../composables/api'
 import router from '../router'
 
@@ -13,11 +13,17 @@ export const useChatStore = defineStore('chat', () => {
   const streamingContent = ref('')
   const thinkingContent = ref('')
   const toolCalls = ref<ToolCall[]>([])
+  const compressing = ref(false)
+  const recovering = ref(false)  // "No conversation found" auto-recovery in progress
   const tokenUsageMap = ref<Record<number, TokenUsage>>({})
   const latestTokenUsage = ref<TokenUsage | null>(null)
   const sessionTokenTotals = ref<Record<number, number>>() // session_id -> total tokens
+  const contextUsage = ref<ContextUsage | null>(null)
   const hasMoreMessages = ref(false)
   const loadingMore = ref(false)
+  // Message queue: messages typed while AI is streaming, sent as batch when done
+  const messageQueue = ref<string[]>([])
+  const messageQueueSessionId = ref<number>(0) // session the queue belongs to
   const ws = ref<WebSocket | null>(null)
   const wsConnected = ref(false)
   let wsReconnectDelay = 1000 // exponential backoff: 1s → 2s → 4s → ... → 30s
@@ -42,6 +48,22 @@ export const useChatStore = defineStore('chat', () => {
 
   function clearUsageLimitWarning() {
     usageLimitWarning.value = ''
+  }
+
+  /** Translate internal error messages to user-friendly text */
+  function formatUserError(raw: string): string {
+    const msg = (raw || '').trim()
+    if (!msg) return '处理时出现问题，请重试'
+    const lower = msg.toLowerCase()
+    if (lower.includes('no conversation found')) return '会话已重置，请重新发送消息'
+    if (lower.includes('provider not found')) return 'AI 服务配置异常，请检查供应商设置'
+    if (lower.includes('context window') || lower.includes('token') && lower.includes('limit'))
+      return '对话内容过长，已自动压缩上下文，请重试'
+    if (lower.includes('connection refused') || lower.includes('timeout'))
+      return 'AI 服务连接超时，请稍后重试'
+    if (lower.includes('permission denied') || lower.includes('unauthorized'))
+      return 'AI 服务认证失败，请检查 API Key 配置'
+    return `处理异常：${msg}`
   }
 
   function detectUsageLimitWarning(raw: string) {
@@ -91,6 +113,14 @@ export const useChatStore = defineStore('chat', () => {
   const defaultProvider = computed(() =>
     providers.value.find((p) => p.is_default) || providers.value[0]
   )
+
+  function isLegacyCompressedMessage(message: Message) {
+    return /^【系统】上下文已压缩（.+ 模式），会话已重置。$/.test((message.content || '').trim())
+  }
+
+  function filterVisibleMessages(list: Message[]) {
+    return list.filter((message) => !isLegacyCompressedMessage(message))
+  }
 
   function connectWS() {
     if (ws.value && ws.value.readyState === WebSocket.OPEN) return
@@ -160,8 +190,9 @@ export const useChatStore = defineStore('chat', () => {
             streamingContent.value = ''
             thinkingContent.value = ''
             toolCalls.value = []
+            flushQueue()
             api.getMessagesPaginated(msg.session_id, 50).then((resp) => {
-              messages.value = resp.messages
+              messages.value = filterVisibleMessages(resp.messages)
               hasMoreMessages.value = resp.has_more
             })
           }
@@ -219,13 +250,34 @@ export const useChatStore = defineStore('chat', () => {
 
       // context_reset: reload messages after context reset (manual or auto)
       if (msg.type === 'context_reset') {
+        compressing.value = false
         if (msg.session_id === currentSessionId.value) {
           streaming.value = false
           streamingContent.value = ''
+          contextUsage.value = null // reset energy bar after compression
           api.getMessagesPaginated(msg.session_id, 50).then((resp) => {
-            messages.value = resp.messages
+            messages.value = filterVisibleMessages(resp.messages)
             hasMoreMessages.value = resp.has_more
           })
+        }
+        return
+      }
+
+      // context_usage: update energy progress bar
+      if (msg.type === 'context_usage') {
+        if (msg.session_id === currentSessionId.value) {
+          try {
+            contextUsage.value = JSON.parse(msg.content)
+          } catch { /* ignore */ }
+        }
+        return
+      }
+
+      // compressing: AI is compressing context before responding
+      if (msg.type === 'compressing') {
+        if (msg.session_id === currentSessionId.value) {
+          compressing.value = true
+          streaming.value = true
         }
         return
       }
@@ -278,12 +330,16 @@ export const useChatStore = defineStore('chat', () => {
           break
         }
         case 'chunk':
+          compressing.value = false
+          recovering.value = false  // Recovery succeeded — streaming content arrived
           for (const tc of toolCalls.value) {
             if (tc.status === 'running') tc.status = 'done'
           }
           streamingContent.value += msg.content
           break
         case 'done': {
+          compressing.value = false
+          recovering.value = false
           // Build metadata from server response or local state
           let metadata = msg.content || ''
           if (!metadata && (thinkingContent.value || toolCalls.value.length > 0)) {
@@ -305,7 +361,7 @@ export const useChatStore = defineStore('chat', () => {
               id: Date.now(),
               session_id: msg.session_id,
               role: 'assistant',
-              content: streamingContent.value || '[任务已执行，详见执行步骤]',
+              content: streamingContent.value,
               metadata: metadata || undefined,
               created_at: new Date().toISOString(),
             })
@@ -314,9 +370,14 @@ export const useChatStore = defineStore('chat', () => {
           thinkingContent.value = ''
           toolCalls.value = []
           streaming.value = false
+          // Flush queued messages (typed while AI was streaming)
+          flushQueue()
           break
         }
-        case 'error':
+        case 'error': {
+          compressing.value = false
+          const rawLower = (msg.content || '').toLowerCase()
+          const isNoConv = rawLower.includes('no conversation found')
           // Preserve already-received content before clearing
           if (streamingContent.value || toolCalls.value.length > 0 || thinkingContent.value) {
             let metadata: string | undefined
@@ -334,7 +395,7 @@ export const useChatStore = defineStore('chat', () => {
               id: Date.now(),
               session_id: msg.session_id,
               role: 'assistant',
-              content: streamingContent.value || '[任务已执行，详见执行步骤]',
+              content: streamingContent.value,
               metadata,
               created_at: new Date().toISOString(),
             })
@@ -342,16 +403,23 @@ export const useChatStore = defineStore('chat', () => {
           streamingContent.value = ''
           thinkingContent.value = ''
           toolCalls.value = []
-          streaming.value = false
-          messages.value.push({
-            id: Date.now() + 1,
-            session_id: msg.session_id,
-            role: 'assistant',
-            content: `Error: ${msg.content}`,
-            created_at: new Date().toISOString(),
-          })
+          if (isNoConv) {
+            // Backend is auto-recovering — don't show error, show recovery state
+            recovering.value = true
+            streaming.value = true  // Keep streaming indicator active during recovery
+          } else {
+            streaming.value = false
+            messages.value.push({
+              id: Date.now() + 1,
+              session_id: msg.session_id,
+              role: 'assistant',
+              content: formatUserError(msg.content),
+              created_at: new Date().toISOString(),
+            })
+          }
           detectUsageLimitWarning(msg.content)
           break
+        }
       }
     }
 
@@ -396,6 +464,7 @@ export const useChatStore = defineStore('chat', () => {
     thinkingContent.value = ''
     toolCalls.value = []
     latestTokenUsage.value = null
+    contextUsage.value = null
     clearUsageLimitWarning()
 
     // FIX #112 (Case 2): block incoming WS streaming events for `id` during the
@@ -409,11 +478,23 @@ export const useChatStore = defineStore('chat', () => {
     // Try to load messages for this session (paginated: latest 50)
     try {
       const resp = await api.getMessagesPaginated(id, 50)
-      messages.value = resp.messages
+      messages.value = filterVisibleMessages(resp.messages)
       hasMoreMessages.value = resp.has_more
       // If successful, update workDir from sessions list (if available)
       const s = sessions.value.find((s) => s.id === id)
       workDir.value = s?.work_dir || ''
+      // Fetch initial context usage for energy progress bar (non-blocking, uses real API input_tokens)
+      api.getSessionContextUsage(id).then((snap) => {
+        if (snap.compression_enabled && snap.provider_max_tokens > 0) {
+          contextUsage.value = {
+            estimated_tokens: snap.estimated_tokens,
+            threshold_percent: snap.threshold_percent,
+            threshold_tokens: snap.threshold_tokens,
+            display_percent: snap.display_percent,
+            compression_enabled: snap.compression_enabled,
+          }
+        }
+      }).catch(() => { /* no data yet, that's fine */ })
     } catch (err: any) {
       // If session doesn't exist (404), redirect to new chat
       // Check error message since request() throws plain Error without response property
@@ -462,8 +543,9 @@ export const useChatStore = defineStore('chat', () => {
     try {
       const oldestId = messages.value.length > 0 ? messages.value[0]!.id : 0
       const resp = await api.getMessagesPaginated(currentSessionId.value, 50, oldestId)
-      if (resp.messages.length > 0) {
-        messages.value = [...resp.messages, ...messages.value]
+      const visibleMessages = filterVisibleMessages(resp.messages)
+      if (visibleMessages.length > 0) {
+        messages.value = [...visibleMessages, ...messages.value]
       }
       hasMoreMessages.value = resp.has_more
     } catch (e) {
@@ -483,6 +565,7 @@ export const useChatStore = defineStore('chat', () => {
     toolCalls.value = []
     workDir.value = ''
     latestTokenUsage.value = null
+    contextUsage.value = null
     clearUsageLimitWarning()
     pendingProviderId.value = providerId || ''
     pendingGroupName.value = groupName || ''
@@ -497,14 +580,34 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function sendMessage(content: string, attachments?: api.ChatAttachmentPayload[]) {
-    if (streaming.value) return
+    // If currently streaming, queue the message for later
+    if (streaming.value) {
+      messageQueue.value.push(content)
+      if (!messageQueueSessionId.value) {
+        messageQueueSessionId.value = currentSessionId.value
+      }
+      return
+    }
     clearUsageLimitWarning()
+
+    // Build display content including inline images (matches backend buildStoredUserContent)
+    let displayContent = content
+    if (attachments && attachments.length > 0) {
+      const imgParts: string[] = []
+      if (content.trim()) imgParts.push(content.trim())
+      for (const att of attachments) {
+        if (att.type === 'image' && att.data && att.mime_type) {
+          imgParts.push(`![${att.name || '图片'}](data:${att.mime_type};base64,${att.data})`)
+        }
+      }
+      displayContent = imgParts.join('\n\n')
+    }
 
     messages.value.push({
       id: Date.now(),
       session_id: currentSessionId.value,
       role: 'user',
-      content,
+      content: displayContent,
       created_at: new Date().toISOString(),
     })
 
@@ -529,15 +632,44 @@ export const useChatStore = defineStore('chat', () => {
         ws.value.send(JSON.stringify({ type: 'subscribe', session_id: resp.session_id }))
       }
     } catch (e: any) {
-      streaming.value = false
-      detectUsageLimitWarning(String(e?.message || ''))
-      messages.value.push({
-        id: Date.now(),
-        session_id: currentSessionId.value,
-        role: 'assistant',
-        content: `Error: ${e.message}`,
-        created_at: new Date().toISOString(),
-      })
+      const errMsg = formatUserError(String(e?.message || ''))
+      const rawLower = String(e?.message || '').toLowerCase()
+      if (rawLower.includes('no conversation found')) {
+        // Backend auto-recovery — show recovery state instead of error
+        recovering.value = true
+        streaming.value = true
+      } else {
+        streaming.value = false
+        detectUsageLimitWarning(String(e?.message || ''))
+        messages.value.push({
+          id: Date.now(),
+          session_id: currentSessionId.value,
+          role: 'assistant',
+          content: errMsg,
+          created_at: new Date().toISOString(),
+        })
+      }
+    }
+  }
+
+  function removeFromQueue(index: number) {
+    messageQueue.value.splice(index, 1)
+  }
+
+  function flushQueue() {
+    if (messageQueue.value.length === 0 || !messageQueueSessionId.value) return
+    const targetSession = messageQueueSessionId.value
+    const queued = messageQueue.value.splice(0) // take all and clear
+    messageQueueSessionId.value = 0
+    const combined = queued.length === 1 ? (queued[0] || '') : queued.map((q, i) => `[消息 ${i + 1}] ${q}`).join('\n\n')
+    // Temporarily switch to the queue's session for sending
+    const savedSession = currentSessionId.value
+    currentSessionId.value = targetSession
+    sendMessage(combined)
+    // Restore if user had switched away
+    if (savedSession !== targetSession) {
+      // Don't restore — the sendMessage already updated state for targetSession.
+      // User will see the target session's messages after flush.
     }
   }
 
@@ -575,23 +707,6 @@ export const useChatStore = defineStore('chat', () => {
     // Send stop signal to backend
     if (ws.value && ws.value.readyState === WebSocket.OPEN) {
       ws.value.send(JSON.stringify({ type: 'stop' }))
-    }
-  }
-
-  async function compressContext() {
-    if (!currentSessionId.value || streaming.value) return
-    try {
-      await api.compressSession(currentSessionId.value)
-      await selectSession(currentSessionId.value)
-      await loadSessions()
-    } catch (e: any) {
-      messages.value.push({
-        id: Date.now(),
-        session_id: currentSessionId.value,
-        role: 'assistant',
-        content: `压缩失败: ${e.message}`,
-        created_at: new Date().toISOString(),
-      })
     }
   }
 
@@ -654,9 +769,12 @@ export const useChatStore = defineStore('chat', () => {
     streamingContent,
     thinkingContent,
     toolCalls,
+    compressing,
+    recovering,
     tokenUsageMap,
     latestTokenUsage,
     sessionTokenTotals,
+    contextUsage,
     workDir,
     pendingProviderId,
     pendingGroupName,
@@ -672,7 +790,6 @@ export const useChatStore = defineStore('chat', () => {
     deleteSessionById,
     sendMessage,
     stopStreaming,
-    compressContext,
     resetContext,
     currentProvider,
     switchProviderForSession,
@@ -681,5 +798,9 @@ export const useChatStore = defineStore('chat', () => {
     clearUsageLimitWarning,
     inputFocusTrigger,
     triggerInputFocus,
+    messageQueue,
+    messageQueueSessionId,
+    removeFromQueue,
+    flushQueue,
   }
 })

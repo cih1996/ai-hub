@@ -8,8 +8,8 @@ import (
 func AddTokenUsage(t *model.TokenUsage) error {
 	t.CreatedAt = time.Now()
 	result, err := DB.Exec(
-		`INSERT INTO token_usage (session_id, message_id, input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		t.SessionID, t.MessageID, t.InputTokens, t.OutputTokens, t.CacheCreationInputTokens, t.CacheReadInputTokens, t.CreatedAt,
+		`INSERT INTO token_usage (session_id, message_id, input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens, request_body_size, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.SessionID, t.MessageID, t.InputTokens, t.OutputTokens, t.CacheCreationInputTokens, t.CacheReadInputTokens, t.RequestBodySize, t.CreatedAt,
 	)
 	if err != nil {
 		return err
@@ -54,6 +54,34 @@ func GetSessionTokenStats(sessionID int64, afterMsgID int64) (*model.TokenUsageS
 		return nil, err
 	}
 	return &s, nil
+}
+
+// GetLatestInputTokens returns the input_tokens from the most recent token_usage record for a session.
+// This is the ACTUAL context window size reported by the Anthropic API, not a rough estimate.
+func GetLatestInputTokens(sessionID int64) (int, error) {
+	var inputTokens int
+	err := DB.QueryRow(
+		`SELECT COALESCE(input_tokens, 0) FROM token_usage WHERE session_id = ? ORDER BY id DESC LIMIT 1`,
+		sessionID,
+	).Scan(&inputTokens)
+	if err != nil {
+		return 0, err
+	}
+	return inputTokens, nil
+}
+
+// GetLatestRequestBodySize returns the request_body_size from the most recent token_usage record for a session.
+// This is the ACTUAL HTTP request body size in bytes, captured by the proxy layer.
+func GetLatestRequestBodySize(sessionID int64) (int64, error) {
+	var size int64
+	err := DB.QueryRow(
+		`SELECT COALESCE(request_body_size, 0) FROM token_usage WHERE session_id = ? AND request_body_size > 0 ORDER BY id DESC LIMIT 1`,
+		sessionID,
+	).Scan(&size)
+	if err != nil {
+		return 0, err
+	}
+	return size, nil
 }
 
 func GetSystemTokenStats(startTime, endTime string) (*model.TokenUsageStats, error) {

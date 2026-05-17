@@ -2,6 +2,7 @@ package api
 
 import (
 	"ai-hub/server/core"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -21,6 +22,7 @@ func InitDataDir(dir string) {
 type SkillInfo struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	WhenToUse   string `json:"when_to_use,omitempty"`
 	Source      string `json:"source"`
 	Path        string `json:"path"`
 	Enabled     bool   `json:"enabled"`
@@ -32,18 +34,18 @@ type ToggleSkillRequest struct {
 	Enable bool   `json:"enable"`
 }
 
-func parseSkillFrontmatter(path string) (name, desc string) {
+func parseSkillFrontmatter(path string) (name, desc, whenToUse string) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return "", ""
+		return "", "", ""
 	}
 	content := string(data)
 	if !strings.HasPrefix(content, "---") {
-		return "", ""
+		return "", "", ""
 	}
 	end := strings.Index(content[3:], "---")
 	if end < 0 {
-		return "", ""
+		return "", "", ""
 	}
 	fm := content[3 : 3+end]
 	for _, line := range strings.Split(fm, "\n") {
@@ -54,6 +56,9 @@ func parseSkillFrontmatter(path string) (name, desc string) {
 		} else if strings.HasPrefix(line, "description:") {
 			desc = strings.TrimSpace(strings.TrimPrefix(line, "description:"))
 			desc = strings.Trim(desc, "\"'")
+		} else if strings.HasPrefix(line, "when_to_use:") {
+			whenToUse = strings.TrimSpace(strings.TrimPrefix(line, "when_to_use:"))
+			whenToUse = strings.Trim(whenToUse, "\"'")
 		}
 	}
 	return
@@ -92,13 +97,14 @@ func scanUserSkills() []SkillInfo {
 		if _, err := os.Stat(skillFile); err != nil {
 			continue
 		}
-		name, desc := parseSkillFrontmatter(skillFile)
+		name, desc, whenToUse := parseSkillFrontmatter(skillFile)
 		if name == "" {
 			name = e.Name()
 		}
 		skills = append(skills, SkillInfo{
 			Name:        name,
 			Description: desc,
+			WhenToUse:   whenToUse,
 			Source:      "user",
 			Path:        skillFile,
 			Enabled:     !isSkillDisabled(e.Name(), "user"),
@@ -108,8 +114,7 @@ func scanUserSkills() []SkillInfo {
 }
 
 func scanPluginSkills() []SkillInfo {
-	home, _ := os.UserHomeDir()
-	base := filepath.Join(home, ".claude", "plugins", "marketplaces")
+	base := filepath.Join(core.GetDataDir(), "plugins", "marketplaces")
 	marketplaces, err := os.ReadDir(base)
 	if err != nil {
 		return nil
@@ -141,13 +146,14 @@ func scanPluginSkills() []SkillInfo {
 				if _, err := os.Stat(skillFile); err != nil {
 					continue
 				}
-				name, desc := parseSkillFrontmatter(skillFile)
+				name, desc, whenToUse := parseSkillFrontmatter(skillFile)
 				if name == "" {
 					name = s.Name()
 				}
 				skills = append(skills, SkillInfo{
 					Name:        name,
 					Description: desc,
+					WhenToUse:   whenToUse,
 					Source:      "plugin",
 					Path:        skillFile,
 					Enabled:     !isSkillDisabled(s.Name(), "plugin"),
@@ -159,8 +165,7 @@ func scanPluginSkills() []SkillInfo {
 }
 
 func scanCommands() []SkillInfo {
-	home, _ := os.UserHomeDir()
-	dir := filepath.Join(home, ".claude", "commands")
+	dir := filepath.Join(core.GetDataDir(), "commands")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
@@ -202,8 +207,7 @@ func ToggleSkill(c *gin.Context) {
 
 	if req.Source == "command" {
 		disPath := disabledCommandPath(req.Name)
-		home, _ := os.UserHomeDir()
-		origPath := filepath.Join(home, ".claude", "commands", req.Name+".md")
+		origPath := filepath.Join(core.GetDataDir(), "commands", req.Name+".md")
 		if req.Enable {
 			// Move back from disabled
 			if _, err := os.Stat(disPath); err == nil {
@@ -218,14 +222,21 @@ func ToggleSkill(c *gin.Context) {
 			}
 		}
 	} else {
-		disPath := disabledSkillPath(req.Name, req.Source)
-		// Find original path
+		// Find original path by resolving display name to directory name
+		var dirName string
 		var origDir string
 		if req.Source == "user" {
-			origDir = filepath.Join(core.GetDataDir(), "skills", req.Name)
+			dirName = resolveSkillDirName(req.Name)
+			if dirName != "" {
+				origDir = filepath.Join(core.GetDataDir(), "skills", dirName)
+			}
 		} else {
 			origDir = findPluginSkillDir(req.Name)
+			if origDir != "" {
+				dirName = filepath.Base(origDir)
+			}
 		}
+		disPath := disabledSkillPath(dirName, req.Source)
 		if req.Enable {
 			if _, err := os.Stat(disPath); err == nil && origDir != "" {
 				os.MkdirAll(filepath.Dir(origDir), 0755)
@@ -245,20 +256,36 @@ func ToggleSkill(c *gin.Context) {
 
 // resolveSkillDirName finds the directory name for a skill by its display name.
 // Display name (from frontmatter) may differ from directory name.
+// Scans both active and disabled skill directories.
 func resolveSkillDirName(displayName string) string {
+	// 1. Scan active skills
 	dir := filepath.Join(core.GetDataDir(), "skills")
 	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return ""
-	}
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
+	if err == nil {
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			skillFile := filepath.Join(dir, e.Name(), "SKILL.md")
+			name, _, _ := parseSkillFrontmatter(skillFile)
+			if name == displayName || e.Name() == displayName {
+				return e.Name()
+			}
 		}
-		skillFile := filepath.Join(dir, e.Name(), "SKILL.md")
-		name, _ := parseSkillFrontmatter(skillFile)
-		if name == displayName || e.Name() == displayName {
-			return e.Name()
+	}
+	// 2. Scan disabled skills (for re-enable: skill is not in active dir)
+	disDir := filepath.Join(core.GetDataDir(), "disabled", "skills", "user")
+	disEntries, err := os.ReadDir(disDir)
+	if err == nil {
+		for _, e := range disEntries {
+			if !e.IsDir() {
+				continue
+			}
+			skillFile := filepath.Join(disDir, e.Name(), "SKILL.md")
+			name, _, _ := parseSkillFrontmatter(skillFile)
+			if name == displayName || e.Name() == displayName {
+				return e.Name()
+			}
 		}
 	}
 	return ""
@@ -325,8 +352,14 @@ func CreateSkill(c *gin.Context) {
 		return
 	}
 
+	// Auto-wrap with frontmatter if missing (Claude Code requires frontmatter for skill discovery)
+	content := req.Content
+	if !strings.HasPrefix(strings.TrimSpace(content), "---") {
+		content = fmt.Sprintf("---\nname: %q\ndescription: %q\n---\n\n%s", req.Name, req.Name, content)
+	}
+
 	skillFile := filepath.Join(skillDir, "SKILL.md")
-	if err := os.WriteFile(skillFile, []byte(req.Content), 0644); err != nil {
+	if err := os.WriteFile(skillFile, []byte(content), 0644); err != nil {
 		os.RemoveAll(skillDir)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write skill file"})
 		return
@@ -415,8 +448,7 @@ func sanitizeSkillName(name string) string {
 }
 
 func findPluginSkillDir(name string) string {
-	home, _ := os.UserHomeDir()
-	base := filepath.Join(home, ".claude", "plugins", "marketplaces")
+	base := filepath.Join(core.GetDataDir(), "plugins", "marketplaces")
 	marketplaces, err := os.ReadDir(base)
 	if err != nil {
 		return ""
@@ -434,6 +466,18 @@ func findPluginSkillDir(name string) string {
 			skillDir := filepath.Join(pluginsDir, p.Name(), "skills", name)
 			if _, err := os.Stat(skillDir); err == nil {
 				return skillDir
+			}
+			// Also check by frontmatter display name
+			skillEntries, _ := os.ReadDir(filepath.Join(pluginsDir, p.Name(), "skills"))
+			for _, s := range skillEntries {
+				if !s.IsDir() {
+					continue
+				}
+				skillFile := filepath.Join(pluginsDir, p.Name(), "skills", s.Name(), "SKILL.md")
+				fmName, _, _ := parseSkillFrontmatter(skillFile)
+				if fmName == name {
+					return filepath.Join(pluginsDir, p.Name(), "skills", s.Name())
+				}
 			}
 		}
 	}

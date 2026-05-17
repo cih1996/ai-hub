@@ -551,11 +551,9 @@ func colorScore(score string) string {
 // sessionReset handles the "sessions <id> reset" subcommand
 // Usage:
 //
-//	ai-hub sessions <id> reset [--keep-last N] [--auto-threshold N] [--yes]
+//	ai-hub sessions <id> reset [--keep-last N] [--yes]
 func sessionReset(c *client.Client, id int64, args []string) int {
 	var keepLast int
-	var autoThreshold int
-	var hasAutoThreshold bool
 	var confirmed bool
 
 	for i := 0; i < len(args); i++ {
@@ -565,31 +563,9 @@ func sessionReset(c *client.Client, id int64, args []string) int {
 				i++
 				fmt.Sscanf(args[i], "%d", &keepLast)
 			}
-		case "--auto-threshold":
-			if i+1 < len(args) {
-				i++
-				hasAutoThreshold = true
-				fmt.Sscanf(args[i], "%d", &autoThreshold)
-			}
 		case "--yes", "-y":
 			confirmed = true
 		}
-	}
-
-	// If only setting auto-threshold (not doing a reset)
-	if hasAutoThreshold && !confirmed {
-		body := map[string]interface{}{"auto_reset_threshold": autoThreshold}
-		_, err := c.PUT(fmt.Sprintf("/sessions/%d", id), body)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			return 1
-		}
-		if autoThreshold > 0 {
-			fmt.Printf("Session #%d: auto-reset threshold set to %d messages\n", id, autoThreshold)
-		} else {
-			fmt.Printf("Session #%d: auto-reset disabled\n", id)
-		}
-		return 0
 	}
 
 	// Performing a reset
@@ -625,15 +601,6 @@ func sessionReset(c *client.Client, id int64, args []string) int {
 	fmt.Printf("  Deleted: %d messages\n", resp.DeletedCount)
 	if resp.KeptCount > 0 {
 		fmt.Printf("  Kept: %d messages\n", resp.KeptCount)
-	}
-
-	// Also set auto-threshold if provided alongside --yes
-	if hasAutoThreshold {
-		threshBody := map[string]interface{}{"auto_reset_threshold": autoThreshold}
-		c.PUT(fmt.Sprintf("/sessions/%d", id), threshBody)
-		if autoThreshold > 0 {
-			fmt.Printf("  Auto-reset threshold: %d messages\n", autoThreshold)
-		}
 	}
 
 	return 0

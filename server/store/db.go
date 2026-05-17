@@ -138,14 +138,11 @@ func migrate() error {
 	// Provider: optional subprocess proxy URL
 	DB.Exec(`ALTER TABLE providers ADD COLUMN proxy_url TEXT NOT NULL DEFAULT ''`)
 
-	// Sessions: add last_compress_msg_id column (auto-compress cycle tracking)
-	DB.Exec(`ALTER TABLE sessions ADD COLUMN last_compress_msg_id INTEGER NOT NULL DEFAULT 0`)
+	// Provider: add max_tokens column (integer)
+	DB.Exec(`ALTER TABLE providers ADD COLUMN max_tokens INTEGER NOT NULL DEFAULT 0`)
 
-	// Global key-value settings table
-	DB.Exec(`CREATE TABLE IF NOT EXISTS settings (
-		key   TEXT PRIMARY KEY,
-		value TEXT NOT NULL DEFAULT ''
-	)`)
+	// Token usage: add request body size column (bytes)
+	DB.Exec(`ALTER TABLE token_usage ADD COLUMN request_body_size INTEGER NOT NULL DEFAULT 0`)
 
 	// Sessions: legacy attention_enabled column retained for existing databases
 	DB.Exec(`ALTER TABLE sessions ADD COLUMN attention_enabled INTEGER NOT NULL DEFAULT 0`)
@@ -226,8 +223,16 @@ func migrate() error {
 	// Schemas: add writers column (write permission isolation)
 	DB.Exec(`ALTER TABLE schemas ADD COLUMN writers TEXT NOT NULL DEFAULT ''`)
 
-	// Injection router table (Issue #210: structured memory injection)
-	InitInjectionRouterTable()
+	// Compression settings table
+	DB.Exec(`CREATE TABLE IF NOT EXISTS compression_settings (
+		id INTEGER PRIMARY KEY CHECK (id = 1),
+		enabled INTEGER NOT NULL DEFAULT 0,
+		threshold_percent INTEGER NOT NULL DEFAULT 80,
+		system_prompt TEXT NOT NULL DEFAULT '',
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`)
+	DB.Exec(`INSERT OR IGNORE INTO compression_settings (id, enabled, threshold_percent, system_prompt) VALUES (1, 0, 80, '')`)
+
 
 	// Hooks table (Issue #211: event hook system)
 	InitHooksTable()
@@ -235,8 +240,15 @@ func migrate() error {
 	// Memory changelog table (Issue #212: memory change tracking)
 	InitChangelogTable()
 
-	// Sessions: add auto_reset_threshold column (Issue #214: context reset)
-	DB.Exec(`ALTER TABLE sessions ADD COLUMN auto_reset_threshold INTEGER NOT NULL DEFAULT 0`)
+	// Session raw requests table (persistence for last raw request context)
+	DB.Exec(`CREATE TABLE IF NOT EXISTS session_raw_requests (
+		session_id INTEGER PRIMARY KEY,
+		payload TEXT NOT NULL DEFAULT '{}',
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+	)`)
+	// Persist complete proxy request body for diagnostic inspection
+	DB.Exec(`ALTER TABLE session_raw_requests ADD COLUMN proxy_body TEXT DEFAULT ''`)
 
 	// Legacy shadow AI activities table retained for archive compatibility
 	DB.Exec(`CREATE TABLE IF NOT EXISTS shadow_activities (

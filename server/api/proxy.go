@@ -4,6 +4,7 @@ import (
 	"ai-hub/server/model"
 	"ai-hub/server/store"
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -26,7 +27,8 @@ type ProxyUsage struct {
 	OutputTokens             int64
 	CacheCreationInputTokens int64
 	CacheReadInputTokens     int64
-	Captured                 bool // true if proxy captured any usage
+	RequestBodySize          int64 // Actual HTTP request body size in bytes
+	Captured                 bool  // true if proxy captured any usage
 }
 
 type meteringContext struct {
@@ -62,6 +64,19 @@ func proxyAccumulate(sessionID int64, input, output, cacheCreation, cacheRead in
 	u.Captured = true
 }
 
+// setProxyRequestBodySize records the HTTP request body size for a session.
+func setProxyRequestBodySize(sessionID int64, size int64) {
+	proxyUsageMu.Lock()
+	defer proxyUsageMu.Unlock()
+	u, ok := proxyUsageMap[sessionID]
+	if !ok {
+		u = &ProxyUsage{}
+		proxyUsageMap[sessionID] = u
+	}
+	u.RequestBodySize = size
+	u.Captured = true
+}
+
 // ConsumeProxyUsage returns accumulated proxy usage for a session and resets it.
 // Called by runStream after streaming completes.
 func ConsumeProxyUsage(sessionID int64) *ProxyUsage {
@@ -90,6 +105,35 @@ func GetLastProxyBody(sessionID int64) json.RawMessage {
 		return nil
 	}
 	return json.RawMessage(val.([]byte))
+}
+
+// persistProxyBody saves the complete proxy request body to DB for diagnostic inspection.
+func persistProxyBody(sessionID int64, body []byte) {
+	_, err := store.DB.Exec(`UPDATE session_raw_requests SET proxy_body = ?, updated_at = CURRENT_TIMESTAMP WHERE session_id = ?`, string(body), sessionID)
+	if err != nil {
+		log.Printf("[proxy] session=%d failed to persist proxy body: %v", sessionID, err)
+	}
+}
+
+// extractJSONField extracts a top-level string field from raw JSON without full parse.
+func extractJSONField(data []byte, field string) string {
+	key := []byte(`"` + field + `"`)
+	idx := bytes.Index(data, key)
+	if idx < 0 {
+		return ""
+	}
+	rest := data[idx+len(key):]
+	// Skip whitespace and colon
+	rest = bytes.TrimLeft(rest, " \t\r\n:")
+	if len(rest) == 0 || rest[0] != '"' {
+		return ""
+	}
+	rest = rest[1:]
+	end := bytes.IndexByte(rest, '"')
+	if end < 0 {
+		return ""
+	}
+	return string(rest[:end])
 }
 
 // ---- Anthropic API Reverse Proxy ----
@@ -145,9 +189,16 @@ func HandleAnthropicProxy(c *gin.Context) {
 	// Capture the full Anthropic API request body for diagnostic inspection.
 	// Only capture POST /messages requests — these contain the complete conversation history.
 	if sessionID > 0 && c.Request.Method == http.MethodPost && strings.Contains(subPath, "messages") && len(body) > 0 {
+		// Log model field for sub-agent debugging
+		if modelVal := extractJSONField(body, "model"); modelVal != "" {
+			log.Printf("[proxy] session=%d model=%s body_size=%d", sessionID, modelVal, len(body))
+		}
 		clone := make([]byte, len(body))
 		copy(clone, body)
 		lastProxyBodies.Store(sessionID, clone)
+		setProxyRequestBodySize(sessionID, int64(len(body)))
+		// Persist proxy body to DB for diagnostic inspection (async)
+		go persistProxyBody(sessionID, clone)
 	}
 
 	meter := &meteringContext{Provider: provider, RequestBody: body}
@@ -257,7 +308,10 @@ func streamProxySSE(c *gin.Context, upstream io.Reader, sessionID int64, meter *
 				StopReason string `json:"stop_reason"`
 			} `json:"delta"`
 			Usage struct {
-				OutputTokens int64 `json:"output_tokens"`
+				InputTokens              int64 `json:"input_tokens"`
+				OutputTokens             int64 `json:"output_tokens"`
+				CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+				CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
 			} `json:"usage"`
 		}
 		if err := json.Unmarshal([]byte(data), &evt); err != nil {
@@ -271,6 +325,17 @@ func streamProxySSE(c *gin.Context, upstream io.Reader, sessionID int64, meter *
 			turnCacheRead += evt.Message.Usage.CacheReadInputTokens
 		case "message_delta":
 			turnOutput += evt.Usage.OutputTokens
+			// Some providers (e.g. mimo-v2.5-pro) report input_tokens in message_delta instead of message_start.
+			// Use overwrite (=) not accumulate (+=) since this is the final authoritative value per turn.
+			if evt.Usage.InputTokens > 0 {
+				turnInput = evt.Usage.InputTokens
+			}
+			if evt.Usage.CacheCreationInputTokens > 0 {
+				turnCacheCreation = evt.Usage.CacheCreationInputTokens
+			}
+			if evt.Usage.CacheReadInputTokens > 0 {
+				turnCacheRead = evt.Usage.CacheReadInputTokens
+			}
 		case "content_block_delta":
 			var txtEvt struct {
 				Delta struct {

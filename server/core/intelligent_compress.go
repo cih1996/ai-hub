@@ -10,21 +10,39 @@ import (
 	"time"
 )
 
+const defaultCompressionSystemPrompt = `你是一个专门负责“对话上下文压缩”的 AI 助手。
+
+你的任务是阅读给定的完整历史记录，输出一份高密度、可直接继续工作的压缩总结。
+
+要求：
+1. 保留用户目标、约束、偏好、已完成结果、未完成事项、关键决策。
+2. 保留重要文件路径、命令、变量名、接口、数据结构、报错结论。
+3. 删除寒暄、重复表述、无价值中间过程。
+4. 用中文输出。
+5. 输出 Markdown，使用以下结构：
+   - 用户目标
+   - 关键约束
+   - 已完成
+   - 当前进展
+   - 关键资料
+   - 下一步
+6. 直接输出压缩结果，不要写前言或解释。`
+
 // BuildIntelligentRecoverySeed calls Claude one-shot to generate a high-quality
-// context summary from the full message history. Returns ("", err) on failure —
-// callers should fall back to buildRecoverySeed.
+// context summary from the full archived conversation logs. Returns ("", err)
+// on failure — callers should fall back to buildRecoverySeed.
 //
 // It uses the one-shot Stream() client (not the persistent pool) so it does not
 // pollute or interfere with the existing session process.
-func BuildIntelligentRecoverySeed(msgs []model.Message, provider *model.Provider, hubSessionID int64) (string, error) {
-	if len(msgs) == 0 {
+func BuildIntelligentRecoverySeed(logs []model.ConversationLog, provider *model.Provider, hubSessionID int64, systemPrompt string) (string, error) {
+	if len(logs) == 0 {
 		return "", fmt.Errorf("no messages to summarize")
 	}
 
 	// Build the conversation text
 	var history strings.Builder
-	history.WriteString(fmt.Sprintf("以下是完整会话历史（共 %d 条消息）：\n\n", len(msgs)))
-	for _, m := range msgs {
+	history.WriteString(fmt.Sprintf("以下是完整会话历史归档（共 %d 条记录）：\n\n", len(logs)))
+	for _, m := range logs {
 		role := "用户"
 		if m.Role == "assistant" {
 			role = "助手"
@@ -32,15 +50,10 @@ func BuildIntelligentRecoverySeed(msgs []model.Message, provider *model.Provider
 		history.WriteString(fmt.Sprintf("[%s]: %s\n\n", role, m.Content))
 	}
 
-	systemPrompt := `你是一个会话上下文压缩助手。任务：阅读以下完整会话历史，提炼出一份简洁但信息密度高的「上下文恢复摘要」。
-
-要求：
-1. 保留用户的核心目标、已完成事项、当前进行中的任务、关键决策和约定
-2. 压缩重复内容，去除闲聊、中间过程输出
-3. 保留所有重要的文件路径、变量名、命令、代码片段（完整保留，不截断）
-4. 输出格式为 Markdown，包含以下章节：【用户目标】【已完成】【进行中】【关键上下文】【下一步】
-5. 字数控制在 1000 字以内，优先保证信息完整性
-6. 直接输出摘要内容，不加前言或解释`
+	systemPrompt = strings.TrimSpace(systemPrompt)
+	if systemPrompt == "" {
+		systemPrompt = defaultCompressionSystemPrompt
+	}
 
 	query := history.String()
 
@@ -59,6 +72,9 @@ func BuildIntelligentRecoverySeed(msgs []model.Message, provider *model.Provider
 		ProxyURL:     provider.ProxyURL,
 		ModelID:      provider.ModelID,
 		HubSessionID: hubSessionID,
+	}
+	if provider.AuthMode == "oauth" {
+		req.ModelID = ""
 	}
 
 	var result strings.Builder
@@ -121,7 +137,7 @@ func BuildIntelligentRecoverySeed(msgs []model.Message, provider *model.Provider
 %s
 
 ---
-如需完整历史，请调用：GET /api/v1/sessions/%d/messages
+如需完整历史，请调用：GET /api/v1/sessions/%d/logs
 请继续处理上面最后一条用户消息的请求；若存在未完成任务，延续执行。`, summary, hubSessionID)
 
 	return seed, nil

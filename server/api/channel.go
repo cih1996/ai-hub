@@ -454,6 +454,7 @@ func forwardToSession(sessionID int64, content string) {
 		broadcast(WSMessage{Type: "message_queued", SessionID: session.ID, Content: content})
 		return
 	}
-	// Kick off streaming
+	// Kick off streaming (with auto-compression check)
+	maybeAutoCompressBeforeRun(session, content)
 	go runStream(session, content, false, msg.ID)
 }

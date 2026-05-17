@@ -199,11 +199,6 @@ func WriteFile(c *gin.Context) {
 		return
 	}
 
-	// Trigger vector sync for memory
-	if req.Scope == "memory" {
-		core.SyncFileToVector(req.Scope, writePath, 0) // files API: no session context
-	}
-
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
@@ -236,11 +231,6 @@ func CreateFile(c *gin.Context) {
 		return
 	}
 
-	// Trigger vector sync for memory
-	if req.Scope == "memory" {
-		core.SyncFileToVector(req.Scope, writePath, 0) // files API: no session context
-	}
-
 	c.JSON(http.StatusCreated, gin.H{"ok": true})
 }
 
@@ -259,12 +249,6 @@ func DeleteFile(c *gin.Context) {
 	os.Remove(tplPath)
 	if dataPath != tplPath {
 		os.Remove(dataPath)
-	}
-
-	// Clean vector record for memory
-	if scope == "memory" {
-		docID := filepath.Base(tplPath)
-		core.Vector.Delete(scope, docID)
 	}
 
 	c.JSON(http.StatusOK, gin.H{"ok": true})

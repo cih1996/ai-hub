@@ -714,7 +714,7 @@
                         const newMsg = {
                             id: Date.now(),
                             role: 'assistant',
-                            content: error ? `❌ 错误: ${error}` : (content || '[任务已执行，详见执行步骤]'),
+                            content: error ? `❌ 错误: ${error}` : content,
                             metadata: metadata || undefined,
                             created_at: new Date().toISOString()
                         };

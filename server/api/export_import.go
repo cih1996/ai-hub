@@ -168,8 +168,8 @@ func ImportArchive(c *gin.Context) {
 	// Accumulate archive contents in memory
 	var manifest *exportManifest
 	sessionInfos := map[string]*sessionExportData{} // "sessions/<id>/info.json" key=<id>
-	sessionRules := map[string]string{}              // key=<id>, value=rules content
-	teamFiles := map[string][]byte{}                 // key="team/memory/file.md", value=content
+	sessionRules := map[string]string{}             // key=<id>, value=rules content
+	teamFiles := map[string][]byte{}                // key="team/memory/file.md", value=content
 	var totalSize int64
 
 	for {
@@ -296,12 +296,6 @@ func ImportArchive(c *gin.Context) {
 			}
 			teamFilesImported++
 
-			// Trigger vector sync for memory files
-			parts := strings.SplitN(relPath, "/", 2)
-			if len(parts) == 2 && parts[0] == "memory" {
-				scope := manifest.GroupName + "/" + parts[0]
-				core.SyncFileToVector(scope, destPath, 0) // import: no source session
-			}
 		}
 		if teamFilesImported > 0 || len(warnings) > 0 {
 			log.Printf("[import] team '%s': %d files imported, %d skipped", manifest.GroupName, teamFilesImported, len(warnings))

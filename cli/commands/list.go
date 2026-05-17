@@ -49,7 +49,8 @@ Examples:
 
 	params := url.Values{}
 	params.Set("scope", scope)
-	path := "/vector/list_files?" + params.Encode()
+	params.Set("type", "memory")
+	path := "/files/scoped/list?" + params.Encode()
 	respData, err := c.GET(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

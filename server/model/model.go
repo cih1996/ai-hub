@@ -19,8 +19,17 @@ type Provider struct {
 	APIKey    string    `json:"api_key"`
 	ModelID   string    `json:"model_id"`
 	IsDefault bool      `json:"is_default"`
+	MaxTokens int       `json:"max_tokens"` // 0 means unlimited or provider default
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// CompressionSettings 全局上下文压缩配置
+type CompressionSettings struct {
+	Enabled          bool      `json:"enabled"`
+	ThresholdPercent int       `json:"threshold_percent"` // 0-100
+	SystemPrompt     string    `json:"system_prompt"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 // DetectMode 固定返回 Claude Code 模式。
@@ -45,27 +54,25 @@ func isOllamaBaseURL(raw string) bool {
 
 // Session 会话
 type Session struct {
-	ID                int64  `json:"id"`
-	Title             string `json:"title"`
-	Icon              string `json:"icon"` // 图标文件名，如 avatar1.svg
-	ProviderID        string `json:"provider_id"`
-	ClaudeSessionID   string `json:"claude_session_id"`    // UUID for Claude Code CLI --session-id
-	WorkDir           string `json:"work_dir"`             // 工作目录，空 = 系统默认(home)
-	GroupName         string `json:"group_name"`           // 会话分组名称
-	LastCompressMsgID int64  `json:"last_compress_msg_id"` // 上次压缩时最新消息 ID，用于增量统计
-	AttentionEnabled  bool   `json:"attention_enabled"`    // 保留旧字段，功能已下线
-	AttentionRules    string `json:"attention_rules"`      // 保留旧字段，功能已下线
+	ID               int64  `json:"id"`
+	Title            string `json:"title"`
+	Icon             string `json:"icon"` // 图标文件名，如 avatar1.svg
+	ProviderID       string `json:"provider_id"`
+	ClaudeSessionID  string `json:"claude_session_id"` // UUID for Claude Code CLI --session-id
+	WorkDir          string `json:"work_dir"`          // 工作目录，空 = 系统默认(home)
+	GroupName        string `json:"group_name"`        // 会话分组名称
+	AttentionEnabled bool   `json:"attention_enabled"` // 保留旧字段，功能已下线
+	AttentionRules   string `json:"attention_rules"`   // 保留旧字段，功能已下线
 	// Retained legacy shadow-session fields; new shadow sessions are no longer created.
 	IsShadow bool  `json:"is_shadow"` // 保留旧字段，用于隐藏历史影子会话
 	ParentID int64 `json:"parent_id"` // 保留旧字段
 	// Health fields (Issue #213)
-	HealthScore        string    `json:"health_score"`         // green | yellow | red (empty = unset)
-	HealthUpdatedAt    string    `json:"health_updated_at"`    // 最后评估时间
-	CorrectionCount    int       `json:"correction_count"`     // 用户纠正次数
-	DriftCount         int       `json:"drift_count"`          // 规则偏离次数
-	AutoResetThreshold int       `json:"auto_reset_threshold"` // 消息数超阈值自动重置（0=不自动重置）
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
+	HealthScore     string    `json:"health_score"`      // green | yellow | red (empty = unset)
+	HealthUpdatedAt string    `json:"health_updated_at"` // 最后评估时间
+	CorrectionCount int       `json:"correction_count"`  // 用户纠正次数
+	DriftCount      int       `json:"drift_count"`       // 规则偏离次数
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 // Message 消息
@@ -122,6 +129,7 @@ type TokenUsage struct {
 	OutputTokens             int64     `json:"output_tokens"`
 	CacheCreationInputTokens int64     `json:"cache_creation_input_tokens"`
 	CacheReadInputTokens     int64     `json:"cache_read_input_tokens"`
+	RequestBodySize          int64     `json:"request_body_size"` // Actual HTTP request body size in bytes
 	CreatedAt                time.Time `json:"created_at"`
 }
 
@@ -132,14 +140,6 @@ type TokenUsageStats struct {
 	TotalCacheCreation int64 `json:"total_cache_creation_tokens"`
 	TotalCacheRead     int64 `json:"total_cache_read_tokens"`
 	Count              int64 `json:"count"`
-}
-
-// CompressSettings 会话自动压缩配置
-type CompressSettings struct {
-	AutoEnabled bool   `json:"auto_enabled"` // 是否启用自动压缩
-	Threshold   int    `json:"threshold"`    // 触发阈值（累计 input tokens 绝对值，建议 80000）
-	Mode        string `json:"mode"`         // "auto"（智能优先，降级简单）| "intelligent"（仅智能）| "simple"（仅简单截取）
-	MinTurns    int    `json:"min_turns"`    // 最小对话轮数阈值（user 消息数），默认 10；token 与轮数同时满足才触发压缩
 }
 
 // AIError AI 错误追踪记录

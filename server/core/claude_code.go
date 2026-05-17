@@ -153,6 +153,18 @@ func (c *ClaudeCodeClient) Stream(ctx context.Context, req ClaudeCodeRequest, on
 		cmd.Env = append(cmd.Env, "ANTHROPIC_BASE_URL="+req.BaseURL)
 	}
 	cmd.Env = applyProviderProxyEnv(cmd.Env, req.ProxyURL)
+	// Force sub-agents to inherit parent model instead of defaulting to haiku.
+	// Without this, explore agent hardcodes 'haiku' which may not be available
+	// in proxy/distributor backends (e.g. "小米mimo" group has no haiku channel).
+	cmd.Env = append(cmd.Env, "CLAUDE_CODE_SUBAGENT_MODEL=inherit")
+	// Also set ANTHROPIC_MODEL so sub-agents can resolve the model name
+	// even when using custom/non-standard model IDs (e.g. mimo-v2.5-pro).
+	if req.ModelID != "" {
+		cmd.Env = append(cmd.Env, "ANTHROPIC_MODEL="+req.ModelID)
+	}
+	// Redirect Claude Code's config home to ~/.ai-hub so it auto-discovers
+	// skills from ~/.ai-hub/skills/ (replaces hardcoded skill listing in system prompt).
+	cmd.Env = append(cmd.Env, "CLAUDE_CONFIG_DIR="+GetDataDir())
 	// OAuth mode: API key not injected; Bearer token handled by Claude CLI's local auth cache
 	if req.HubSessionID > 0 {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("AI_HUB_SESSION_ID=%d", req.HubSessionID))
@@ -236,7 +248,7 @@ func (c *ClaudeCodeClient) StreamPersistent(ctx context.Context, req ClaudeCodeR
 	}
 
 	err = proc.SendAndStream(ctx, req.Query, onData)
-	if err == nil || ctx.Err() != nil || isStreamWatchdogError(err) {
+	if err == nil || ctx.Err() != nil {
 		return err
 	}
 
@@ -296,10 +308,6 @@ func (c *ClaudeCodeClient) StreamPersistent(ctx context.Context, req ClaudeCodeR
 		return err
 	}
 	return err
-}
-
-func isStreamWatchdogError(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "stream watchdog timeout")
 }
 
 func maskKey(key string) string {

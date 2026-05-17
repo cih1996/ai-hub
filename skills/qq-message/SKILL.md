@@ -1,6 +1,7 @@
 ---
 name: "QQ消息发送"
 description: "QQ消息发送接口调用指南。当 AI 需要回复QQ消息、向QQ群或用户发送消息时触发。基于 OneBot 11 协议，通过 NapCat HTTP API 发送。"
+when_to_use: "当 AI 需要回复 QQ 消息、向 QQ 群或用户发送消息时"
 ---
 
 # QQ消息发送 — 调用手册

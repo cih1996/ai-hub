@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import {
   listServices, createService, updateService, deleteService,
   startService, stopService, restartService, getServiceLogs,
@@ -17,6 +17,11 @@ const logLoading = ref(false)
 const actionLoading = ref<Record<number, boolean>>({})
 
 const form = ref({ name: '', command: '', work_dir: '', port: 0, auto_start: false })
+
+const totalCount = computed(() => services.value.length)
+const runningCount = computed(() => services.value.filter(s => s.status === 'running').length)
+const idleCount = computed(() => services.value.filter(s => s.status !== 'running' && s.status !== 'dead').length)
+const errorCount = computed(() => services.value.filter(s => s.status === 'dead').length)
 
 function resetForm() {
   form.value = { name: '', command: '', work_dir: '', port: 0, auto_start: false }
@@ -111,13 +116,33 @@ onMounted(load)
   <div class="services-page">
     <div class="page-header">
       <div>
-        <h2 class="page-title">我的作品</h2>
+        <h2 class="page-title">服务</h2>
         <span class="page-desc">管理托管服务进程，支持启停控制和日志查看</span>
       </div>
       <button class="btn-create" @click="resetForm(); showCreate = true">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
         新建
       </button>
+    </div>
+
+    <!-- Stats Panel -->
+    <div class="stats-bar" v-if="services.length > 0">
+      <div class="stat-chip">
+        <span class="stat-num">{{ totalCount }}</span>
+        <span class="stat-label">全部</span>
+      </div>
+      <div class="stat-chip">
+        <span class="stat-num stat-idle">{{ idleCount }}</span>
+        <span class="stat-label">空闲</span>
+      </div>
+      <div class="stat-chip">
+        <span class="stat-num stat-running">{{ runningCount }}</span>
+        <span class="stat-label">运行中</span>
+      </div>
+      <div class="stat-chip">
+        <span class="stat-num stat-error">{{ errorCount }}</span>
+        <span class="stat-label">错误</span>
+      </div>
     </div>
 
     <div v-if="loading" class="empty-state">加载中...</div>
@@ -321,6 +346,19 @@ onMounted(load)
   background: var(--accent); color: var(--btn-text); transition: opacity var(--transition); flex-shrink: 0;
 }
 .btn-create:hover { opacity: 0.9; }
+.stats-bar {
+  display: flex; gap: 12px; margin-bottom: 20px;
+}
+.stat-chip {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 10px 18px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 10px;
+  min-width: 70px;
+}
+.stat-num { font-size: 20px; font-weight: 700; color: var(--text-primary); }
+.stat-label { font-size: 11px; color: var(--text-muted); }
+.stat-idle { color: var(--text-secondary); }
+.stat-running { color: #22c55e; }
+.stat-error { color: #ef4444; }
 .empty-state { text-align: center; color: var(--text-muted); padding: 60px 16px; font-size: 14px; display: flex; flex-direction: column; align-items: center; }
 
 /* Card Grid */

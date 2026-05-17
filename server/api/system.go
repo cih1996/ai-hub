@@ -1,7 +1,6 @@
 package api
 
 import (
-	"ai-hub/server/core"
 	"context"
 	"net/http"
 	"os"
@@ -35,29 +34,6 @@ func Shutdown(c *gin.Context) {
 			p.Signal(syscall.SIGTERM)
 		}
 	}()
-}
-
-// ReloadVector reloads the vector engine
-// POST /api/v1/reload/vector
-// Query params: force_download=true to force re-download model
-func ReloadVector(c *gin.Context) {
-	if core.Vector == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Vector engine not initialized"})
-		return
-	}
-
-	forceDownload := c.Query("force_download") == "true"
-
-	// Reinitialize vector engine
-	go func() {
-		core.Vector.ReloadWithOptions(forceDownload)
-	}()
-
-	msg := "Vector engine reload initiated"
-	if forceDownload {
-		msg = "Vector engine reload initiated (force download enabled)"
-	}
-	c.JSON(http.StatusOK, gin.H{"message": msg})
 }
 
 // ReloadConfig reloads configuration (placeholder)

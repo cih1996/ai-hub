@@ -170,8 +170,6 @@ func Run(args []string) int {
 		return commands.RunMount(c, commandArgs)
 	case "transfer":
 		return commands.RunTransfer(c, commandArgs)
-	case "injection-router":
-		return commands.RunInjectionRouter(c, commandArgs)
 	case "hooks":
 		return commands.RunHooks(c, commandArgs)
 	case "changelog":
@@ -214,24 +212,21 @@ func runMem(c *client.Client, group string, args []string) int {
 }
 
 func printMemHelp() {
-	fmt.Println(`AI Hub Memory Runtime - Structured memory management
+	fmt.Println(`AI Hub Memory Runtime
+
+This structured memory CLI has been removed and is no longer available.
+Use file-based memory management instead:
+  ai-hub list --level <session|team|global>
+  ai-hub read <file> --level <session|team|global>
+  ai-hub write <file> --level <session|team|global> --content "..."
+  ai-hub edit <file> --level <session|team|global> --old "旧" --new "新"
+  ai-hub delete <file> --level <session|team|global>
 
 Usage:
   ai-hub mem <subcommand> [args]
 
-Subcommands:
-  add          Write a new structured memory record
-  retrieve     Search memories with semantic + statistical reranking
-  feedback     Report success/fail for a memory record
-  revise       Create a new version of an existing memory
-  deprecate    Mark a memory as deprecated
-  spec         Output JSON Schema for a subcommand
-
-Examples:
-  echo '{"type":"procedure","title":"Deploy SOP",...}' | ai-hub mem add
-  ai-hub mem retrieve --query "deploy" --types procedure
-  ai-hub mem feedback --id mem_20260305_0001 --result success
-  ai-hub mem spec add`)
+Supported:
+  spec         Show legacy JSON schema only`)
 }
 
 func printHelp() {
@@ -248,13 +243,13 @@ Global Flags:
   --version          Show version
 
 Memory:
-  search             Search memory by semantic similarity
+  search             Search memory files by filename/content text
   list               List memory files
   read               Read memory file
   write              Write memory file
   edit               Edit memory file (find and replace)
   delete             Delete memory file
-  mem                Structured memory runtime (add/retrieve/feedback/revise/deprecate/spec)
+  mem                Structured memory runtime (removed)
 
 Sessions:
   sessions           List all sessions
@@ -262,7 +257,6 @@ Sessions:
   sessions <id> messages   View recent messages
   sessions <id> move --group <name>  Move session to group
   sessions <id> reset [--keep-last N] [--yes]  Reset session context
-  sessions <id> reset --auto-threshold N  Set auto-reset threshold
   send               Send message to a session (0=new)
 
 Groups:
@@ -308,7 +302,6 @@ Daemon:
   daemon status      Show service status
 
 Hot Reload:
-  reload vector      Reload vector engine
   reload config      Reload configuration
   reload skills      Reload skill definitions
 
@@ -323,11 +316,6 @@ File Transfer:
   transfer list     List transfer records (--remote <url>)
   transfer status   Check transfer status (<id> --remote <url>)
   transfer delete   Delete transfer record (<id> --remote <url>)
-
-Injection Router:
-  injection-router list                                        List injection rules
-  injection-router set --keywords "kw" --inject "categories"   Create injection rule
-  injection-router delete <id>                                 Delete injection rule
 
 Hooks:
   hooks list [--event <type>]         List event hooks

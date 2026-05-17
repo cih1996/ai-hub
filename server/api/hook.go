@@ -58,13 +58,15 @@ func CreateHook(c *gin.Context) {
 	}
 	// Validate event type
 	validEvents := map[string]bool{
-		"session.created":  true,
-		"message.received": true,
-		"message.count":    true,
-		"session.error":    true,
+		"session.created":    true,
+		"message.received":   true,
+		"message.count":      true,
+		"session.error":      true,
+		"session.compressed": true,
+		"message.sent":       true,
 	}
 	if !validEvents[h.Event] {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid event type. Valid: session.created, message.received, message.count, session.error"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid event type. Valid: session.created, message.received, message.count, session.error, session.compressed, message.sent"})
 		return
 	}
 	// Validate target session exists

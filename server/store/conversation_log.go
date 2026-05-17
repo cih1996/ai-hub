@@ -23,6 +23,19 @@ func AddConversationLog(logItem *model.ConversationLog) error {
 	return nil
 }
 
+func GetConversationLogs(sessionID int64) ([]model.ConversationLog, error) {
+	rows, err := DB.Query(
+		`SELECT id, session_id, message_id, role, content, created_at
+		 FROM conversation_logs WHERE session_id = ? ORDER BY id ASC`,
+		sessionID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanConversationLogs(rows)
+}
+
 // GetConversationLogsPaginated returns archived logs with cursor-based pagination.
 // beforeID > 0 returns older logs (id < beforeID). Results are ordered ASC.
 func GetConversationLogsPaginated(sessionID int64, beforeID int64, limit int) ([]model.ConversationLog, error) {

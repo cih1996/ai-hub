@@ -58,20 +58,12 @@ func main() {
 		exec.Command("cmd", "/c", "chcp", "65001").Run()
 	}
 
-	// Self-install mode: when run without arguments, check and install/upgrade
-	if len(os.Args) == 1 {
-		if runSelfInstall() {
-			return
-		}
-		// If self-install returns false, continue to start server
-	}
-
 	// CLI mode detection: if first arg is not a server flag, route to CLI
-	// Server flags: -port, -data, --data-dir
+	// Server flags: -port, --port, -data, --data, --data-dir
 	// CLI triggers: --version, --help, or any non-flag argument
 	if len(os.Args) > 1 {
 		firstArg := os.Args[1]
-		isServerFlag := firstArg == "-port" || firstArg == "-data" || firstArg == "--data-dir"
+		isServerFlag := firstArg == "-port" || firstArg == "--port" || firstArg == "-data" || firstArg == "--data" || firstArg == "--data-dir"
 		if !isServerFlag {
 			cli.Version = Version
 			os.Exit(cli.Run(os.Args[1:]))
@@ -158,19 +150,6 @@ func main() {
 	// Clean up legacy ~/.claude/rules/ and ~/.claude/skills/ (migrated to ~/.ai-hub/ since v1.17.0)
 	cleanLegacyClaudeDirs()
 
-	// Init Go-native vector engine (no Python dependency)
-	core.InitVectorEngine("")
-	defer func() {
-		if core.Vector != nil {
-			core.Vector.Stop()
-		}
-	}()
-
-	// Start vector file watcher
-	vectorWatcher := core.StartVectorWatcher()
-	core.Watcher = vectorWatcher // expose globally for SyncFileToVector
-	defer vectorWatcher.Stop()
-
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.RedirectTrailingSlash = false
@@ -199,6 +178,8 @@ func main() {
 		v1.PUT("/providers/:id/default", api.SetProviderDefault)
 		v1.DELETE("/providers/:id", api.DeleteProvider)
 		v1.GET("/claude/auth-status", api.GetClaudeAuthStatus)
+		v1.GET("/compression/settings", api.GetCompressionSettings)
+		v1.PUT("/compression/settings", api.PutCompressionSettings)
 
 		// Sessions
 		v1.GET("/sessions", api.ListSessions)
@@ -209,9 +190,9 @@ func main() {
 		v1.GET("/sessions/:id/messages", api.GetMessages)
 		v1.GET("/sessions/:id/logs", api.GetConversationLogs)
 		v1.DELETE("/sessions/:id/messages", api.TruncateMessages)
-		v1.POST("/sessions/:id/compress", api.CompressSession)
 		v1.POST("/sessions/:id/reset", api.ResetSession)
 		v1.GET("/sessions/:id/last-request", api.GetLastRawRequest)
+		v1.GET("/sessions/:id/context-usage", api.GetSessionContextUsage)
 		v1.GET("/sessions/:id/messages/:msg_id", api.GetMessageWithContext)
 		v1.PUT("/sessions/:id/provider", api.SwitchProvider)
 
@@ -253,6 +234,10 @@ func main() {
 		v1.DELETE("/files", api.DeleteFile)
 		v1.GET("/files/variables", api.GetTemplateVars)
 		v1.GET("/files/default", api.GetDefaultFile)
+		v1.GET("/files/scoped/list", api.ListScopedFiles)
+		v1.POST("/files/scoped/read", api.ReadScopedFile)
+		v1.POST("/files/scoped/write", api.WriteScopedFile)
+		v1.POST("/files/scoped/delete", api.DeleteScopedFile)
 
 		// Project-level rules
 		v1.GET("/project-rules", api.ListProjectRules)
@@ -307,25 +292,6 @@ func main() {
 		v1.POST("/webhook/feishu", api.HandleFeishuWebhook)
 		v1.POST("/webhook/qq", api.HandleQQWebhook)
 
-		// Vector engine (Skill tools)
-		v1.POST("/vector/search", api.SearchVector)
-		v1.POST("/vector/search_memory", api.SearchMemory)
-		v1.POST("/vector/read_memory", api.ReadMemory)
-		v1.POST("/vector/write_memory", api.WriteMemory)
-		v1.POST("/vector/write", api.WriteVector)
-		v1.POST("/vector/delete_memory", api.DeleteMemory)
-		v1.POST("/vector/delete", api.DeleteVector)
-		v1.GET("/vector/stats", api.StatsVector)
-		v1.GET("/vector/status", api.VectorStatus)
-		v1.GET("/vector/health", api.VectorHealth)
-		v1.POST("/vector/restart", api.RestartVector)
-		v1.GET("/vector/list", api.ListVectorFiles)
-		v1.GET("/vector/list_files", api.ListVectorFilesRich) // Issue #109: rich list with preview+type+source_session_id
-		v1.GET("/vector/list_memory", api.ListMemoryFiles)
-		v1.POST("/vector/read", api.ReadVector)
-		v1.POST("/vector/update_metadata", api.UpdateVectorMetadata)
-		v1.POST("/vector/get_doc", api.GetVectorDoc)
-
 		// Export / Import
 		v1.GET("/export/session/:id", api.ExportSession)
 		v1.GET("/export/team/:name", api.ExportTeam)
@@ -339,13 +305,8 @@ func main() {
 		v1.GET("/token-usage/ranking", api.GetTokenUsageRanking)
 		v1.GET("/token-usage/hourly", api.GetHourlyTokenUsage)
 
-		// Global settings
-		v1.GET("/settings/compress", api.GetCompressSettings)
-		v1.PUT("/settings/compress", api.UpdateCompressSettings)
-
 		// System management (daemon, reload)
 		v1.POST("/shutdown", api.Shutdown)
-		v1.POST("/reload/vector", api.ReloadVector)
 		v1.POST("/reload/config", api.ReloadConfig)
 		v1.POST("/reload/skills", api.ReloadSkills)
 
@@ -370,16 +331,7 @@ func main() {
 		v1.GET("/transfer/download/:id", api.TransferDownload)
 		v1.DELETE("/transfer/delete/:id", api.TransferDelete)
 
-		// Injection router (Issue #210: structured memory injection)
-		v1.GET("/injection-router", api.ListInjectionRoutes)
-		v1.POST("/injection-router", api.CreateInjectionRoute)
-		v1.PUT("/injection-router/:id", api.UpdateInjectionRoute)
-		v1.DELETE("/injection-router/:id", api.DeleteInjectionRoute)
 
-		// Structured memory (Issue #210)
-		v1.GET("/structured-memory", api.ListStructuredMemory)
-		v1.GET("/structured-memory/:category", api.GetStructuredMemory)
-		v1.PUT("/structured-memory/:category", api.PutStructuredMemory)
 
 		// Hooks (Issue #211: event hook system)
 		v1.GET("/hooks", api.ListHooks)
@@ -518,10 +470,6 @@ func main() {
 		log.Println("[main] shutting down...")
 		api.QQWSMgr.Shutdown()
 		core.StopServiceManager()
-		if core.Vector != nil {
-			core.Vector.Stop()
-		}
-		vectorWatcher.Stop()
 		core.Pool.ShutdownPool()
 		store.Close()
 		os.Exit(0)
@@ -549,9 +497,14 @@ func main() {
 	}
 }
 
-// installBuiltinSkills copies embedded skills/* to ~/.ai-hub/skills/ on every startup.
+// installBuiltinSkills copies embedded skills/* to ~/.ai-hub/skills/ on startup.
+// Preserves user modifications: if a file already exists, it is NEVER overwritten,
+// regardless of whether the content matches the embedded version. This ensures
+// that user edits to built-in skills survive restarts.
 func installBuiltinSkills(dataDir string) {
 	targetBase := filepath.Join(dataDir, "skills")
+	installed := 0
+	skipped := 0
 
 	fs.WalkDir(builtinSkillsFS, "skills", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -568,15 +521,21 @@ func installBuiltinSkills(dataDir string) {
 			os.MkdirAll(target, 0755)
 			return nil
 		}
+		// Skip if target already exists (preserve user modifications)
+		if _, err := os.Stat(target); err == nil {
+			skipped++
+			return nil
+		}
 		data, err := builtinSkillsFS.ReadFile(path)
 		if err != nil {
 			return nil
 		}
 		os.MkdirAll(filepath.Dir(target), 0755)
 		os.WriteFile(target, data, 0644)
+		installed++
 		return nil
 	})
-	log.Printf("[skills] built-in skills installed to %s", targetBase)
+	log.Printf("[skills] built-in skills: %d installed, %d skipped (already exist) → %s", installed, skipped, targetBase)
 }
 
 // migrateNestedRules moves files from rules/rules/ to rules/ (flatten).
@@ -678,10 +637,9 @@ func cleanLegacyClaudeDirs() {
 	}
 }
 
-// installClaudeRules copies embedded claude/* to the rules directory (~/.ai-hub/rules/)
-// on every startup (always overwrite, like installBuiltinSkills). This ensures system-level
-// rule updates (e.g. new sections, self-correction mechanism) are applied to all
-// existing installations. User customisations should live in separate rule-*.md files.
+// installClaudeRules copies embedded claude/* to the rules directory (~/.ai-hub/rules/).
+// Preserves user modifications: if a rule file already exists, it is NEVER overwritten.
+// User customisations in rule-*.md files are unaffected (separate files).
 func installClaudeRules(dataDir string) {
 	targetBase := filepath.Join(dataDir, "rules")
 	log.Printf("[rules] template dir: %s", targetBase)
@@ -696,33 +654,36 @@ func installClaudeRules(dataDir string) {
 		}
 	}
 
-	count := 0
+	installed := 0
+	skipped := 0
 	fs.WalkDir(claudeRulesFS, "claude", func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return nil
 		}
 		rel, _ := filepath.Rel("claude", p)
 		target := filepath.Join(targetBase, rel)
-		log.Printf("[rules] embed path=%s rel=%s target=%s", p, rel, target)
+
+		// Skip if target already exists (preserve user modifications)
+		if _, statErr := os.Stat(target); statErr == nil {
+			skipped++
+			return nil
+		}
 
 		data, err := claudeRulesFS.ReadFile(p)
 		if err != nil {
-			log.Printf("[rules] read embed error: %v", err)
 			return nil
 		}
 		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
-			log.Printf("[rules] mkdir error: %v", err)
 			return nil
 		}
 		if err := os.WriteFile(target, data, 0644); err != nil {
-			log.Printf("[rules] write error: %v", err)
 			return nil
 		}
-		log.Printf("[rules] installed/updated template %s (%d bytes)", target, len(data))
-		count++
+		log.Printf("[rules] installed template %s (%d bytes)", target, len(data))
+		installed++
 		return nil
 	})
-	log.Printf("[rules] done, installed/updated %d template(s)", count)
+	log.Printf("[rules] done: %d installed, %d skipped (already exist)", installed, skipped)
 }
 
 // installCLIBinary installs CLI binary to ~/.ai-hub/bin/ for Claude subprocess access.

@@ -33,7 +33,7 @@ func CreateSession(s *model.Session) error {
 
 func ListSessions() ([]model.Session, error) {
 	// Exclude shadow sessions from normal listing
-	rows, err := DB.Query(`SELECT id, title, icon, provider_id, claude_session_id, work_dir, group_name, last_compress_msg_id, attention_enabled, attention_rules, is_shadow, parent_id, health_score, health_updated_at, correction_count, drift_count, auto_reset_threshold, created_at, updated_at FROM sessions WHERE is_shadow = 0 ORDER BY updated_at DESC`)
+	rows, err := DB.Query(`SELECT id, title, icon, provider_id, claude_session_id, work_dir, group_name, attention_enabled, attention_rules, is_shadow, parent_id, health_score, health_updated_at, correction_count, drift_count, created_at, updated_at FROM sessions WHERE is_shadow = 0 ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -41,7 +41,7 @@ func ListSessions() ([]model.Session, error) {
 	var list []model.Session
 	for rows.Next() {
 		var s model.Session
-		if err := rows.Scan(&s.ID, &s.Title, &s.Icon, &s.ProviderID, &s.ClaudeSessionID, &s.WorkDir, &s.GroupName, &s.LastCompressMsgID, &s.AttentionEnabled, &s.AttentionRules, &s.IsShadow, &s.ParentID, &s.HealthScore, &s.HealthUpdatedAt, &s.CorrectionCount, &s.DriftCount, &s.AutoResetThreshold, &s.CreatedAt, &s.UpdatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.Title, &s.Icon, &s.ProviderID, &s.ClaudeSessionID, &s.WorkDir, &s.GroupName, &s.AttentionEnabled, &s.AttentionRules, &s.IsShadow, &s.ParentID, &s.HealthScore, &s.HealthUpdatedAt, &s.CorrectionCount, &s.DriftCount, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			return nil, err
 		}
 		list = append(list, s)
@@ -52,8 +52,8 @@ func ListSessions() ([]model.Session, error) {
 func GetSession(id int64) (*model.Session, error) {
 	var s model.Session
 	err := DB.QueryRow(
-		`SELECT id, title, icon, provider_id, claude_session_id, work_dir, group_name, last_compress_msg_id, attention_enabled, attention_rules, is_shadow, parent_id, health_score, health_updated_at, correction_count, drift_count, auto_reset_threshold, created_at, updated_at FROM sessions WHERE id = ?`, id,
-	).Scan(&s.ID, &s.Title, &s.Icon, &s.ProviderID, &s.ClaudeSessionID, &s.WorkDir, &s.GroupName, &s.LastCompressMsgID, &s.AttentionEnabled, &s.AttentionRules, &s.IsShadow, &s.ParentID, &s.HealthScore, &s.HealthUpdatedAt, &s.CorrectionCount, &s.DriftCount, &s.AutoResetThreshold, &s.CreatedAt, &s.UpdatedAt)
+		`SELECT id, title, icon, provider_id, claude_session_id, work_dir, group_name, attention_enabled, attention_rules, is_shadow, parent_id, health_score, health_updated_at, correction_count, drift_count, created_at, updated_at FROM sessions WHERE id = ?`, id,
+	).Scan(&s.ID, &s.Title, &s.Icon, &s.ProviderID, &s.ClaudeSessionID, &s.WorkDir, &s.GroupName, &s.AttentionEnabled, &s.AttentionRules, &s.IsShadow, &s.ParentID, &s.HealthScore, &s.HealthUpdatedAt, &s.CorrectionCount, &s.DriftCount, &s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -63,8 +63,8 @@ func GetSession(id int64) (*model.Session, error) {
 func UpdateSession(s *model.Session) error {
 	s.UpdatedAt = time.Now()
 	_, err := DB.Exec(
-		`UPDATE sessions SET title=?, icon=?, provider_id=?, group_name=?, auto_reset_threshold=?, updated_at=? WHERE id=?`,
-		s.Title, s.Icon, s.ProviderID, s.GroupName, s.AutoResetThreshold, s.UpdatedAt, s.ID,
+		`UPDATE sessions SET title=?, icon=?, provider_id=?, group_name=?, updated_at=? WHERE id=?`,
+		s.Title, s.Icon, s.ProviderID, s.GroupName, s.UpdatedAt, s.ID,
 	)
 	return err
 }
@@ -396,13 +396,6 @@ func UpdateClaudeSessionID(id int64, newUUID string) error {
 	return err
 }
 
-// UpdateLastCompressMsgID records the latest message ID at compress time,
-// so subsequent auto-compress checks only count messages/tokens after this point.
-func UpdateLastCompressMsgID(sessionID int64, msgID int64) error {
-	_, err := DB.Exec(`UPDATE sessions SET last_compress_msg_id=?, updated_at=? WHERE id=?`, msgID, time.Now(), sessionID)
-	return err
-}
-
 func truncateTitle(s string) string {
 	for i, c := range s {
 		if c == '\n' || c == '\r' {
@@ -480,11 +473,4 @@ func ResetSessionMessages(sessionID int64, keepLast int) (int64, error) {
 		return 0, err
 	}
 	return result.RowsAffected()
-}
-
-// UpdateAutoResetThreshold sets the auto_reset_threshold for a session.
-func UpdateAutoResetThreshold(sessionID int64, threshold int) error {
-	_, err := DB.Exec(`UPDATE sessions SET auto_reset_threshold=?, updated_at=? WHERE id=?`,
-		threshold, time.Now(), sessionID)
-	return err
 }

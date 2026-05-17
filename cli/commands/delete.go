@@ -72,9 +72,10 @@ Examples:
 	reqBody := map[string]interface{}{
 		"scope":     scope,
 		"file_name": filename,
+		"type":      "memory",
 	}
 
-	respData, err := c.POST("/vector/delete", reqBody)
+	respData, err := c.POST("/files/scoped/delete", reqBody)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 1

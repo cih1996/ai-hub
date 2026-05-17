@@ -116,7 +116,7 @@ onMounted(() => {
   <div class="teams-view">
     <div class="teams-header">
       <div>
-        <h2 class="teams-title">数字员工</h2>
+        <h2 class="teams-title">团队</h2>
         <p class="teams-desc">点击团队展开成员列表，点击成员进入对话</p>
       </div>
     </div>

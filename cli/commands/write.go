@@ -82,14 +82,9 @@ Examples:
 		"scope":     scope,
 		"file_name": filename,
 		"content":   content,
+		"type":      "memory",
 	}
-
-	// Add schema if specified
-	if schema != "" {
-		reqBody["schema"] = schema
-	}
-
-	respData, err := c.POST("/vector/write", reqBody)
+	respData, err := c.POST("/files/scoped/write", reqBody)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 1
@@ -97,6 +92,9 @@ Examples:
 
 	var resp map[string]interface{}
 	json.Unmarshal(respData, &resp)
+	if schema != "" {
+		fmt.Fprintf(os.Stderr, "Warning: --schema has been removed from file-based memory writes and was ignored\n")
+	}
 	fmt.Printf("Written: %s (level=%s)\n", filename, level)
 	return 0
 }

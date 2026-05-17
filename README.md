@@ -125,7 +125,7 @@ make release-all
 - **🔌 多 Provider 支持** — Claude Code CLI + 任意 OpenAI 兼容 API
 - **💬 多渠道接入** — QQ（NapCat）、飞书，消息分流到不同会话
 - **⏰ 定时触发器** — 定时向会话发送指令，支持 cron 表达式
-- **📝 记忆库** — 会话级/团队级/全局级知识存储，支持语义搜索
+- **📝 记忆库** — 会话级/团队级/全局级知识存储，支持文件名和正文检索
 - **🛠️ Skill 系统** — 可扩展的技能模块，按需加载
 - **🔄 进程池管理** — 持久进程复用，MCP 连接保持
 
@@ -181,7 +181,7 @@ Base URL: `http://localhost:9527/api/v1`
 - **后端**：Go、Gin、SQLite、gorilla/websocket
 - **前端**：Vue 3、TypeScript、Vite、Pinia
 - **AI 引擎**：Claude Code CLI、OpenAI 兼容 API
-- **向量引擎**：Go 原生实现（Cybertron + bge-small-zh-v1.5）
+- **记忆存储**：目录/文件驱动的三层作用域（session/team/global）
 
 ## Star History
 

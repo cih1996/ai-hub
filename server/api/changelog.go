@@ -76,9 +76,6 @@ func RollbackChangelog(c *gin.Context) {
 		return
 	}
 
-	// Sync to vector
-	core.SyncFileToVector(req.Scope, path, 0)
-
 	// Record the rollback as a new changelog entry
 	rollbackCl := &model.MemoryChangelog{
 		FileName:   req.FileName,
@@ -92,8 +89,8 @@ func RollbackChangelog(c *gin.Context) {
 	store.AddChangelog(rollbackCl)
 
 	c.JSON(http.StatusOK, gin.H{
-		"ok":              true,
-		"rolled_back_to":  req.Version,
-		"new_version":     rollbackCl.Version,
+		"ok":             true,
+		"rolled_back_to": req.Version,
+		"new_version":    rollbackCl.Version,
 	})
 }

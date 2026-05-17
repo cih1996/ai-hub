@@ -6,7 +6,6 @@ import { useChatStore } from '../stores/chat'
 import { useRouter, useRoute } from 'vue-router'
 import * as api from '../composables/api'
 import { useTheme, type ThemeMode } from '../composables/theme'
-import TeamDetailModal from './TeamDetailModal.vue'
 
 const isMobile = inject<Ref<boolean>>('isMobile', ref(false))
 const closeSidebar = inject<() => void>('closeSidebar', () => {})
@@ -25,7 +24,7 @@ const store = useChatStore()
 const router = useRouter()
 const route = useRoute()
 
-const deleteTarget = ref<Session | null>(null)
+const deleteTarget = ref<{ type: 'session' | 'team', data: Session | string, title: string } | null>(null)
 const version = ref('')
 
 // Highlight animation state
@@ -59,14 +58,34 @@ watch(() => store.inputFocusTrigger, async () => {
 })
 
 // Context menu
-const ctxMenu = ref<{ x: number; y: number; session: Session } | null>(null)
+const ctxMenu = ref<{ x: number; y: number; session: Session, isTeam: boolean, teamGroupKey?: string } | null>(null)
 
-function openCtxMenu(e: MouseEvent, s: Session) {
-  ctxMenu.value = { x: e.clientX, y: e.clientY, session: s }
+function openCtxMenu(e: MouseEvent, s: Session, isTeam = false, teamGroupKey?: string) {
+  ctxMenu.value = { x: e.clientX, y: e.clientY, session: s, isTeam, teamGroupKey }
 }
 
 function closeCtxMenu() {
   ctxMenu.value = null
+}
+
+function handleExportSession() {
+  if (ctxMenu.value?.session) {
+    exportSession(ctxMenu.value.session)
+  }
+}
+
+function handleDeleteSession() {
+  if (ctxMenu.value?.session) {
+    deleteTarget.value = { type: 'session', data: ctxMenu.value.session, title: ctxMenu.value.session.title }
+    closeCtxMenu()
+  }
+}
+
+function handleDeleteTeam() {
+  if (ctxMenu.value?.teamGroupKey) {
+    deleteTarget.value = { type: 'team', data: ctxMenu.value.teamGroupKey, title: '整个团队及所有成员会话' }
+    closeCtxMenu()
+  }
 }
 
 function exportSession(s: Session) {
@@ -81,8 +100,6 @@ function exportSession(s: Session) {
 
 // Import
 
-// Team detail modal
-const teamDetailGroup = ref('')  // non-empty = show modal for this group_name
 
 // New chat dialog
 const showNewChatDialog = ref(false)
@@ -108,43 +125,78 @@ onMounted(async () => {
 
 function confirmDelete() {
   if (deleteTarget.value) {
-    store.deleteSessionById(deleteTarget.value.id)
+    if (deleteTarget.value.type === 'session') {
+      const session = deleteTarget.value.data as Session
+      store.deleteSessionById(session.id)
+    } else if (deleteTarget.value.type === 'team') {
+      const groupKey = deleteTarget.value.data as string
+      // Find all sessions in this team and delete them
+      const sessionsToDelete = store.sessions.filter(s => s.group_name === groupKey)
+      for (const s of sessionsToDelete) {
+        store.deleteSessionById(s.id)
+      }
+    }
     deleteTarget.value = null
   }
 }
 
 const isTeams = computed(() => route.path.startsWith('/teams'))
+const isRules = computed(() => route.path.startsWith('/rules'))
+const isExtensions = computed(() => route.path.startsWith('/extensions'))
 const isServices = computed(() => route.path.startsWith('/services'))
 
 interface SessionGroup {
   key: string
   label: string
   sessions: Session[]
+  isTeam: boolean
 }
 
 const groupedSessions = computed<SessionGroup[]>(() => {
-  const groups = new Map<string, Session[]>()
+  const groups = new Map<string, { sessions: Session[], isTeam: boolean }>()
   for (const s of store.sessions) {
-    // Prefer group_name, fall back to work_dir
-    const key = s.group_name || s.work_dir || ''
-    if (!groups.has(key)) groups.set(key, [])
-    groups.get(key)!.push(s)
+    if (s.group_name) {
+      const key = s.group_name
+      if (!groups.has(key)) groups.set(key, { sessions: [], isTeam: true })
+      groups.get(key)!.sessions.push(s)
+    } else if (s.work_dir) {
+      const key = s.work_dir
+      if (!groups.has(key)) groups.set(key, { sessions: [], isTeam: false })
+      groups.get(key)!.sessions.push(s)
+    } else {
+      if (!groups.has('')) groups.set('', { sessions: [], isTeam: false })
+      groups.get('')!.sessions.push(s)
+    }
   }
-  const result: SessionGroup[] = []
+  
+  // Sort sessions inside groups by id so the first member is consistent
+  for (const g of groups.values()) {
+    g.sessions.sort((a, b) => a.id - b.id)
+  }
+
+  const individualGroups: SessionGroup[] = []
+  const teamGroups: SessionGroup[] = []
+
   // Default group (no group_name and no work_dir) first
   const defaultGroup = groups.get('')
   if (defaultGroup) {
-    result.push({ key: '', label: '默认', sessions: defaultGroup })
+    individualGroups.push({ key: '', label: '默认', sessions: defaultGroup.sessions, isTeam: false })
     groups.delete('')
   }
   // Other groups sorted alphabetically
   const sortedKeys = [...groups.keys()].sort()
   for (const key of sortedKeys) {
-    // If it looks like a path, shorten it; otherwise use as-is
-    const label = key.startsWith('/') ? key.replace(/^\/Users\/[^/]+/, '~') : key
-    result.push({ key, label, sessions: groups.get(key)! })
+    const isTeam = groups.get(key)!.isTeam
+    // If it looks like a path and is not a team, shorten it; otherwise use as-is
+    const label = (!isTeam && key.startsWith('/')) ? key.replace(/^\/Users\/[^/]+/, '~') : key
+    const group = { key, label, sessions: groups.get(key)!.sessions, isTeam }
+    if (isTeam) {
+      teamGroups.push(group)
+    } else {
+      individualGroups.push(group)
+    }
   }
-  return result
+  return [...individualGroups, ...teamGroups]
 })
 
 // Expanded state for each group (persisted in localStorage)
@@ -282,8 +334,25 @@ onMounted(async () => {
           <path d="M23 21v-2a4 4 0 00-3-3.87"/>
           <path d="M16 3.13a4 4 0 010 7.75"/>
         </svg>
-        <span>数字员工</span>
+        <span>团队</span>
         <span v-if="store.busySessionCount > 0" class="nav-badge busy-badge">{{ store.busySessionCount }}</span>
+      </button>
+      <button class="nav-item" :class="{ active: isRules }" @click="navTo('/rules')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+          <line x1="16" y1="13" x2="8" y2="13"/>
+          <line x1="16" y1="17" x2="8" y2="17"/>
+          <polyline points="10 9 9 9 8 9"/>
+        </svg>
+        <span>规则</span>
+      </button>
+      <button class="nav-item" :class="{ active: isExtensions }" @click="navTo('/extensions')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="16 18 22 12 16 6"/>
+          <polyline points="8 6 2 12 8 18"/>
+        </svg>
+        <span>技能</span>
       </button>
       <button class="nav-item" :class="{ active: isServices }" @click="navTo('/services')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -292,74 +361,99 @@ onMounted(async () => {
           <path d="M9 12H4s.55-3.03 2-4c1.62-1.08 3 0 3 0"/>
           <path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-3 0-3"/>
         </svg>
-        <span>我的作品</span>
+        <span>服务</span>
       </button>
     </div>
 
     <div class="session-list">
-      <template v-for="group in groupedSessions" :key="group.key">
-        <!-- Only show group label for named teams (not default/empty group) -->
-        <div
-          v-if="group.key !== ''"
-          class="group-label group-label-clickable"
-          @click="toggleGroupCollapse(group.key)"
-        >
-          <svg class="group-expand-icon" :class="{ expanded: !isGroupCollapsed(group.key) }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="9 18 15 12 9 6"/>
-          </svg>
-          <span class="group-label-text">{{ group.label }}</span>
-          <span class="group-member-count">{{ group.sessions.length }}</span>
-          <svg class="group-label-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" @click.stop="teamDetailGroup = group.key" title="查看团队详情">
-            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-          </svg>
+      <template v-for="(group, idx) in groupedSessions" :key="group.key">
+        <div v-if="idx > 0 && group.isTeam && !groupedSessions[idx-1]?.isTeam" class="sidebar-divider">
+          <span>团队会话</span>
         </div>
-        <!-- Sessions (hidden if group is collapsed) -->
-        <template v-if="group.key === '' || !isGroupCollapsed(group.key)">
+        <!-- Team Group: Acts as a single clickable item -->
+        <template v-if="group.isTeam && group.sessions.length > 0">
           <div
-            v-for="s in group.sessions"
-            :key="s.id"
-            :data-session-id="s.id"
             class="session-item"
-            :class="{ active: s.id === store.currentSessionId, highlight: s.id === highlightSessionId, streaming: s.streaming }"
-            @click="selectSession(s.id)"
-            @contextmenu.prevent="openCtxMenu($event, s)"
+            :class="{ active: group.sessions.some(s => s.id === store.currentSessionId), highlight: group.sessions.some(s => s.id === highlightSessionId) }"
+            @click="selectSession(group.sessions[0]!.id)"
+            @contextmenu.prevent="openCtxMenu($event, group.sessions[0]!, true, group.key)"
           >
-            <img :src="getSessionIcon(s)" class="session-icon" :class="{ 'icon-pulse': s.streaming }" alt="" />
+            <img :src="getSessionIcon(group.sessions[0]!)" class="session-icon" alt="" />
             <div class="session-info">
               <div class="session-title-row">
-                <span
-                  v-if="s.process_alive"
-                  class="process-dot"
-                  :class="s.process_state === 'busy' ? 'busy' : 'idle'"
-                  :title="s.process_state === 'busy' ? '运行中' : '空闲'"
-                ></span>
-                <span
-                  v-if="s.health_score"
-                  class="health-dot"
-                  :class="s.health_score"
-                  :title="'健康度: ' + s.health_score + (s.correction_count ? ' | 纠正: ' + s.correction_count : '')"
-                ></span>
-                <svg v-if="s.has_triggers" class="trigger-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
-                </svg>
-                <div class="session-title">{{ s.title }}</div>
-                <span class="session-id">{{ s.id }}</span>
+                <span class="team-badge">团队</span>
+                <div class="session-title">{{ group.label }}</div>
+                <span class="group-member-count">{{ group.sessions.length }}</span>
               </div>
               <div class="session-time">
-              {{ formatTime(s.updated_at) }}
-              <span v-if="store.sessionTokenTotals?.[s.id]" class="session-token-tag" :title="(store.sessionTokenTotals![s.id] ?? 0).toLocaleString() + ' tokens'">
-                {{ formatTokens(store.sessionTokenTotals![s.id] ?? 0) }}
-              </span>
-              <span v-if="s.error_count" class="error-badge" :title="s.error_count + ' errors'">{{ s.error_count }}</span>
-              <span v-if="s.warning_count" class="warning-badge" :title="s.warning_count + ' warnings'">{{ s.warning_count }}</span>
+                {{ formatTime(group.sessions[0]!.updated_at) }}
+              </div>
             </div>
           </div>
-          <button class="btn-delete" @click.stop="deleteTarget = s" title="Delete">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M18 6L6 18M6 6l12 12"/>
+        </template>
+
+        <!-- Non-team group -->
+        <template v-else>
+          <!-- Only show group label for named paths (not default/empty group) -->
+          <div
+            v-if="group.key !== ''"
+            class="group-label group-label-clickable"
+            @click="toggleGroupCollapse(group.key)"
+          >
+            <svg class="group-expand-icon" :class="{ expanded: !isGroupCollapsed(group.key) }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="9 18 15 12 9 6"/>
             </svg>
-          </button>
-        </div>
+            <span class="group-label-text">{{ group.label }}</span>
+            <span class="group-member-count">{{ group.sessions.length }}</span>
+          </div>
+          <!-- Sessions (hidden if group is collapsed) -->
+          <template v-if="group.key === '' || !isGroupCollapsed(group.key)">
+            <div
+              v-for="s in group.sessions"
+              :key="s.id"
+              :data-session-id="s.id"
+              class="session-item"
+              :class="{ active: s.id === store.currentSessionId, highlight: s.id === highlightSessionId, streaming: s.streaming }"
+              @click="selectSession(s.id)"
+              @contextmenu.prevent="openCtxMenu($event, s)"
+            >
+              <img :src="getSessionIcon(s)" class="session-icon" :class="{ 'icon-pulse': s.streaming }" alt="" />
+              <div class="session-info">
+                <div class="session-title-row">
+                  <span
+                    v-if="s.process_alive"
+                    class="process-dot"
+                    :class="s.process_state === 'busy' ? 'busy' : 'idle'"
+                    :title="s.process_state === 'busy' ? '运行中' : '空闲'"
+                  ></span>
+                  <span
+                    v-if="s.health_score"
+                    class="health-dot"
+                    :class="s.health_score"
+                    :title="'健康度: ' + s.health_score + (s.correction_count ? ' | 纠正: ' + s.correction_count : '')"
+                  ></span>
+                  <svg v-if="s.has_triggers" class="trigger-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                  </svg>
+                  <div class="session-title">{{ s.title }}</div>
+                  <span class="session-id">{{ s.id }}</span>
+                </div>
+                <div class="session-time">
+                {{ formatTime(s.updated_at) }}
+                <span v-if="store.sessionTokenTotals?.[s.id]" class="session-token-tag" :title="(store.sessionTokenTotals![s.id] ?? 0).toLocaleString() + ' tokens'">
+                  {{ formatTokens(store.sessionTokenTotals![s.id] ?? 0) }}
+                </span>
+                <span v-if="s.error_count" class="error-badge" :title="s.error_count + ' errors'">{{ s.error_count }}</span>
+                <span v-if="s.warning_count" class="warning-badge" :title="s.warning_count + ' warnings'">{{ s.warning_count }}</span>
+              </div>
+            </div>
+            <button class="btn-delete" @click.stop="deleteTarget = { type: 'session', data: s, title: s.title }" title="Delete">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 6L6 18M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+          </template>
         </template>
       </template>
       <div v-if="store.sessions.length === 0" class="no-sessions">
@@ -390,7 +484,7 @@ onMounted(async () => {
       <div v-if="deleteTarget" class="modal-overlay" @click="deleteTarget = null">
         <div class="modal-box" @click.stop>
           <p class="modal-title">确认删除</p>
-          <p class="modal-desc">删除会话「{{ deleteTarget.title }}」？此操作不可撤销。</p>
+          <p class="modal-desc">删除「{{ deleteTarget.title }}」？此操作不可撤销。</p>
           <div class="modal-actions">
             <button class="modal-btn cancel" @click="deleteTarget = null">取消</button>
             <button class="modal-btn confirm" @click="confirmDelete">删除</button>
@@ -439,30 +533,33 @@ onMounted(async () => {
     <Teleport to="body">
       <div v-if="ctxMenu" class="ctx-overlay" @click="closeCtxMenu" @contextmenu.prevent="closeCtxMenu">
         <div class="ctx-menu" :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }" @click.stop>
-          <button class="ctx-item" @click="exportSession(ctxMenu.session)">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-              <polyline points="17 8 12 3 7 8"/>
-              <line x1="12" y1="3" x2="12" y2="15"/>
-            </svg>
-            <span>导出会话</span>
-          </button>
-          <button class="ctx-item ctx-danger" @click="closeCtxMenu(); deleteTarget = ctxMenu!.session">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M18 6L6 18M6 6l12 12"/>
-            </svg>
-            <span>删除会话</span>
-          </button>
+          <template v-if="!ctxMenu.isTeam">
+            <button class="ctx-item" @click="handleExportSession">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+              <span>导出会话</span>
+            </button>
+            <button class="ctx-item ctx-danger" @click="handleDeleteSession">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 6L6 18M6 6l12 12"/>
+              </svg>
+              <span>删除会话</span>
+            </button>
+          </template>
+          <template v-else>
+            <button class="ctx-item ctx-danger" @click="handleDeleteTeam">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 6L6 18M6 6l12 12"/>
+              </svg>
+              <span>删除团队及所有会话</span>
+            </button>
+          </template>
         </div>
       </div>
     </Teleport>
-
-    <!-- Team detail modal -->
-    <TeamDetailModal
-      :visible="!!teamDetailGroup"
-      :group-name="teamDetailGroup"
-      @close="teamDetailGroup = ''"
-    />
   </aside>
 </template>
 
@@ -593,6 +690,16 @@ onMounted(async () => {
   opacity: 1;
   background: var(--bg-hover);
 }
+.team-badge {
+  font-size: 10px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 1px 4px;
+  border-radius: 4px;
+  margin-right: 4px;
+  flex-shrink: 0;
+  line-height: 1.2;
+}
 .group-expand-icon {
   flex-shrink: 0;
   transition: transform 0.2s ease;
@@ -608,6 +715,8 @@ onMounted(async () => {
   border-radius: 10px;
   margin-left: auto;
   margin-right: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .group-collapse-btn {
   margin-left: auto;
@@ -765,7 +874,7 @@ onMounted(async () => {
   background: rgba(217, 119, 6, 0.12);
 }
 .btn-delete {
-  opacity: 0;
+  opacity: 0.4;
   width: 24px;
   height: 24px;
   display: flex;
@@ -969,6 +1078,25 @@ onMounted(async () => {
 }
 .ctx-item.ctx-danger:hover {
   background: rgba(239, 68, 68, 0.08);
+}
+.sidebar-divider {
+  display: flex;
+  align-items: center;
+  margin: 16px 12px 8px 12px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.sidebar-divider::before,
+.sidebar-divider::after {
+  content: '';
+  flex: 1;
+  border-bottom: 1px solid var(--border);
+}
+.sidebar-divider span {
+  padding: 0 8px;
 }
 /* Mobile: show delete button always (no hover on touch) */
 @media (max-width: 768px) {

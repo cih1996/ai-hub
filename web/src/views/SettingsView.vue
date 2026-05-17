@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, watch, reactive } from 'vue'
+import { computed, ref, onMounted, watch } from 'vue'
 import { useChatStore } from '../stores/chat'
-import type { Provider, CompressSettings } from '../types'
+import type { Provider, CompressionSettings } from '../types'
 import * as api from '../composables/api'
 import type { ClaudeAuthStatus } from '../composables/api'
 
@@ -19,6 +19,7 @@ type ProviderForm = {
   api_key: string
   model_id: string
   is_default: boolean
+  max_tokens: number
 }
 
 const form = ref<ProviderForm>({
@@ -30,10 +31,17 @@ const form = ref<ProviderForm>({
   api_key: '',
   model_id: '',
   is_default: false,
+  max_tokens: 0,
 })
 
 const authStatus = ref<ClaudeAuthStatus | null>(null)
 const authLoading = ref(false)
+const compressionSaving = ref(false)
+const compressionSettings = ref<CompressionSettings>({
+  enabled: false,
+  threshold_percent: 80,
+  system_prompt: '',
+})
 
 async function loadAuthStatus() {
   authLoading.value = true
@@ -43,8 +51,12 @@ async function loadAuthStatus() {
   finally { authLoading.value = false }
 }
 
+async function loadCompressionSettings() {
+  compressionSettings.value = await api.getCompressionSettings()
+}
+
 function resetForm() {
-  form.value = { name: '', auth_mode: 'api_key', usage_mode: 'upstream', proxy_url: '', base_url: '', api_key: '', model_id: '', is_default: false }
+  form.value = { name: '', auth_mode: 'api_key', usage_mode: 'upstream', proxy_url: '', base_url: '', api_key: '', model_id: '', is_default: false, max_tokens: 0 }
   editing.value = null
   showForm.value = false
 }
@@ -54,12 +66,13 @@ function editProvider(p: Provider) {
   form.value = {
     name: p.name,
     auth_mode: p.auth_mode || 'api_key',
-    usage_mode: p.usage_mode || 'upstream',
+    usage_mode: (p.usage_mode as UsageMode) || 'upstream',
     proxy_url: p.proxy_url || '',
     base_url: p.base_url,
     api_key: p.api_key,
     model_id: p.model_id,
     is_default: p.is_default,
+    max_tokens: p.max_tokens ? Math.round(p.max_tokens / (1024 * 1024)) : 0,
   }
   showForm.value = true
   if (p.auth_mode === 'oauth') loadAuthStatus()
@@ -90,10 +103,12 @@ const needsApiKey = computed(() => {
 })
 
 async function saveProvider() {
+  // Convert max_tokens from MB to bytes for backend
+  const payload = { ...form.value, max_tokens: (form.value.max_tokens || 0) * 1024 * 1024 }
   if (editing.value) {
-    await api.updateProvider(editing.value.id, form.value)
+    await api.updateProvider(editing.value.id, payload)
   } else {
-    await api.createProvider(form.value)
+    await api.createProvider(payload)
   }
   await store.loadProviders()
   resetForm()
@@ -107,6 +122,15 @@ async function removeProvider(id: string) {
 async function setDefaultProvider(id: string) {
   await api.setProviderDefault(id)
   await store.loadProviders()
+}
+
+async function saveCompressionSettings() {
+  compressionSaving.value = true
+  try {
+    compressionSettings.value = await api.updateCompressionSettings(compressionSettings.value)
+  } finally {
+    compressionSaving.value = false
+  }
 }
 
 function maskKey(key: string): string {
@@ -180,40 +204,8 @@ async function handleExport() {
 }
 onMounted(() => {
   store.loadProviders()
-  loadCompressSettings()
+  loadCompressionSettings()
 })
-
-// ---- Auto Compress Settings ----
-const compressForm = reactive<CompressSettings>({
-  auto_enabled: false,
-  threshold: 80000,
-  mode: 'auto',
-  min_turns: 10,
-})
-const compressSaveOk = ref(false)
-const compressSaveErr = ref('')
-
-async function loadCompressSettings() {
-  try {
-    const cfg = await api.getCompressSettings()
-    compressForm.auto_enabled = cfg.auto_enabled
-    compressForm.threshold = cfg.threshold
-    compressForm.mode = cfg.mode
-    compressForm.min_turns = cfg.min_turns ?? 10
-  } catch { /* ignore */ }
-}
-
-async function saveCompressSettings() {
-  compressSaveOk.value = false
-  compressSaveErr.value = ''
-  try {
-    await api.updateCompressSettings({ ...compressForm })
-    compressSaveOk.value = true
-    setTimeout(() => { compressSaveOk.value = false }, 3000)
-  } catch (e: unknown) {
-    compressSaveErr.value = e instanceof Error ? e.message : '保存失败'
-  }
-}
 
 </script>
 
@@ -345,6 +337,12 @@ async function saveCompressSettings() {
               </label>
             </div>
 
+            <div class="form-group">
+              <label>最大请求大小 (MB，可选)</label>
+              <input type="number" v-model.number="form.max_tokens" placeholder="0 表示无限制" min="0" step="1" />
+              <small class="form-hint">例如填 5 表示 5MB，超过此大小触发自动压缩</small>
+            </div>
+
             <div class="form-actions">
               <button class="btn-cancel" @click="resetForm">取消</button>
               <button class="btn-save" @click="saveProvider" :disabled="!form.name || (needsApiKey && !form.api_key)">
@@ -355,74 +353,53 @@ async function saveCompressSettings() {
         </div>
       </section>
 
-      <!-- Auto Compress Settings -->
       <section class="section">
         <div class="section-header">
           <div>
-            <h2>自动压缩</h2>
-            <p class="section-desc">Token 使用量达到阈值时自动压缩会话上下文，延长可用会话长度。</p>
+            <h2>压缩管理</h2>
+            <p class="section-desc">发送消息前按百分比阈值预估上下文占用，超出后自动调用临时 AI Agent 生成压缩总结。</p>
           </div>
         </div>
 
-        <div class="compress-settings">
+        <div class="compression-card">
           <div class="form-group checkbox">
             <label>
-              <input type="checkbox" v-model="compressForm.auto_enabled" />
+              <input type="checkbox" v-model="compressionSettings.enabled" />
               启用自动压缩
             </label>
-            <span class="hint">开启后，每轮对话结束时检测 token 总量，超过阈值则自动触发压缩并重置会话上下文。</span>
+            <span class="hint">关闭后不会在发送前检查上下文阈值。</span>
           </div>
 
-          <template v-if="compressForm.auto_enabled">
-            <div class="form-group">
-              <label>触发阈值（input tokens）</label>
-              <div class="threshold-row">
-                <input
-                  type="number"
-                  v-model.number="compressForm.threshold"
-                  min="10000"
-                  max="500000"
-                  step="5000"
-                />
-                <span class="threshold-label">{{ (compressForm.threshold / 1000).toFixed(0) }}k tokens</span>
-              </div>
-              <span class="hint">单会话累计 input token 数超过此值时触发压缩。建议：80000（约 80k tokens，对应 200k 上下文窗口的 40%）。</span>
-            </div>
+          <div class="form-group">
+            <label>触发阈值百分比</label>
+            <input
+              v-model.number="compressionSettings.threshold_percent"
+              type="number"
+              min="0"
+              max="100"
+              step="1"
+              placeholder="例如 80"
+            />
+            <span class="hint">系统会在发送前粗略估算：当前上下文 + 本次消息。如果达到供应商最大 Token 的该百分比就先压缩。`0` 代表关闭阈值。</span>
+          </div>
 
-            <div class="form-group">
-              <label>最少对话轮数</label>
-              <div class="threshold-row">
-                <input
-                  type="number"
-                  v-model.number="compressForm.min_turns"
-                  min="0"
-                  max="500"
-                  step="1"
-                />
-                <span class="threshold-label">轮</span>
-              </div>
-              <span class="hint">token 数超过阈值且对话轮数（用户消息数）达到此值，才触发压缩。设为 0 则仅按 token 阈值判断。默认 10 轮，避免会话过短时频繁压缩。</span>
-            </div>
-
-            <div class="form-group">
-              <label>压缩模式</label>
-              <select v-model="compressForm.mode">
-                <option value="auto">智能优先（推荐）：先用 Claude 生成摘要，失败自动降级为简单截取</option>
-                <option value="intelligent">仅智能：Claude 生成摘要，失败则跳过压缩</option>
-                <option value="simple">仅简单截取：取最近 10 条消息，无需额外 API 调用</option>
-              </select>
-              <span class="hint">智能模式使用 Claude 生成高质量上下文摘要（消耗少量 token）；简单模式不消耗额外 token。</span>
-            </div>
-          </template>
+          <div class="form-group">
+            <label>压缩系统提示词</label>
+            <textarea
+              v-model="compressionSettings.system_prompt"
+              class="compression-textarea"
+              placeholder="输入压缩 AI Agent 的系统提示词"
+            ></textarea>
+            <span class="hint">压缩时会启动一个独立临时 Agent，读取当前会话的全量归档历史，输出新的压缩总结。</span>
+          </div>
 
           <div class="form-actions">
-            <button class="btn-save" @click="saveCompressSettings">保存配置</button>
-            <span v-if="compressSaveOk" class="save-ok">✓ 已保存</span>
-            <span v-if="compressSaveErr" class="save-err">{{ compressSaveErr }}</span>
+            <button class="btn-save" @click="saveCompressionSettings" :disabled="compressionSaving">
+              {{ compressionSaving ? '保存中...' : '保存压缩配置' }}
+            </button>
           </div>
         </div>
       </section>
-
 
       <!-- 数据管理 -->
       <section class="section">
@@ -509,6 +486,12 @@ async function saveCompressSettings() {
 .btn-add:hover { background: var(--accent-hover); }
 
 .provider-list { display: flex; flex-direction: column; gap: 8px; }
+.compression-card {
+  padding: 18px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
 .provider-card {
   display: flex; align-items: center; justify-content: space-between;
   padding: 14px 16px; background: var(--bg-secondary);
@@ -567,13 +550,33 @@ async function saveCompressSettings() {
   color: var(--text-secondary); margin-bottom: 6px;
   text-transform: uppercase; letter-spacing: 0.5px;
 }
+.form-hint {
+  display: block; font-size: 11px; color: var(--text-tertiary); margin-top: 4px;
+}
 .form-group input, .form-group select {
   width: 100%; padding: 10px 12px;
   background: var(--bg-tertiary); border: 1px solid var(--border);
   border-radius: var(--radius); font-size: 14px; color: var(--text-primary);
   transition: border-color var(--transition);
 }
+.form-group textarea {
+  width: 100%;
+  padding: 12px;
+  min-height: 220px;
+  resize: vertical;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  transition: border-color var(--transition);
+}
 .form-group input:focus { border-color: var(--accent); }
+.form-group textarea:focus { border-color: var(--accent); outline: none; }
+.compression-textarea {
+  font-family: inherit;
+}
 .hint { display: block; font-size: 11px; color: var(--text-muted); margin-top: 4px; }
 .form-group.checkbox label {
   display: flex; align-items: center; gap: 8px;
@@ -595,13 +598,6 @@ async function saveCompressSettings() {
 }
 .btn-save:hover:not(:disabled) { background: var(--accent-hover); }
 .btn-save:disabled { opacity: 0.4; cursor: not-allowed; }
-/* ---- Auto Compress Settings ---- */
-.compress-settings { display: flex; flex-direction: column; gap: 16px; }
-.threshold-row { display: flex; align-items: center; gap: 10px; }
-.threshold-row input[type="number"] { width: 120px; }
-.threshold-label { font-size: 13px; color: var(--text-secondary); }
-.save-ok { font-size: 13px; color: var(--accent); margin-left: 10px; }
-.save-err { font-size: 13px; color: #e74c3c; margin-left: 10px; }
 
 @media (max-width: 768px) {
   .settings-container { padding: 16px 12px; }
@@ -609,10 +605,9 @@ async function saveCompressSettings() {
   .form-modal h3 { margin-bottom: 12px; }
   .provider-card { flex-direction: column; align-items: flex-start; gap: 10px; }
   .provider-actions { margin-left: 0; width: 100%; justify-content: flex-end; }
+  .management-item { flex-direction: column; align-items: flex-start; gap: 12px; }
 }
-</style>
 
-/* ---- Data Management ---- */
 .data-management {
   display: flex;
   flex-direction: column;
@@ -663,3 +658,4 @@ async function saveCompressSettings() {
 .action-btn svg {
   flex-shrink: 0;
 }
+</style>

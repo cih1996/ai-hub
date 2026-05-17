@@ -1,6 +1,7 @@
 ---
 name: "QQ频道部署"
 description: "QQ Bot 全流程部署引导。当需要安装 NapCat、配置 QQ 机器人、对接 AI Hub 时触发。引导用户完成安装、登录、WebUI 配置和频道创建。"
+when_to_use: "当需要安装 NapCat、配置 QQ 机器人、创建频道时"
 ---
 
 # QQ Bot 部署 — 自动部署手册

@@ -109,3 +109,61 @@ func GetHourlyTokenUsage(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, list)
 }
+
+// GetSessionContextUsage returns context usage based on actual HTTP request body size (bytes).
+// GET /api/v1/sessions/:id/context-usage
+func GetSessionContextUsage(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid session id"})
+		return
+	}
+
+	bodySize, _ := store.GetLatestRequestBodySize(id)
+
+	session, _ := store.GetSession(id)
+	var provider *model.Provider
+	if session != nil {
+		provider, _ = store.GetProvider(session.ProviderID)
+		if provider == nil {
+			provider, _ = store.GetDefaultProvider()
+		}
+	}
+
+	settings, _ := store.GetCompressionSettings()
+	if settings == nil {
+		settings = &model.CompressionSettings{}
+	}
+
+	providerMaxSize := 0
+	thresholdPercent := 0
+	thresholdBytes := 0
+	compressionEnabled := false
+	displayPct := 0.0
+
+	if provider != nil {
+		providerMaxSize = provider.MaxTokens // MaxTokens repurposed as max request size in bytes
+	}
+	if settings.Enabled && settings.ThresholdPercent > 0 {
+		compressionEnabled = true
+		thresholdPercent = settings.ThresholdPercent
+		if providerMaxSize > 0 {
+			thresholdBytes = providerMaxSize * thresholdPercent / 100
+			if thresholdBytes > 0 {
+				displayPct = float64(bodySize) * 100 / float64(thresholdBytes)
+				if displayPct > 100 {
+					displayPct = 100
+				}
+			}
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"estimated_tokens":    bodySize,      // bytes (field name kept for frontend compat)
+		"provider_max_tokens": providerMaxSize, // bytes
+		"threshold_percent":   thresholdPercent,
+		"threshold_tokens":    thresholdBytes, // bytes
+		"display_percent":     displayPct,
+		"compression_enabled": compressionEnabled,
+	})
+}

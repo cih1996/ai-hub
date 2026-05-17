@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -27,9 +28,17 @@ var upgrader = websocket.Upgrader{
 
 // RawRequestSnapshot holds the last raw request sent to Claude Code CLI for a session.
 type RawRequestSnapshot struct {
-	SystemPrompt string    `json:"system_prompt"`
-	Query        string    `json:"query"`
-	CapturedAt   time.Time `json:"captured_at"`
+	SystemPrompt            string    `json:"system_prompt"`
+	Query                   string    `json:"query"`
+	CapturedAt              time.Time `json:"captured_at"`
+	EstimatedTokens         int       `json:"estimated_tokens"`
+	ProviderMaxTokens       int       `json:"provider_max_tokens"`
+	ThresholdPercent        int       `json:"threshold_percent"`
+	ThresholdTokens         int       `json:"threshold_tokens"`
+	UsagePercent            float64   `json:"usage_percent"`
+	CompressionEnabled      bool      `json:"compression_enabled"`
+	WouldTriggerCompression bool      `json:"would_trigger_compression"`
+	CompressionTriggered    bool      `json:"compression_triggered"`
 }
 
 // lastRawRequests stores the most recent raw request per session (sessID → RawRequestSnapshot).
@@ -201,8 +210,6 @@ var (
 	runningQueueCursor = make(map[int64]int64) // sessionID -> original trigger cursor for current queued batch
 )
 
-const streamNoOutputTimeout = 60 * time.Second
-
 func markForceFreshRun(sessionID int64) {
 	forceFreshMu.Lock()
 	forceFreshRun[sessionID] = true
@@ -248,6 +255,331 @@ func consumeForceFreshRun(sessionID int64) bool {
 	}
 	delete(forceFreshRun, sessionID)
 	return true
+}
+
+type autoCompressionResult struct {
+	Triggered       bool
+	DeletedCount    int64
+	EstimatedTokens int
+	ThresholdTokens int
+}
+
+const (
+	roughBasePromptBytes   = 2000  // Base prompt overhead in bytes (JSON structure, role fields, etc.)
+	roughPerMessageBytes   = 100   // Per-message JSON overhead (role, type, structure)
+	roughPerImageBytes     = 50000 // Per-image attachment estimate (~50KB base64 encoded)
+	roughToolDefBytes      = 30000 // Claude Code built-in tool definitions (Read, Edit, Bash, etc.)
+	minCompressionLogCount = 2
+)
+
+// estimateTextBytes returns the UTF-8 byte length of the content.
+func estimateTextBytes(content string) int {
+	return len(content)
+}
+
+// estimateSystemPromptBytes reads the actual system prompt files and returns total byte size.
+func estimateSystemPromptBytes(sessionID int64, groupName string) int {
+	total := 0
+	// ① Global rules (~/.ai-hub/rules/*.md)
+	if rulesDir := core.TemplateDir(); rulesDir != "" {
+		if entries, err := os.ReadDir(rulesDir); err == nil {
+			for _, e := range entries {
+				if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
+					if data, err := os.ReadFile(filepath.Join(rulesDir, e.Name())); err == nil {
+						total += len(data)
+					}
+				}
+			}
+		}
+	}
+	// ② Team rules (~/.ai-hub/teams/<group>/rules/*.md)
+	if groupName != "" {
+		teamsDir := filepath.Join(core.GetDataDir(), "teams", groupName, "rules")
+		if entries, err := os.ReadDir(teamsDir); err == nil {
+			for _, e := range entries {
+				if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
+					if data, err := os.ReadFile(filepath.Join(teamsDir, e.Name())); err == nil {
+						total += len(data)
+					}
+				}
+			}
+		}
+	}
+	// ③ Session rules (session-rules/<id>.md)
+	if sessionID > 0 {
+		if rules, err := ReadSessionRules(sessionID); err == nil && rules != "" {
+			total += len(rules)
+		}
+	}
+	// Conservative floor
+	if total < 5000 {
+		total = 5000
+	}
+	return total
+}
+
+// estimateMessagesBytes returns the estimated byte size of the messages array.
+func estimateMessagesBytes(msgs []model.Message) int {
+	total := roughBasePromptBytes
+	for _, msg := range msgs {
+		total += len(msg.Content) + roughPerMessageBytes
+	}
+	return total
+}
+
+// estimateOutgoingBytes returns the estimated byte size of the outgoing message.
+func estimateOutgoingBytes(content string, attachments []model.ChatAttachment) int {
+	total := len(content) + roughPerMessageBytes
+	for _, att := range attachments {
+		if att.Type == "image" {
+			total += roughPerImageBytes
+		}
+	}
+	return total
+}
+
+type requestTokenEstimate struct {
+	EstimatedTokens         int // Now represents estimated request size in bytes
+	ProviderMaxTokens       int // Now represents max request size in bytes (provider.MaxTokens repurposed)
+	ThresholdPercent        int
+	ThresholdTokens         int // Threshold in bytes
+	UsagePercent            float64
+	CompressionEnabled      bool
+	WouldTriggerCompression bool
+	CompressionTriggered    bool
+}
+
+func buildRequestTokenEstimate(provider *model.Provider, activeMsgs []model.Message, outgoingContent string, attachments []model.ChatAttachment, sessionID int64, groupName string) (*requestTokenEstimate, *model.CompressionSettings) {
+	estimate := &requestTokenEstimate{
+		EstimatedTokens: estimateMessagesBytes(activeMsgs) + estimateOutgoingBytes(outgoingContent, attachments) +
+			estimateSystemPromptBytes(sessionID, groupName) + roughToolDefBytes,
+	}
+	if provider != nil {
+		estimate.ProviderMaxTokens = provider.MaxTokens // MaxTokens now represents max request size in bytes
+	}
+
+	settings, err := store.GetCompressionSettings()
+	if err != nil {
+		log.Printf("[compress] failed to load compression settings for estimate: %v", err)
+		return estimate, &model.CompressionSettings{}
+	}
+
+	estimate.CompressionEnabled = settings.Enabled
+	estimate.ThresholdPercent = settings.ThresholdPercent
+	if estimate.ProviderMaxTokens > 0 {
+		estimate.UsagePercent = float64(estimate.EstimatedTokens) * 100 / float64(estimate.ProviderMaxTokens)
+		if settings.Enabled && settings.ThresholdPercent > 0 {
+			estimate.ThresholdTokens = estimate.ProviderMaxTokens * settings.ThresholdPercent / 100
+			estimate.WouldTriggerCompression = estimate.EstimatedTokens >= estimate.ThresholdTokens
+		}
+	}
+	return estimate, settings
+}
+
+func storeInitialRawRequestSnapshot(sessionID int64, query string, estimate *requestTokenEstimate) {
+	snap := RawRequestSnapshot{
+		Query:      query,
+		CapturedAt: time.Now(),
+	}
+	if estimate != nil {
+		snap.EstimatedTokens = estimate.EstimatedTokens
+		snap.ProviderMaxTokens = estimate.ProviderMaxTokens
+		snap.ThresholdPercent = estimate.ThresholdPercent
+		snap.ThresholdTokens = estimate.ThresholdTokens
+		snap.UsagePercent = estimate.UsagePercent
+		snap.CompressionEnabled = estimate.CompressionEnabled
+		snap.WouldTriggerCompression = estimate.WouldTriggerCompression
+		snap.CompressionTriggered = estimate.CompressionTriggered
+	}
+	lastRawRequests.Store(sessionID, snap)
+	persistRawRequestSnapshot(sessionID, snap)
+}
+
+func updateRawRequestSnapshot(sessionID int64, systemPrompt string, query string) {
+	snap := RawRequestSnapshot{
+		SystemPrompt: systemPrompt,
+		Query:        query,
+		CapturedAt:   time.Now(),
+	}
+	if existing, ok := loadRawRequestSnapshot(sessionID); ok {
+		snap.EstimatedTokens = existing.EstimatedTokens
+		snap.ProviderMaxTokens = existing.ProviderMaxTokens
+		snap.ThresholdPercent = existing.ThresholdPercent
+		snap.ThresholdTokens = existing.ThresholdTokens
+		snap.UsagePercent = existing.UsagePercent
+		snap.CompressionEnabled = existing.CompressionEnabled
+		snap.WouldTriggerCompression = existing.WouldTriggerCompression
+		snap.CompressionTriggered = existing.CompressionTriggered
+	}
+	lastRawRequests.Store(sessionID, snap)
+	persistRawRequestSnapshot(sessionID, snap)
+}
+
+func loadRawRequestSnapshot(sessionID int64) (RawRequestSnapshot, bool) {
+	if val, ok := lastRawRequests.Load(sessionID); ok {
+		return val.(RawRequestSnapshot), true
+	}
+	var payload string
+	err := store.DB.QueryRow(`SELECT payload FROM session_raw_requests WHERE session_id = ?`, sessionID).Scan(&payload)
+	if err == nil {
+		var snap RawRequestSnapshot
+		if err := json.Unmarshal([]byte(payload), &snap); err == nil {
+			lastRawRequests.Store(sessionID, snap)
+			return snap, true
+		}
+	}
+	return RawRequestSnapshot{}, false
+}
+
+func persistRawRequestSnapshot(sessionID int64, snap RawRequestSnapshot) {
+	payload, err := json.Marshal(snap)
+	if err == nil {
+		store.DB.Exec(`INSERT INTO session_raw_requests (session_id, payload, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(session_id) DO UPDATE SET payload=excluded.payload, updated_at=CURRENT_TIMESTAMP`, sessionID, string(payload))
+	}
+}
+
+// maybeAutoCompressBeforeRun is a reusable compression check called before any runStream invocation.
+// It ensures webhook, hook, and queued message paths also trigger compression when needed.
+// Returns true if compression was triggered (caller can broadcast context_reset if desired).
+func maybeAutoCompressBeforeRun(session *model.Session, content string) bool {
+	if session == nil {
+		return false
+	}
+	provider := resolveSessionProviderForSend(session)
+	if provider == nil {
+		return false
+	}
+	activeMsgs, err := store.GetMessages(session.ID)
+	if err != nil {
+		log.Printf("[compress] session %d: failed to load messages: %v", session.ID, err)
+		return false
+	}
+	estimate, compressionSettings := buildRequestTokenEstimate(provider, activeMsgs, content, nil, session.ID, session.GroupName)
+	compressResult, err := maybeAutoCompressSession(session, provider, activeMsgs, compressionSettings, estimate)
+	if err != nil {
+		log.Printf("[compress] session %d: auto compression error: %v", session.ID, err)
+		return false
+	}
+	if compressResult != nil && compressResult.Triggered {
+		broadcast(WSMessage{
+			Type:      "context_reset",
+			SessionID: session.ID,
+			Content:   fmt.Sprintf("deleted:%d", compressResult.DeletedCount),
+			Detail:    fmt.Sprintf("estimated_tokens=%d threshold_tokens=%d", compressResult.EstimatedTokens, compressResult.ThresholdTokens),
+		})
+		log.Printf("[compress] session %d: auto-compressed before run (deleted=%d, estimated=%d, threshold=%d)",
+			session.ID, compressResult.DeletedCount, compressResult.EstimatedTokens, compressResult.ThresholdTokens)
+		go core.FireHooks(core.HookEvent{
+			Type:            "session.compressed",
+			SourceSessionID: session.ID,
+			Content:         fmt.Sprintf("压缩完成，删除 %d 条消息，请求体 %d / 阈值 %d", compressResult.DeletedCount, compressResult.EstimatedTokens, compressResult.ThresholdTokens),
+		})
+		return true
+	}
+	return false
+}
+
+func resolveSessionProviderForSend(session *model.Session) *model.Provider {
+	if session == nil {
+		return nil
+	}
+	provider, err := store.GetProvider(session.ProviderID)
+	if err == nil {
+		return provider
+	}
+	log.Printf("[chat] session %d: provider %s not found before send, trying default", session.ID, session.ProviderID)
+	provider, err = store.GetDefaultProvider()
+	if err != nil {
+		log.Printf("[chat] session %d: unable to resolve provider before send: %v", session.ID, err)
+		return nil
+	}
+	session.ProviderID = provider.ID
+	if err := store.UpdateSessionProvider(session.ID, provider.ID); err != nil {
+		log.Printf("[chat] session %d: failed to persist fallback provider %s: %v", session.ID, provider.ID, err)
+	}
+	return provider
+}
+
+func resetSessionRuntimeContext(session *model.Session) (int64, error) {
+	if session == nil {
+		return 0, fmt.Errorf("session is nil")
+	}
+	deleted, err := store.ResetSessionMessages(session.ID, 0)
+	if err != nil {
+		return 0, err
+	}
+	core.Pool.Kill(session.ID)
+	newUUID := uuid.New().String()
+	if err := store.UpdateClaudeSessionID(session.ID, newUUID); err != nil {
+		return 0, err
+	}
+	session.ClaudeSessionID = newUUID
+	markForceFreshRun(session.ID)
+	return deleted, nil
+}
+
+func maybeAutoCompressSession(session *model.Session, provider *model.Provider, activeMsgs []model.Message, compressionSettings *model.CompressionSettings, estimate *requestTokenEstimate) (*autoCompressionResult, error) {
+	result := &autoCompressionResult{}
+	if session == nil || provider == nil {
+		return result, nil
+	}
+	if provider.MaxTokens <= 0 {
+		return result, nil
+	}
+	if compressionSettings == nil {
+		compressionSettings = &model.CompressionSettings{}
+	}
+	if !compressionSettings.Enabled || compressionSettings.ThresholdPercent <= 0 {
+		return result, nil
+	}
+	if len(activeMsgs) == 0 {
+		return result, nil
+	}
+	if estimate == nil || estimate.ThresholdTokens <= 0 {
+		return result, nil
+	}
+	result.EstimatedTokens = estimate.EstimatedTokens
+	result.ThresholdTokens = estimate.ThresholdTokens
+	if estimate.EstimatedTokens < estimate.ThresholdTokens {
+		return result, nil
+	}
+
+	logs, err := store.GetConversationLogs(session.ID)
+	if err != nil {
+		return nil, err
+	}
+	if len(logs) < minCompressionLogCount {
+		return result, nil
+	}
+
+	// Notify frontend that compression is starting
+	broadcast(WSMessage{
+		Type:      "compressing",
+		SessionID: session.ID,
+		Content:   fmt.Sprintf("estimated=%d threshold=%d", estimate.EstimatedTokens, estimate.ThresholdTokens),
+	})
+
+	seed, err := core.BuildIntelligentRecoverySeed(logs, provider, session.ID, compressionSettings.SystemPrompt)
+	if err != nil {
+		log.Printf("[compress] session %d: intelligent compression failed, using full log recovery seed: %v", session.ID, err)
+		seed = buildRecoverySeedFromLogs(logs, "上下文自动压缩后恢复")
+	}
+	seed = strings.TrimSpace(seed)
+	if seed == "" {
+		return result, nil
+	}
+
+	deleted, err := resetSessionRuntimeContext(session)
+	if err != nil {
+		return nil, err
+	}
+	setPendingRecoverySeed(session.ID, seed)
+
+	result.Triggered = true
+	result.DeletedCount = deleted
+	estimate.CompressionTriggered = true
+	log.Printf("[compress] session %d: auto compression triggered, estimated=%d threshold=%d deleted=%d", session.ID, result.EstimatedTokens, result.ThresholdTokens, deleted)
+	return result, nil
 }
 
 func HandleChat(c *gin.Context) {
@@ -369,6 +701,8 @@ func SendChat(c *gin.Context) {
 	queryContent := buildClaudeQuery(req.Content, req.Attachments)
 
 	var session *model.Session
+	var providerForEstimate *model.Provider
+	var requestEstimate *requestTokenEstimate
 	isNewSession := req.SessionID == 0
 
 	if isNewSession {
@@ -380,6 +714,7 @@ func SendChat(c *gin.Context) {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "specified provider not found"})
 				return
 			}
+			providerForEstimate = p
 			providerID = p.ID
 		} else {
 			// Fall back to default provider
@@ -388,6 +723,7 @@ func SendChat(c *gin.Context) {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "No default provider configured. Go to Settings to add one."})
 				return
 			}
+			providerForEstimate = provider
 			providerID = provider.ID
 		}
 		var err error
@@ -413,6 +749,7 @@ func SendChat(c *gin.Context) {
 			os.MkdirAll(dir, 0755)
 			os.WriteFile(sessionRulesPath(session.ID), []byte(req.SessionRules), 0644)
 		}
+		requestEstimate, _ = buildRequestTokenEstimate(providerForEstimate, nil, storedContent, req.Attachments, session.ID, req.GroupName)
 	} else {
 		var err error
 		session, err = store.GetSession(req.SessionID)
@@ -450,6 +787,57 @@ func SendChat(c *gin.Context) {
 			})
 			return
 		}
+
+		provider := resolveSessionProviderForSend(session)
+		providerForEstimate = provider
+		activeMsgs, err := store.GetMessages(session.ID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "load messages failed: " + err.Error()})
+			return
+		}
+
+		// Compression check: use last proxy body size (real data) as primary signal.
+		// Only fall back to rough estimate when no proxy data exists (new sessions).
+		compressionSettings, _ := store.GetCompressionSettings()
+		var requestEstimate *requestTokenEstimate
+		if compressionSettings != nil && compressionSettings.Enabled && provider != nil && provider.MaxTokens > 0 {
+			thresholdBytes := provider.MaxTokens * compressionSettings.ThresholdPercent / 100
+			if lastBodySize, err := store.GetLatestRequestBodySize(session.ID); err == nil && lastBodySize > 0 && thresholdBytes > 0 && lastBodySize >= int64(thresholdBytes) {
+				// Last proxy body already at/over threshold — compress NOW using real data
+				log.Printf("[compress] session %d: last proxy body %d >= threshold %d, triggering compression before send", session.ID, lastBodySize, thresholdBytes)
+				requestEstimate = &requestTokenEstimate{
+					EstimatedTokens:    int(lastBodySize),
+					ProviderMaxTokens:  provider.MaxTokens,
+					ThresholdPercent:   compressionSettings.ThresholdPercent,
+					ThresholdTokens:    int(thresholdBytes),
+					CompressionEnabled: true,
+				}
+				compressResult, err := maybeAutoCompressSession(session, provider, activeMsgs, compressionSettings, requestEstimate)
+				if err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "auto compression failed: " + err.Error()})
+					return
+				}
+				if compressResult != nil && compressResult.Triggered {
+					// Reload messages after compression
+					activeMsgs, _ = store.GetMessages(session.ID)
+					broadcast(WSMessage{
+						Type:      "context_reset",
+						SessionID: session.ID,
+						Content:   fmt.Sprintf("deleted:%d", compressResult.DeletedCount),
+						Detail:    fmt.Sprintf("estimated_tokens=%d threshold_tokens=%d", compressResult.EstimatedTokens, compressResult.ThresholdTokens),
+					})
+					go core.FireHooks(core.HookEvent{
+						Type:            "session.compressed",
+						SourceSessionID: session.ID,
+						Content:         fmt.Sprintf("压缩完成，删除 %d 条消息，请求体 %d / 阈值 %d", compressResult.DeletedCount, compressResult.EstimatedTokens, compressResult.ThresholdTokens),
+					})
+				}
+			}
+		}
+		// Fallback: build rough estimate (for progress bar display and new sessions without proxy data)
+		if requestEstimate == nil {
+			requestEstimate, _ = buildRequestTokenEstimate(provider, activeMsgs, storedContent, req.Attachments, session.ID, session.GroupName)
+		}
 		userMsg := &model.Message{
 			SessionID: session.ID,
 			Role:      "user",
@@ -468,6 +856,40 @@ func SendChat(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "save conversation log failed: " + err.Error()})
 			return
 		}
+	}
+
+	storeInitialRawRequestSnapshot(session.ID, queryContent, requestEstimate)
+
+	// Broadcast context usage to frontend for energy progress bar.
+	// Use the latest proxy body size as baseline when available (accurate),
+	// falling back to the rough estimate for new sessions.
+	if requestEstimate != nil && requestEstimate.ProviderMaxTokens > 0 {
+		displayPct := 0.0
+		if requestEstimate.ThresholdTokens > 0 {
+			// Try to anchor to the last actual proxy body size for better accuracy
+			estimatedBytes := requestEstimate.EstimatedTokens
+			if lastBodySize, err := store.GetLatestRequestBodySize(session.ID); err == nil && lastBodySize > 0 {
+				// Baseline from real proxy data + estimated new message overhead
+				outgoingEstimate := estimateOutgoingBytes(queryContent, nil)
+				estimatedBytes = int(lastBodySize) + outgoingEstimate
+			}
+			displayPct = float64(estimatedBytes) * 100 / float64(requestEstimate.ThresholdTokens)
+			if displayPct > 100 {
+				displayPct = 100
+			}
+		}
+		ctxInfo, _ := json.Marshal(gin.H{
+			"estimated_tokens":   requestEstimate.EstimatedTokens,
+			"threshold_percent":  requestEstimate.ThresholdPercent,
+			"threshold_tokens":   requestEstimate.ThresholdTokens,
+			"display_percent":    displayPct,
+			"compression_enabled": requestEstimate.CompressionEnabled,
+		})
+		broadcast(WSMessage{
+			Type:      "context_usage",
+			SessionID: session.ID,
+			Content:   string(ctxInfo),
+		})
 	}
 
 	// Fire message.received hooks (for both new and existing sessions)
@@ -489,7 +911,10 @@ func buildStoredUserContent(content string, attachments []model.ChatAttachment) 
 		return text
 	}
 
-	parts := make([]string, 0, len(attachments))
+	parts := make([]string, 0, len(attachments)+1)
+	if text != "" {
+		parts = append(parts, text)
+	}
 	for _, att := range attachments {
 		if att.Type != "image" {
 			continue
@@ -498,15 +923,14 @@ func buildStoredUserContent(content string, attachments []model.ChatAttachment) 
 		if name == "" {
 			name = "图片"
 		}
-		parts = append(parts, fmt.Sprintf("[图片附件: %s]", name))
+		// Store as markdown image with base64 data URL so frontend can render inline
+		if att.Data != "" && att.MimeType != "" {
+			parts = append(parts, fmt.Sprintf("![%s](data:%s;base64,%s)", name, att.MimeType, att.Data))
+		} else {
+			parts = append(parts, fmt.Sprintf("[图片附件: %s]", name))
+		}
 	}
-	if len(parts) == 0 {
-		return text
-	}
-	if text == "" {
-		return strings.Join(parts, "\n")
-	}
-	return text + "\n\n" + strings.Join(parts, "\n")
+	return strings.Join(parts, "\n\n")
 }
 
 func buildAnthropicQueryPayload(query string) []map[string]any {
@@ -603,7 +1027,7 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 		provider, err = store.GetDefaultProvider()
 		if err != nil {
 			errMsg := "provider not found and no default provider configured"
-			streamErr = fmt.Errorf(errMsg)
+			streamErr = fmt.Errorf("%s", errMsg)
 			broadcast(WSMessage{Type: "error", SessionID: session.ID, Content: errMsg})
 			return
 		}
@@ -638,24 +1062,61 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 	log.Printf("[chat] session=%d provider=%s mode=%s model=%s base_url=%s",
 		session.ID, provider.Name, provider.Mode, provider.ModelID, provider.BaseURL)
 
+	// Save original query for retry (before seed is prepended)
+	originalQuery := query
+
 	// One-shot recovery seed after session reset actions.
 	if seed := takePendingRecoverySeed(session.ID); strings.TrimSpace(seed) != "" {
 		query = seed + "\n\n---\n\n" + query
 	}
 
-	// isResume: true when the persistent process is alive OR when the session has
-	// completed assistant messages in DB (i.e., we need to restore the conversation).
-	// If previous turn detected "No conversation found", force one fresh run to avoid
-	// getting stuck in a resume loop.
-	isResume := !isNewSession && (core.Pool.HasProcess(session.ID) || store.HasAssistantMessages(session.ID))
-	if consumeForceFreshRun(session.ID) {
-		isResume = false
-	}
-	fullResponse, metadataJSON, usageInput, usageOutput, usageCacheCreation, usageCacheRead, err = streamClaudeCode(ctx, provider, query, session.ClaudeSessionID, isResume, stream.Send, session.ID, session.WorkDir, session.GroupName, progressMsgID)
-	streamErr = err
+	// --- Retry loop for "No conversation found" (silent auto-recovery) ---
+	// When the Claude CLI reports the session is gone, we silently reset and retry
+	// instead of exposing the raw error to the user. Maximum 1 retry.
+	const maxNoConvRetries = 1
+	for noConvRetry := 0; noConvRetry <= maxNoConvRetries; noConvRetry++ {
+		// isResume: true when the persistent process is alive OR when the session has
+		// completed assistant messages in DB (i.e., we need to restore the conversation).
+		// If previous turn detected "No conversation found", force one fresh run to avoid
+		// getting stuck in a resume loop.
+		isResume := !isNewSession && (core.Pool.HasProcess(session.ID) || store.HasAssistantMessages(session.ID))
+		if consumeForceFreshRun(session.ID) {
+			isResume = false
+		}
+		fullResponse, metadataJSON, usageInput, usageOutput, usageCacheCreation, usageCacheRead, err = streamClaudeCode(ctx, provider, query, session.ClaudeSessionID, isResume, stream.Send, session.ID, session.WorkDir, session.GroupName, progressMsgID)
+		streamErr = err
 
-	log.Printf("[chat-flow] session=%d triggerMsgID=%d progressMsgID=%d streamClaudeCode returned: err=%v, fullResponse_len=%d, metadata_len=%d",
-		session.ID, triggerMsgID, progressMsgID, err, len(fullResponse), len(metadataJSON))
+		log.Printf("[chat-flow] session=%d triggerMsgID=%d progressMsgID=%d streamClaudeCode returned: err=%v, fullResponse_len=%d, metadata_len=%d",
+			session.ID, triggerMsgID, progressMsgID, err, len(fullResponse), len(metadataJSON))
+
+		// Auto-retry on "No conversation found" — silent recovery, user sees nothing
+		if err != nil && noConvRetry < maxNoConvRetries && strings.Contains(strings.ToLower(err.Error()), "no conversation found") {
+			log.Printf("[chat] session=%d: 'No conversation found' detected, silently retrying (attempt %d/%d)", session.ID, noConvRetry+1, maxNoConvRetries)
+			// Clean up the failed assistant message (no conversation log exists yet for empty msg)
+			store.DeleteMessage(progressMsgID)
+			// Reload session (claude_session_id was reset by streamClaudeCode)
+			if fresh, serr := store.GetSession(session.ID); serr == nil {
+				session = fresh
+			}
+			// Consume recovery seed (set by streamClaudeCode's error handler) + original query
+			if seed := takePendingRecoverySeed(session.ID); strings.TrimSpace(seed) != "" {
+				query = seed + "\n\n---\n\n" + originalQuery
+			}
+			// Create a fresh assistant message for the retry
+			retryMsg := &model.Message{SessionID: session.ID, Role: "assistant", Content: "", Metadata: ""}
+			if err := store.AddMessage(retryMsg); err != nil {
+				log.Printf("[chat] session=%d: failed to create retry message: %v", session.ID, err)
+				break
+			}
+			progressMsgID = retryMsg.ID
+			ResetProxyUsage(session.ID)
+			continue // retry
+		}
+
+		break // success or non-retryable error
+	}
+
+	var proxyRequestBodySize int64
 
 	if err != nil {
 		log.Printf("[chat] session=%d provider=%s error: %v", session.ID, provider.Name, err)
@@ -665,13 +1126,11 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 			usageOutput = pu.OutputTokens
 			usageCacheCreation = pu.CacheCreationInputTokens
 			usageCacheRead = pu.CacheReadInputTokens
+			proxyRequestBodySize = pu.RequestBodySize
 		}
 		// Save partial response before reporting error — don't lose already-received content
 		if fullResponse != "" || metadataJSON != "" {
 			content := fullResponse
-			if content == "" {
-				content = "[任务已执行，详见执行步骤]"
-			}
 			store.UpdateMessageContent(progressMsgID, content, metadataJSON)
 			if strings.TrimSpace(content) != "" {
 				if err := store.AddConversationLog(&model.ConversationLog{
@@ -692,7 +1151,8 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 				broadcast(WSMessage{Type: "token_usage", SessionID: session.ID, Content: string(usageJSON)})
 			}
 		} else {
-			// No content received — update the pre-inserted message with error instead of deleting
+			// No content received — save error to DB for debugging, but don't broadcast
+			// as chunk (the error event below handles frontend display)
 			errContent := "❌ " + err.Error()
 			store.UpdateMessageContent(progressMsgID, errContent, "")
 			if strings.TrimSpace(errContent) != "" {
@@ -705,7 +1165,6 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 					log.Printf("[chat] session=%d failed to archive assistant error log: %v", session.ID, logErr)
 				}
 			}
-			broadcast(WSMessage{Type: "chunk", SessionID: session.ID, Content: errContent})
 		}
 		broadcast(WSMessage{Type: "error", SessionID: session.ID, Content: err.Error()})
 		return
@@ -713,19 +1172,17 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 
 	// Prefer proxy-captured usage (has accurate cache tokens) over stream-json fallback (Issue #72)
 	if pu := ConsumeProxyUsage(session.ID); pu != nil {
-		log.Printf("[chat] session=%d using proxy usage: input=%d output=%d cache_create=%d cache_read=%d",
-			session.ID, pu.InputTokens, pu.OutputTokens, pu.CacheCreationInputTokens, pu.CacheReadInputTokens)
+		log.Printf("[chat] session=%d using proxy usage: input=%d output=%d cache_create=%d cache_read=%d body_size=%d",
+			session.ID, pu.InputTokens, pu.OutputTokens, pu.CacheCreationInputTokens, pu.CacheReadInputTokens, pu.RequestBodySize)
 		usageInput = pu.InputTokens
 		usageOutput = pu.OutputTokens
 		usageCacheCreation = pu.CacheCreationInputTokens
 		usageCacheRead = pu.CacheReadInputTokens
+		proxyRequestBodySize = pu.RequestBodySize
 	}
 
 	if fullResponse != "" || metadataJSON != "" {
 		content := fullResponse
-		if content == "" {
-			content = "[任务已执行，详见执行步骤]"
-		}
 		// Final update of the pre-inserted assistant message
 		store.UpdateMessageContent(progressMsgID, content, metadataJSON)
 		if strings.TrimSpace(content) != "" {
@@ -740,18 +1197,18 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 		}
 		extractAndSaveErrors(session.ID, progressMsgID, content)
 		// Save and broadcast token usage
-		if usageInput > 0 || usageOutput > 0 || usageCacheCreation > 0 || usageCacheRead > 0 {
-			tu := &model.TokenUsage{SessionID: session.ID, MessageID: progressMsgID, InputTokens: usageInput, OutputTokens: usageOutput, CacheCreationInputTokens: usageCacheCreation, CacheReadInputTokens: usageCacheRead}
+		if usageInput > 0 || usageOutput > 0 || usageCacheCreation > 0 || usageCacheRead > 0 || proxyRequestBodySize > 0 {
+			tu := &model.TokenUsage{SessionID: session.ID, MessageID: progressMsgID, InputTokens: usageInput, OutputTokens: usageOutput, CacheCreationInputTokens: usageCacheCreation, CacheReadInputTokens: usageCacheRead, RequestBodySize: proxyRequestBodySize}
 			store.AddTokenUsage(tu)
 			usageJSON, _ := json.Marshal(tu)
 			broadcast(WSMessage{Type: "token_usage", SessionID: session.ID, Content: string(usageJSON)})
 		}
-		// Auto-compress check: run async so it never blocks the response path
-		if usageInput > 0 {
-			go maybeAutoCompress(session, usageInput)
-		}
-		// Auto-reset check: message count threshold (Issue #214)
-		go maybeAutoReset(session)
+		// Fire message.sent hook
+		go core.FireHooks(core.HookEvent{
+			Type:            "message.sent",
+			SourceSessionID: session.ID,
+			Content:         content,
+		})
 	} else {
 		// No content received — remove the empty pre-inserted message
 		log.Printf("[chat-flow] session=%d no content received, deleting empty message %d", session.ID, progressMsgID)
@@ -759,6 +1216,28 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 	}
 
 	streamErr = nil
+
+	// Re-broadcast context usage after streaming completes using ACTUAL request body size from proxy.
+	// Falls back gracefully if proxy body size not available (e.g. claude-code provider).
+	if proxyRequestBodySize > 0 {
+		if provider := resolveSessionProviderForSend(session); provider != nil && provider.MaxTokens > 0 {
+			if settings, err := store.GetCompressionSettings(); err == nil && settings.Enabled && settings.ThresholdPercent > 0 {
+				thresholdBytes := int64(provider.MaxTokens) * int64(settings.ThresholdPercent) / 100
+				displayPct := float64(proxyRequestBodySize) * 100 / float64(thresholdBytes)
+				if displayPct > 100 {
+					displayPct = 100
+				}
+				ctxInfo, _ := json.Marshal(gin.H{
+					"estimated_tokens":    proxyRequestBodySize, // bytes
+					"threshold_percent":   settings.ThresholdPercent,
+					"threshold_tokens":    thresholdBytes, // bytes
+					"display_percent":     displayPct,
+					"compression_enabled": true,
+				})
+				broadcast(WSMessage{Type: "context_usage", SessionID: session.ID, Content: string(ctxInfo)})
+			}
+		}
+	}
 
 	// Broadcast done so even reconnected/new WS clients receive it (stream.Send is single-client)
 	log.Printf("[chat-flow] session=%d broadcasting done event", session.ID)
@@ -832,6 +1311,7 @@ func processQueuedMessages(sessionID int64, triggerMsgID int64) {
 	markQueueBatchRunning(sessionID, triggerMsgID)
 
 	log.Printf("[queue] session %d: processing %d queued message(s), triggerMsgID %d(original=%d) -> %d", sessionID, len(pending), triggerMsgID, originalTriggerMsgID, newTriggerMsgID)
+	maybeAutoCompressBeforeRun(session, merged)
 	go runStream(session, merged, false, newTriggerMsgID)
 }
 
@@ -863,30 +1343,6 @@ func runtimeTemplateVars(sessID int64, groupName string) map[string]string {
 	return vars
 }
 
-// buildStructuredMemoryInjection builds the structured memory block for system prompt.
-// It loads injection routes from the database, matches the query against them,
-// and assembles the fixed + conditionally-matched memory categories.
-// Returns empty string if no structured memory content is available.
-func buildStructuredMemoryInjection(query string) string {
-	// Load injection routes from DB
-	dbRoutes, err := store.ListInjectionRoutes()
-	if err != nil {
-		log.Printf("[injection] failed to load routes: %v", err)
-		dbRoutes = nil
-	}
-	// Convert store routes to core routes for matching
-	var coreRoutes []core.InjectionRoute
-	for _, r := range dbRoutes {
-		coreRoutes = append(coreRoutes, core.InjectionRoute{
-			Keywords:         r.Keywords,
-			InjectCategories: r.InjectCategories,
-		})
-	}
-	// Match query against routes
-	matchedConditional := core.MatchInjectionRoutes(query, coreRoutes)
-	// Build the injection block
-	return core.BuildStructuredMemoryBlock(matchedConditional)
-}
 
 // buildTeamMembersList generates a markdown table of team members for injection into system prompt
 func buildTeamMembersList(groupName string, currentSessionID int64) string {
@@ -957,10 +1413,6 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 	if rules, err := ReadSessionRules(sessID); err == nil && rules != "" {
 		promptParts = append(promptParts, core.RenderTemplateWithVars(rules, tplVars))
 	}
-	// Structured memory injection (Issue #210): append memory block after all rules
-	if memBlock := buildStructuredMemoryInjection(query); memBlock != "" {
-		promptParts = append(promptParts, memBlock)
-	}
 	if len(promptParts) > 0 {
 		req.SystemPrompt = strings.Join(promptParts, "\n\n---\n\n")
 	}
@@ -971,11 +1423,7 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 		req.SystemPrompt += webSearchHint
 	}
 	// Capture raw request snapshot for diagnostic purposes (GET /sessions/:id/last-request)
-	lastRawRequests.Store(sessID, RawRequestSnapshot{
-		SystemPrompt: req.SystemPrompt,
-		Query:        query,
-		CapturedAt:   time.Now(),
-	})
+	updateRawRequestSnapshot(sessID, req.SystemPrompt, query)
 	if anthropicPayload := buildAnthropicQueryPayload(query); anthropicPayload != nil {
 		if rawPayload, err := json.Marshal(map[string]any{
 			"messages": []map[string]any{{
@@ -983,36 +1431,11 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 				"content": anthropicPayload,
 			}},
 		}); err == nil {
-			lastRawRequests.Store(sessID, RawRequestSnapshot{
-				SystemPrompt: req.SystemPrompt,
-				Query:        string(rawPayload),
-				CapturedAt:   time.Now(),
-			})
+			updateRawRequestSnapshot(sessID, req.SystemPrompt, string(rawPayload))
 		}
 	}
 	var fullResponse string
 	var streamErr error
-	lastOutputAt := time.Now()
-	watchdogCtx, watchdogCancel := context.WithCancel(ctx)
-	defer watchdogCancel()
-	go func() {
-		ticker := time.NewTicker(5 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-watchdogCtx.Done():
-				return
-			case <-ticker.C:
-				if time.Since(lastOutputAt) > streamNoOutputTimeout {
-					streamErr = fmt.Errorf("stream watchdog timeout: no output for %s", streamNoOutputTimeout)
-					log.Printf("[watchdog] session=%d no output for %s, cancelling stream", sessID, streamNoOutputTimeout)
-					watchdogCancel()
-					core.Pool.ForceKill(sessID)
-					return
-				}
-			}
-		}
-	}()
 
 	// Steps accumulator for metadata persistence
 	var steps []StepInfo
@@ -1029,8 +1452,12 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 	var lastSaveTime time.Time
 	var lastSaveLen int
 
-	err := claudeClient.StreamPersistent(watchdogCtx, req, func(line string) {
-		lastOutputAt = time.Now()
+	// Track whether we've synced the real CLI session UUID back to DB.
+	// The Claude CLI may use a different UUID than what we passed via --session-id/--resume.
+	// We capture it from stream events and persist it so --resume works after server restarts.
+	cliSessionSynced := false
+
+	err := claudeClient.StreamPersistent(ctx, req, func(line string) {
 		// Debug: log raw line type for troubleshooting (especially Windows)
 		if len(line) > 0 {
 			// Parse type first to decide log level
@@ -1056,6 +1483,7 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 			ConversationName string          `json:"conversation_name"`
 			Error            json.RawMessage `json:"error"`
 			Errors           json.RawMessage `json:"errors"` // Can be []string or []struct{message,type}
+			SessionID        string          `json:"session_id"` // Actual CLI session UUID (may differ from DB's claude_session_id)
 			Usage            struct {
 				InputTokens              int64 `json:"input_tokens"`
 				OutputTokens             int64 `json:"output_tokens"`
@@ -1066,6 +1494,17 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 		if err := json.Unmarshal([]byte(line), &wrapper); err != nil {
 			log.Printf("[claude] json parse error: %v, line: %.200s", err, line)
 			return
+		}
+
+		// Sync real CLI session UUID back to DB (first valid occurrence).
+		// This ensures --resume works after server restarts, since the CLI may use
+		// a different UUID than what we passed via --session-id.
+		if !cliSessionSynced && wrapper.SessionID != "" && wrapper.SessionID != sessionID {
+			log.Printf("[claude] session %d: syncing real CLI session UUID: DB has %s, CLI uses %s", sessID, sessionID, wrapper.SessionID)
+			if err := store.UpdateClaudeSessionID(sessID, wrapper.SessionID); err == nil {
+				cliSessionSynced = true
+				sessionID = wrapper.SessionID // update local ref for subsequent resume retries
+			}
 		}
 
 		switch wrapper.Type {
@@ -1198,33 +1637,62 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 					delete(toolInputs, inner.Index)
 				}
 			case "message_delta":
-				// Capture per-turn usage from message_delta (output_tokens in delta.usage)
+				// Capture per-turn usage from message_delta
 				if inner.Delta.Usage.OutputTokens > 0 {
 					usageOutput += inner.Delta.Usage.OutputTokens
 				}
-				// Some models put usage at top level of message_delta
+				// Top-level usage in message_delta contains the real input_tokens and cache tokens.
+				// input_tokens is the TOTAL context window size (not per-turn), so overwrite, don't accumulate.
+				if inner.Usage.InputTokens > 0 {
+					usageInput = inner.Usage.InputTokens
+				}
 				if inner.Usage.OutputTokens > 0 {
 					usageOutput += inner.Usage.OutputTokens
 				}
-				usageCacheCreation += inner.Usage.CacheCreationInputTokens
-				usageCacheRead += inner.Usage.CacheReadInputTokens
+				if inner.Usage.CacheCreationInputTokens > 0 {
+					usageCacheCreation = inner.Usage.CacheCreationInputTokens
+				}
+				if inner.Usage.CacheReadInputTokens > 0 {
+					usageCacheRead = inner.Usage.CacheReadInputTokens
+				}
 			case "message_stop":
-				// Capture per-turn usage from message_stop
-				usageInput += inner.Usage.InputTokens
+				// input_tokens is total context size — overwrite, don't accumulate
+				if inner.Usage.InputTokens > 0 {
+					usageInput = inner.Usage.InputTokens
+				}
 				usageOutput += inner.Usage.OutputTokens
-				usageCacheCreation += inner.Usage.CacheCreationInputTokens
-				usageCacheRead += inner.Usage.CacheReadInputTokens
+				if inner.Usage.CacheCreationInputTokens > 0 {
+					usageCacheCreation = inner.Usage.CacheCreationInputTokens
+				}
+				if inner.Usage.CacheReadInputTokens > 0 {
+					usageCacheRead = inner.Usage.CacheReadInputTokens
+				}
 			case "message_start":
-				// Capture input_tokens from message_start (reported once per turn)
-				usageInput += inner.Message.Usage.InputTokens
+				// input_tokens from message_start (reported once per turn) — overwrite, don't accumulate
+				if inner.Message.Usage.InputTokens > 0 {
+					usageInput = inner.Message.Usage.InputTokens
+				}
 				usageOutput += inner.Message.Usage.OutputTokens
-				usageCacheCreation += inner.Message.Usage.CacheCreationInputTokens
-				usageCacheRead += inner.Message.Usage.CacheReadInputTokens
+				if inner.Message.Usage.CacheCreationInputTokens > 0 {
+					usageCacheCreation = inner.Message.Usage.CacheCreationInputTokens
+				}
+				if inner.Message.Usage.CacheReadInputTokens > 0 {
+					usageCacheRead = inner.Message.Usage.CacheReadInputTokens
+				}
 			}
 
 		case "result":
 			log.Printf("[claude-flow] session %d: received result event, subtype=%s, is_error=%v, result_len=%d",
 				sessID, wrapper.Subtype, wrapper.IsError, len(wrapper.Result))
+			// Capture usage from result event wrapper level (most reliable source)
+			if wrapper.Usage.InputTokens > 0 {
+				usageInput = wrapper.Usage.InputTokens // overwrite, don't accumulate
+			}
+			if wrapper.Usage.OutputTokens > 0 {
+				usageOutput += wrapper.Usage.OutputTokens
+			}
+			usageCacheCreation += wrapper.Usage.CacheCreationInputTokens
+			usageCacheRead += wrapper.Usage.CacheReadInputTokens
 			if wrapper.ConversationName != "" {
 				if err := store.UpdateSessionTitle(sessID, wrapper.ConversationName); err == nil {
 					broadcast(WSMessage{Type: "session_title_update", SessionID: sessID, Content: wrapper.ConversationName})
@@ -1280,21 +1748,44 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 					sessID, wrapper.Subtype, wrapper.IsError, errMsgs, wrapper.Result)
 				streamErr = fmt.Errorf("claude result error: %s", errContent)
 
-				// Auto-recovery: "No conversation found" → reset claude_session_id
+				// Auto-recovery: "No conversation found" → reuse same UUID with --session-id
+				// to rebuild the JSONL cache. Only compression is allowed to change the UUID.
+				// runStream will silently retry, so skip error broadcast for this case
+				isNoConvFound := false
 				for _, msg := range errMsgs {
 					if strings.Contains(strings.ToLower(msg), "no conversation found") {
-						log.Printf("[claude] session %d: detected 'No conversation found', resetting claude_session_id", sessID)
-						newUUID := uuid.New().String()
-						if err := store.UpdateClaudeSessionID(sessID, newUUID); err == nil {
-							core.Pool.Kill(sessID)
-							markForceFreshRun(sessID)
-							errContent += " (会话已自动重置，请重新发送消息)"
-							log.Printf("[claude] session %d: claude_session_id reset to %s", sessID, newUUID)
+						isNoConvFound = true
+						log.Printf("[claude] session %d: detected 'No conversation found', reusing UUID for fresh --session-id", sessID)
+						// Kill the failed process and force fresh run (--session-id instead of --resume)
+						core.Pool.Kill(sessID)
+						markForceFreshRun(sessID)
+						// Inject recovery seed from conversation_logs to preserve context
+						seed := ""
+						if logs, logErr := store.GetConversationLogs(sessID); logErr == nil && len(logs) > 0 {
+							if compressed, compErr := core.BuildIntelligentRecoverySeed(logs, p, sessID, ""); compErr == nil {
+								seed = strings.TrimSpace(compressed)
+								log.Printf("[claude] session %d: intelligent recovery seed (%d logs, %d bytes)", sessID, len(logs), len(seed))
+							} else {
+								seed = buildRecoverySeedFromLogs(logs, "Claude CLI 会话缓存丢失")
+								log.Printf("[claude] session %d: AI compression failed (%v), using full log recovery seed (%d logs, %d bytes)", sessID, compErr, len(logs), len(seed))
+							}
 						}
+						if seed == "" {
+							if histMsgs, msgErr := store.GetMessages(sessID); msgErr == nil && len(histMsgs) > 0 {
+								seed = buildRecoverySeed(histMsgs, "Claude CLI 会话缓存丢失")
+								log.Printf("[claude] session %d: last-resort recovery seed from messages (%d msgs, %d bytes)", sessID, len(histMsgs), len(seed))
+							}
+						}
+						if seed != "" {
+							setPendingRecoverySeed(sessID, seed)
+						}
+						log.Printf("[claude] session %d: reusing existing claude_session_id, will retry with --session-id (fresh JSONL)", sessID)
 						break
 					}
 				}
-				send(WSMessage{Type: "error", SessionID: sessID, Content: errContent})
+				if !isNoConvFound {
+					send(WSMessage{Type: "error", SessionID: sessID, Content: errContent})
+				}
 			} else if wrapper.Subtype == "success" && fullResponse == "" {
 				// Prefer assistant message content (preserves newlines) over result summary
 				fallback := assistantFullText
@@ -1307,13 +1798,19 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 					send(WSMessage{Type: "chunk", SessionID: sessID, Content: fallback})
 				}
 			}
-			// Capture token usage (accumulate, not overwrite)
+			// Capture token usage — input_tokens is total context size (overwrite), output accumulates
 			if wrapper.Usage.InputTokens > 0 || wrapper.Usage.OutputTokens > 0 || wrapper.Usage.CacheCreationInputTokens > 0 || wrapper.Usage.CacheReadInputTokens > 0 {
-				usageInput += wrapper.Usage.InputTokens
+				if wrapper.Usage.InputTokens > 0 {
+					usageInput = wrapper.Usage.InputTokens // overwrite, not accumulate
+				}
 				usageOutput += wrapper.Usage.OutputTokens
-				usageCacheCreation += wrapper.Usage.CacheCreationInputTokens
-				usageCacheRead += wrapper.Usage.CacheReadInputTokens
-				log.Printf("[claude] session %d: result usage +input=%d +output=%d +cache_create=%d +cache_read=%d (total: input=%d output=%d cache_create=%d cache_read=%d)", sessID, wrapper.Usage.InputTokens, wrapper.Usage.OutputTokens, wrapper.Usage.CacheCreationInputTokens, wrapper.Usage.CacheReadInputTokens, usageInput, usageOutput, usageCacheCreation, usageCacheRead)
+				if wrapper.Usage.CacheCreationInputTokens > 0 {
+					usageCacheCreation = wrapper.Usage.CacheCreationInputTokens
+				}
+				if wrapper.Usage.CacheReadInputTokens > 0 {
+					usageCacheRead = wrapper.Usage.CacheReadInputTokens
+				}
+				log.Printf("[claude] session %d: result usage input=%d output=%d cache_create=%d cache_read=%d (total: input=%d output=%d cache_create=%d cache_read=%d)", sessID, wrapper.Usage.InputTokens, wrapper.Usage.OutputTokens, wrapper.Usage.CacheCreationInputTokens, wrapper.Usage.CacheReadInputTokens, usageInput, usageOutput, usageCacheCreation, usageCacheRead)
 			}
 
 		case "assistant":
@@ -1343,7 +1840,6 @@ func streamClaudeCode(ctx context.Context, p *model.Provider, query, sessionID s
 	})
 
 	// Build metadata JSON from accumulated steps
-	watchdogCancel()
 	if err == nil && streamErr != nil {
 		err = streamErr
 	}
@@ -1372,19 +1868,26 @@ func GetLastRawRequest(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid session id"})
 		return
 	}
-	val, ok := lastRawRequests.Load(id)
+	snap, ok := loadRawRequestSnapshot(id)
 	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{"error": "no request captured yet for this session"})
 		return
 	}
-	snap := val.(RawRequestSnapshot)
 	msgs, _ := store.GetMessages(id)
 
 	resp := gin.H{
-		"system_prompt": snap.SystemPrompt,
-		"query":         snap.Query,
-		"context_count": len(msgs),
-		"captured_at":   snap.CapturedAt,
+		"system_prompt":             snap.SystemPrompt,
+		"query":                     snap.Query,
+		"context_count":             len(msgs),
+		"captured_at":               snap.CapturedAt,
+		"estimated_tokens":          snap.EstimatedTokens,
+		"provider_max_tokens":       snap.ProviderMaxTokens,
+		"threshold_percent":         snap.ThresholdPercent,
+		"threshold_tokens":          snap.ThresholdTokens,
+		"usage_percent":             snap.UsagePercent,
+		"compression_enabled":       snap.CompressionEnabled,
+		"would_trigger_compression": snap.WouldTriggerCompression,
+		"compression_triggered":     snap.CompressionTriggered,
 	}
 
 	// Attach the actual Anthropic API request body (captured at the proxy layer).
@@ -1392,6 +1895,12 @@ func GetLastRawRequest(c *gin.Context) {
 	// exactly as Claude Code CLI sent it to Anthropic.
 	if proxyBody := GetLastProxyBody(id); proxyBody != nil {
 		resp["anthropic_request"] = proxyBody
+	} else {
+		// Fallback: load from DB (survives restarts)
+		var pb string
+		if err := store.DB.QueryRow(`SELECT proxy_body FROM session_raw_requests WHERE session_id = ? AND proxy_body != ''`, id).Scan(&pb); err == nil && pb != "" {
+			resp["anthropic_request"] = json.RawMessage(pb)
+		}
 	}
 
 	c.JSON(http.StatusOK, resp)
@@ -1448,6 +1957,7 @@ func fireMessageReceivedHook(sessionID int64, content string) {
 
 func initHookStreamCallback() {
 	core.SetHookStreamCallback(func(session *model.Session, content string, triggerMsgID int64) {
+		maybeAutoCompressBeforeRun(session, content)
 		go runStream(session, content, false, triggerMsgID)
 	})
 }

@@ -187,7 +187,7 @@ async function onDeploy() {
   deploying.value = true
   deployResult.value = ''
   try {
-    const content = `请读取 ~/.ai-hub/skills/feishu-deploy/SKILL.md 获取飞书应用部署流程，然后按流程执行。
+    const content = `请执行飞书应用部署技能，按流程执行。
 
 部署参数：
 - 应用名称：${form.value.name}
@@ -206,7 +206,7 @@ async function onDeployQQ() {
   deploying.value = true
   deployResult.value = ''
   try {
-    const rules = `你是 QQ 机器人部署助手。请阅读 ~/.ai-hub/skills/qq-deploy/SKILL.md 获取完整部署手册。
+    const rules = `你是 QQ 机器人部署助手。请执行 QQ 频道部署技能获取完整部署手册。
 
 关键要求：
 - 用户是非技术人员，全程用简单易懂的语言引导
@@ -237,7 +237,7 @@ ${smartDesc.value.trim()}
 ## 消息处理流程
 1. 收到【飞书消息】后，解析发送者、会话ID、消息内容
 2. 根据角色定位理解意图并生成回复
-3. 通过飞书 API 回复（参考 ~/.ai-hub/skills/feishu-message/SKILL.md）
+3. 通过飞书 API 回复（参考飞书消息发送技能）
 4. 飞书凭证（app_id、app_secret）从消息中的「频道凭证」部分获取
 
 ## 会话间通信协议

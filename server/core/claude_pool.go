@@ -285,6 +285,16 @@ func (p *ProcessPool) spawnProcess(req ClaudeCodeRequest, isResume bool) (*Persi
 		cmd.Env = append(cmd.Env, "ANTHROPIC_BASE_URL="+req.BaseURL)
 	}
 	cmd.Env = applyProviderProxyEnv(cmd.Env, req.ProxyURL)
+	// Force sub-agents to inherit parent model instead of defaulting to haiku.
+	cmd.Env = append(cmd.Env, "CLAUDE_CODE_SUBAGENT_MODEL=inherit")
+	// Also set ANTHROPIC_MODEL so sub-agents can resolve the model name
+	// even when using custom/non-standard model IDs (e.g. mimo-v2.5-pro).
+	if req.ModelID != "" {
+		cmd.Env = append(cmd.Env, "ANTHROPIC_MODEL="+req.ModelID)
+	}
+	// Redirect Claude Code's config home to ~/.ai-hub so it auto-discovers
+	// skills from ~/.ai-hub/skills/ (replaces hardcoded skill listing in system prompt).
+	cmd.Env = append(cmd.Env, "CLAUDE_CONFIG_DIR="+GetDataDir())
 	// OAuth mode: API key not injected; Bearer token handled by Claude CLI's local auth cache
 	if req.HubSessionID > 0 {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("AI_HUB_SESSION_ID=%d", req.HubSessionID))
@@ -382,8 +392,6 @@ func (proc *PersistentProcess) readLoop(stdout io.Reader) {
 	close(proc.doneCh)
 }
 
-const sendAndStreamMaxDuration = 60 * time.Second
-
 // SendAndStream writes a query to stdin and streams response events via onData
 func (proc *PersistentProcess) SendAndStream(ctx context.Context, query string, onData func(string)) (err error) {
 	proc.mu.Lock()
@@ -441,11 +449,22 @@ drained:
 		log.Printf("[pool] session %d: drained %d stale events", proc.hubSessionID, drainCount)
 	}
 
+	// Build message content: if query is a JSON multimodal payload, parse it
+	// so the content field is a proper JSON array (not a double-encoded string).
+	contentVal := interface{}(query)
+	if len(query) > 0 && query[0] == '{' {
+		var parsed map[string]interface{}
+		if json.Unmarshal([]byte(query), &parsed) == nil {
+			if c, ok := parsed["content"]; ok {
+				contentVal = c // use the parsed content array directly
+			}
+		}
+	}
 	msg := map[string]interface{}{
 		"type": "user",
-		"message": map[string]string{
+		"message": map[string]interface{}{
 			"role":    "user",
-			"content": query,
+			"content": contentVal,
 		},
 	}
 	data, err := json.Marshal(msg)
@@ -457,27 +476,11 @@ drained:
 		return fmt.Errorf("write stdin: %w", err)
 	}
 	// Read events until "result" type or process death.
-	// Watchdog caps a single turn that keeps retrying or emits only non-result events,
-	// preventing bad providers from leaving the session busy forever.
-	deadline := time.NewTimer(sendAndStreamMaxDuration)
-	defer deadline.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			proc.kill()
 			return ctx.Err()
-		case <-deadline.C:
-			proc.kill()
-			Pool.mu.Lock()
-			if current, ok := Pool.processes[proc.hubSessionID]; ok && current == proc {
-				delete(Pool.processes, proc.hubSessionID)
-			}
-			Pool.mu.Unlock()
-			if Pool.OnStateChange != nil {
-				go Pool.OnStateChange(proc.hubSessionID, false, "")
-			}
-			log.Printf("[pool] session %d: stream exceeded %s without result, killed stuck CLI process", proc.hubSessionID, sendAndStreamMaxDuration)
-			return fmt.Errorf("stream watchdog timeout: no result for %s", sendAndStreamMaxDuration)
 		case line, ok := <-proc.eventCh:
 			if !ok {
 				return fmt.Errorf("event channel closed")

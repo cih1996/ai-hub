@@ -3,14 +3,22 @@ export interface Provider {
   name: string
   mode: string
   auth_mode: string
-  usage_mode: 'upstream' | 'middleware'
+  usage_mode: string
   proxy_url: string
   base_url: string
   api_key: string
   model_id: string
   is_default: boolean
+  max_tokens: number
   created_at: string
   updated_at: string
+}
+
+export interface CompressionSettings {
+  enabled: boolean
+  threshold_percent: number
+  system_prompt: string
+  updated_at?: string
 }
 
 export interface Session {
@@ -30,7 +38,6 @@ export interface Session {
   health_updated_at: string
   correction_count: number
   drift_count: number
-  auto_reset_threshold: number
   created_at: string
   updated_at: string
 }
@@ -66,9 +73,10 @@ export interface StepsMetadata {
 }
 
 export interface WSMessage {
-  type: 'chat' | 'stop' | 'subscribe' | 'error' | 'chunk' | 'thinking' | 'tool_start' | 'tool_input' | 'tool_result' | 'done' | 'session_created' | 'streaming_status' | 'session_update' | 'session_title_update' | 'process_update' | 'message_queued' | 'token_usage' | 'context_reset'
+  type: 'chat' | 'stop' | 'subscribe' | 'error' | 'chunk' | 'thinking' | 'tool_start' | 'tool_input' | 'tool_result' | 'done' | 'session_created' | 'streaming_status' | 'session_update' | 'session_title_update' | 'process_update' | 'message_queued' | 'token_usage' | 'context_reset' | 'compressing' | 'context_usage'
   session_id: number
   content: string
+  detail?: string
   tool_id?: string
   tool_name?: string
 }
@@ -125,9 +133,10 @@ export interface TokenUsageStats {
   count: number
 }
 
-export interface CompressSettings {
-  auto_enabled: boolean
-  threshold: number   // input token 绝对值阈值，如 80000
-  mode: 'auto' | 'intelligent' | 'simple'
-  min_turns: number   // 最小对话轮数（user messages），token 与轮数同时满足才压缩
+export interface ContextUsage {
+  estimated_tokens: number
+  threshold_percent: number
+  threshold_tokens: number
+  display_percent: number
+  compression_enabled: boolean
 }

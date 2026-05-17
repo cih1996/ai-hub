@@ -64,8 +64,9 @@ Examples:
 	readBody := map[string]interface{}{
 		"scope":     scope,
 		"file_name": filename,
+		"type":      "memory",
 	}
-	respData, err := c.POST("/vector/read", readBody)
+	respData, err := c.POST("/files/scoped/read", readBody)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error reading file: %v\n", err)
 		return 1
@@ -92,8 +93,9 @@ Examples:
 		"scope":     scope,
 		"file_name": filename,
 		"content":   newContent,
+		"type":      "memory",
 	}
-	_, err = c.POST("/vector/write", writeBody)
+	_, err = c.POST("/files/scoped/write", writeBody)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error writing file: %v\n", err)
 		return 1

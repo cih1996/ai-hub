@@ -1,13 +1,14 @@
 ---
 name: "一号核心手册"
-description: "系统核心操作手册。当需要操作记忆库、会话、规则、笔记、定时器、系统诊断、脚本引擎时触发。CLI 用法已内置在全局规则中，无需 Read 本手册。"
+description: "系统核心操作手册。当需要操作记忆库、知识库、会话、规则、笔记、定时器、系统诊断、脚本引擎时触发。AI 应自行 Read 本手册获取完整指令。"
+when_to_use: "当需要操作记忆库、知识库、会话、规则、笔记、定时器、系统诊断、脚本引擎时"
 ---
 
 # 一号核心手册
 
 > Skill 名称：一号核心手册（ai-hub-core）
 > 触发条件：当需要操作记忆库、会话、规则、笔记、定时器、系统诊断、脚本引擎时触发。
-> 工具数量：CLI 命令 + HTTP API
+> 工具数量：文件系统工具 + CLI 命令 + HTTP API
 
 ---
 
@@ -16,7 +17,8 @@ description: "系统核心操作手册。当需要操作记忆库、会话、规
 ### 1.1 Skill 优先
 
 - Skill 是执行协议，不是参考文档。
-- 能走 CLI 的操作必须走 CLI，禁止手动 curl 拼接。
+- 记忆库和知识库优先通过文件系统工具（Read / Grep / Glob / Edit / Write）直接操作。
+- 需要脱离本地文件系统访问时，使用 HTTP API。
 - 发现"执行不流畅、重复步骤、规则不足"时，优先补充/修订 Skill。
 
 ### 1.2 环境变量
@@ -35,11 +37,11 @@ CLI 命令自动继承以下环境变量（由 AI Hub 进程注入）：
 
 所有数据遵循三层隔离：
 
-| 层级 | CLI --level | 作用域 | 说明 |
-|------|-------------|--------|------|
-| 会话级 | session | `<group>/sessions/<id>/memory` | 当前会话私有 |
-| 团队级 | team | `<group>/memory` | 同团队共享 |
-| 全局级 | global | `memory` | 所有会话可见 |
+| 层级 | 作用域 | 说明 |
+|------|--------|------|
+| 会话级 | `<group>/sessions/<id>/memory` | 当前会话私有 |
+| 团队级 | `<group>/memory` | 同团队共享 |
+| 全局级 | `memory` | 所有会话可见 |
 
 搜索时自动合并三层结果，优先级：会话 > 团队 > 全局。
 
@@ -53,7 +55,7 @@ CLI 命令自动继承以下环境变量（由 AI Hub 进程注入）：
 ### 1.5 诊断优先
 
 - 遇到问题先诊断再修复，禁止盲目操作。
-- 优先用 API/CLI 查询，减少直接文件操作。
+- 优先用 API 或文件工具查询，减少直接文件操作。
 - 安全重启：kill → wait → verify。
 
 ### 1.6 调度安全
@@ -66,69 +68,152 @@ CLI 命令自动继承以下环境变量（由 AI Hub 进程注入）：
 
 ## §2 记忆库
 
-### CLI 命令
+### 文件路径
+
+记忆文件存储在 `~/.ai-hub/memory/` 下，三层隔离：
+
+| 层级 | 路径 | 说明 |
+|------|------|------|
+| 全局 | `~/.ai-hub/memory/*.md` | 所有会话可见 |
+| 团队 | `~/.ai-hub/teams/<group>/memory/*.md` | 同团队共享 |
+| 会话 | `~/.ai-hub/teams/<group>/sessions/<id>/memory/*.md` | 当前会话私有 |
+
+### AI 操作方式
+
+- **读取**：直接用 Read 工具读取文件
+- **搜索**：用 Grep 工具搜索关键词，或用 Glob 工具按文件名匹配
+- **写入**：用 Write / Edit 工具直接写入
+- **删除**：用 Bash 工具 `rm` 删除文件
+
+三层数据独立存储，AI 按需检索对应层级的目录即可。
+
+### 写入规则
+
+- 先搜索后写入，命中则更新，避免重复。
+- 每个主题一个主文件，禁止按日期命名。
+- 正文写当前状态，变更追加到「变更记录」章节。
+- 禁止在正文写过程叙述。
+
+### HTTP API
+
+当 ai-hub 未注册为系统 MCP 时，可通过 HTTP 接口访问记忆。两组接口：
+
+**通用文件接口**（全局级，`scope=memory`）：
 
 ```bash
-# 搜索（语义匹配，默认 top_k=10）
-ai-hub search "关键词" --level team
-ai-hub search "关键词" --level session --top 5 --tags "标签1,标签2"
+# 列出全局记忆文件
+curl "http://localhost:$AI_HUB_PORT/api/v1/files?scope=memory"
 
-# 列出文件（含预览、创建/更新时间）
-ai-hub list --level team
-ai-hub list --level global
+# 读取记忆文件
+curl "http://localhost:$AI_HUB_PORT/api/v1/files/content?scope=memory&path=文件名.md"
 
-# 读取
-ai-hub read "文件名.md" --level team
+# 写入记忆文件
+curl -X PUT "http://localhost:$AI_HUB_PORT/api/v1/files/content" \
+  -H "Content-Type: application/json" \
+  -d '{"scope": "memory", "path": "文件名.md", "content": "内容"}'
 
-# 写入（--content 或 stdin）
-ai-hub write "文件名.md" --level team --content "内容"
-echo "内容" | ai-hub write "文件名.md" --level team
+# 创建记忆文件
+curl -X POST "http://localhost:$AI_HUB_PORT/api/v1/files" \
+  -H "Content-Type: application/json" \
+  -d '{"scope": "memory", "path": "文件名.md", "content": "内容"}'
 
-# 编辑（查找替换 + diff 输出）
-ai-hub edit "文件名.md" --level team --old "旧文本" --new "新文本"
-
-# 删除
-ai-hub delete "文件名.md" --level team
-ai-hub delete "文件名.md" --level team --force
+# 删除记忆文件
+curl -X DELETE "http://localhost:$AI_HUB_PORT/api/v1/files" \
+  -H "Content-Type: application/json" \
+  -d '{"scope": "memory", "path": "文件名.md"}'
 ```
 
-### 搜索规则
-
-- 搜索自动合并三层结果（session + team + global）
-- 结果按相似度排序，包含文件名、预览、创建/更新时间
-- 向量引擎未就绪时，回退到 list + read
-
-### 向量引擎健康
+**隔离记忆接口**（支持 session / team / global 三层）：
 
 ```bash
-ai-hub status    # 查看向量引擎状态
+# 列出记忆文件（自动合并三层，按优先级排序）
+curl "http://localhost:$AI_HUB_PORT/api/v1/files/scoped/list?session_id=$AI_HUB_SESSION_ID&type=memory&level=all"
+
+# 仅列出团队级记忆
+curl "http://localhost:$AI_HUB_PORT/api/v1/files/scoped/list?scope=memory/团队名&type=memory"
+
+# 读取记忆文件（session_id 自动推断层级）
+curl -X POST "http://localhost:$AI_HUB_PORT/api/v1/files/scoped/read" \
+  -H "Content-Type: application/json" \
+  -d '{"file_name": "文件名.md", "session_id": '$AI_HUB_SESSION_ID'}'
+
+# 显式指定 scope 读取
+curl -X POST "http://localhost:$AI_HUB_PORT/api/v1/files/scoped/read" \
+  -H "Content-Type: application/json" \
+  -d '{"file_name": "文件名.md", "scope": "memory/团队名"}'
+
+# 写入记忆文件
+curl -X POST "http://localhost:$AI_HUB_PORT/api/v1/files/scoped/write" \
+  -H "Content-Type: application/json" \
+  -d '{"file_name": "文件名.md", "content": "内容", "session_id": '$AI_HUB_SESSION_ID'}'
+
+# 删除记忆文件
+curl -X POST "http://localhost:$AI_HUB_PORT/api/v1/files/scoped/delete" \
+  -H "Content-Type: application/json" \
+  -d '{"file_name": "文件名.md", "session_id": '$AI_HUB_SESSION_ID'}'
 ```
 
-如果向量引擎异常，可通过 API 重启：
-```bash
-curl -X POST http://localhost:$AI_HUB_PORT/api/v1/vector/restart
+> **scope 格式**：`memory`（全局）/ `memory/{团队名}`（团队级）/ `{团队名}/sessions/{id}/memory`（会话级）
+> **level 参数**：`all`（合并三层）/ `session` / `team` / `global`
+
+### 结构化记忆
+
+结构化 mem 运行时已下线，仅保留历史 JSON Schema 参考。
+
+---
+
+## §2.1 知识库
+
+### 文件路径
+
+知识文件存储在 `~/.ai-hub/knowledge/` 下，按项目/主题组织子目录：
+
+```
+~/.ai-hub/knowledge/
+├── project-a/
+│   └── api-spec.md
+├── project-b/
+│   └── architecture.md
+└── misc/
+    └── notes.md
 ```
 
-### 结构化记忆（mem 子命令）
+### AI 操作方式
+
+与记忆库一致：通过文件系统工具直接读写，无需专用 CLI。
+
+### 前端管理
+
+知识库提供 Web 前端供人工查看和在线编辑，地址：
+```
+http://localhost:$AI_HUB_PORT/knowledge
+```
+
+### HTTP API
+
+知识库通过通用文件接口访问，`scope=knowledge`：
 
 ```bash
-# 写入结构化记忆
-echo '{"type":"procedure","title":"Deploy SOP",...}' | ai-hub mem add
+# 列出知识文件
+curl "http://localhost:$AI_HUB_PORT/api/v1/files?scope=knowledge"
 
-# 语义搜索 + 统计重排
-ai-hub mem retrieve --query "deploy" --types procedure
+# 读取知识文件
+curl "http://localhost:$AI_HUB_PORT/api/v1/files/content?scope=knowledge&path=project-a/api-spec.md"
 
-# 反馈成功/失败
-ai-hub mem feedback --id mem_20260305_0001 --result success
+# 写入知识文件
+curl -X PUT "http://localhost:$AI_HUB_PORT/api/v1/files/content" \
+  -H "Content-Type: application/json" \
+  -d '{"scope": "knowledge", "path": "project-a/api-spec.md", "content": "内容"}'
 
-# 修订记忆
-ai-hub mem revise --id mem_20260305_0001
+# 创建知识文件
+curl -X POST "http://localhost:$AI_HUB_PORT/api/v1/files" \
+  -H "Content-Type: application/json" \
+  -d '{"scope": "knowledge", "path": "project-a/api-spec.md", "content": "内容"}'
 
-# 废弃记忆
-ai-hub mem deprecate --id mem_20260305_0001
-
-# 查看 JSON Schema
-ai-hub mem spec add
+# 删除知识文件
+curl -X DELETE "http://localhost:$AI_HUB_PORT/api/v1/files" \
+  -H "Content-Type: application/json" \
+  -d '{"scope": "knowledge", "path": "project-a/api-spec.md"}'
 ```
 
 ---
@@ -233,7 +318,7 @@ ai-hub rules delete 25
 | 层级 | 路径 | 说明 |
 |------|------|------|
 | 全局 | `~/.ai-hub/rules/CLAUDE.md` | 模板文件，支持 `{{VAR}}` 占位符 |
-| 团队 | `~/.ai-hub/teams/<group>/rules/*.md` | 团队私有，通过向量 API 读取 |
+| 团队 | `~/.ai-hub/teams/<group>/rules/*.md` | 团队私有，按目录文件读取 |
 | 会话 | `~/.ai-hub/session-rules/{id}.md` | 每会话角色定义，优先级最高 |
 
 规则在进程启动时注入，修改后需重启进程生效。
@@ -258,7 +343,7 @@ ai-hub notes write todo.md --content "# TODO\n- item 1"
 ai-hub notes delete todo.md
 ```
 
-笔记存储在 `~/.ai-hub/notes/`，禁止直接 Edit/Write 该目录，必须通过 CLI 或 API 操作。
+笔记存储在 `~/.ai-hub/notes/`，AI 可通过 CLI 或文件系统工具操作。
 
 ---
 
@@ -300,6 +385,59 @@ ai-hub triggers delete 1
 
 ---
 
+## §7.1 事件钩子
+
+### 事件类型
+
+| 事件 | 中文名 | 触发时机 | 支持的条件 |
+|------|--------|----------|------------|
+| `message.received` | 收到消息 | 任意会话收到用户消息 | `content_match` |
+| `message.sent` | AI 回复完成 | AI 完成流式回复后 | `content_match` |
+| `message.count` | 消息计数 | 与收到消息同时触发 | `count_gt` |
+| `session.created` | 会话创建 | 新会话首次发消息 | 无 |
+| `session.error` | 会话错误 | AI 流式输出报错 | `content_match` |
+| `session.compressed` | 上下文压缩 | 自动压缩完成后 | 无 |
+
+### 条件格式
+
+- `content_match:关键词1|关键词2` — 内容命中任一关键词/正则即触发
+- `count_gt:N` — 消息数超过 N 时触发
+- 留空 = 无条件触发
+
+### 模板变量（Payload 中使用）
+
+- `{source_session_id}` — 触发源会话 ID
+- `{event_type}` — 事件类型
+- `{content}` — 消息内容或错误摘要（截断 500 字）
+- `{message_count}` — 当前消息计数
+
+### API
+
+```bash
+# 列出钩子
+curl "http://localhost:$AI_HUB_PORT/api/v1/hooks"
+
+# 按事件类型筛选
+curl "http://localhost:$AI_HUB_PORT/api/v1/hooks?event=message.received"
+
+# 创建钩子
+curl -X POST "http://localhost:$AI_HUB_PORT/api/v1/hooks" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "event": "message.received",
+    "condition": "content_match:紧急|urgent",
+    "target_session": 5,
+    "payload": "[紧急消息] 来自会话 {source_session_id}:\n{content}",
+    "enabled": true
+  }'
+
+# 启停钩子
+curl -X POST "http://localhost:$AI_HUB_PORT/api/v1/hooks/1/enable"
+curl -X POST "http://localhost:$AI_HUB_PORT/api/v1/hooks/1/disable"
+```
+
+---
+
 ## §8 系统诊断
 
 ### CLI 命令
@@ -308,7 +446,7 @@ ai-hub triggers delete 1
 # 版本信息
 ai-hub version
 
-# 系统状态（服务 + 向量引擎 + 进程池）
+# 系统状态（服务 + 进程池）
 ai-hub status
 ```
 
@@ -316,9 +454,10 @@ ai-hub status
 
 | 症状 | 检查命令 | 处理 |
 |------|----------|------|
-| 向量搜索无结果 | `ai-hub status` | 检查向量引擎状态，必要时重启 |
+| 记忆搜索无结果 | `ai-hub list --level <level>` | 改用文件列表和正文检查命中内容 |
 | 会话无响应 | `ai-hub sessions <id>` | 检查进程状态 |
 | 规则未生效 | `ai-hub rules get <id>` | 确认规则内容，重启进程 |
+| 子agent模型报错 | 查看日志中 `[proxy]` 行的 model 字段 | 确认 ANTHROPIC_MODEL 环境变量是否正确传递 |
 
 ### 日志分析
 
@@ -328,6 +467,29 @@ tail -50 ~/.ai-hub/logs/ai-hub.log
 
 # 搜索错误
 grep -i "error\|forbidden\|timeout" ~/.ai-hub/logs/ai-hub.log | tail -20
+
+# 查看代理层请求（含 model 字段，用于排查子agent问题）
+grep "\[proxy\]" ~/.ai-hub/logs/ai-hub.log | tail -20
+
+# 查看钩子触发记录
+grep "\[hooks\]" ~/.ai-hub/logs/ai-hub.log | tail -20
+```
+
+### 上下文详情（Raw Request 诊断）
+
+右上角「上下文详情」可查看最后一次发给模型的完整请求数据：
+
+- **Messages Tab**：结构化展示消息列表，支持 tool_use/tool_result 跳转
+- **Raw Tab**：完整 JSON 请求体（含 model、messages、tools 等），显示 KB 大小
+- **全量日志 Tab**：会话历史归档，支持搜索和导航
+
+**持久化说明**：Raw 请求体已持久化到 `session_raw_requests.proxy_body` 列，重启后仍可查看。
+
+```bash
+# API 获取最后一次请求数据
+curl "http://localhost:$AI_HUB_PORT/api/v1/sessions/$AI_HUB_SESSION_ID/last-request"
+
+# 响应包含：system_prompt, query, anthropic_request（完整请求体）, context_count 等
 ```
 
 ---

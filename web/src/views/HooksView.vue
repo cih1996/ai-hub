@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { listHooks, createHook, updateHook, deleteHook, enableHook, disableHook, listSessions } from '../composables/api'
 import type { Hook } from '../composables/api'
 import type { Session } from '../types'
@@ -12,12 +12,41 @@ const editingHook = ref<Hook | null>(null)
 const deleteTarget = ref<Hook | null>(null)
 
 const eventOptions = [
-  'message.received',
-  'message.sent',
-  'session.created',
-  'context.compressed',
-  'context.reset',
-  'error.detected',
+  { value: 'message.received', label: '收到消息' },
+  { value: 'message.sent', label: 'AI 回复完成' },
+  { value: 'message.count', label: '消息计数' },
+  { value: 'session.created', label: '会话创建' },
+  { value: 'session.error', label: '会话错误' },
+  { value: 'session.compressed', label: '上下文压缩' },
+]
+
+// 每种事件类型支持的条件和模板变量
+const eventMeta: Record<string, { conditions: string[]; desc: string }> = {
+  'message.received':   { conditions: ['content_match'], desc: '任意会话收到用户消息时触发' },
+  'message.sent':       { conditions: ['content_match'], desc: 'AI 完成回复后触发，可用于监控输出或触发后续流程' },
+  'message.count':      { conditions: ['count_gt'],      desc: '与「收到消息」同时触发，配合消息数阈值使用' },
+  'session.created':    { conditions: [],                desc: '新会话首次发消息时触发' },
+  'session.error':      { conditions: ['content_match'], desc: 'AI 流式输出中检测到错误时触发' },
+  'session.compressed': { conditions: [],                desc: '上下文自动压缩完成后触发，可用于通知或串联工作流' },
+}
+
+const conditionPresets: Record<string, { label: string; value: string; desc: string }[]> = {
+  content_match: [
+    { label: '包含关键词', value: 'content_match:关键词', desc: '内容包含任一关键词即触发（支持 | 分隔多个）' },
+    { label: '正则匹配', value: 'content_match:^TODO', desc: '支持正则表达式，如 ^TODO 表示以 TODO 开头' },
+  ],
+  count_gt: [
+    { label: '超过 50 条', value: 'count_gt:50', desc: '消息总数超过 50 条时触发' },
+    { label: '超过 100 条', value: 'count_gt:100', desc: '消息总数超过 100 条时触发' },
+    { label: '超过 200 条', value: 'count_gt:200', desc: '消息总数超过 200 条时触发' },
+  ],
+}
+
+const templateVars = [
+  { key: '{source_session_id}', desc: '触发源会话 ID' },
+  { key: '{event_type}', desc: '事件类型（如 message.received）' },
+  { key: '{content}', desc: '消息内容或错误摘要（截断 500 字）' },
+  { key: '{message_count}', desc: '当前消息计数（仅 message.count 事件有值）' },
 ]
 
 const form = ref({
@@ -39,15 +68,26 @@ function sessionTitle(id: number): string {
 }
 
 function eventLabel(e: string): string {
-  const map: Record<string, string> = {
-    'message.received': '收到消息',
-    'message.sent': '发送消息',
-    'session.created': '会话创建',
-    'context.compressed': '上下文压缩',
-    'context.reset': '上下文重置',
-    'error.detected': '检测到错误',
-  }
-  return map[e] || e
+  const opt = eventOptions.find(o => o.value === e)
+  return opt ? opt.label : e
+}
+
+const currentEventConditions = computed(() => {
+  const meta = eventMeta[form.value.event]
+  return meta ? meta.conditions : []
+})
+
+const currentEventDesc = computed(() => {
+  const meta = eventMeta[form.value.event]
+  return meta ? meta.desc : ''
+})
+
+function applyConditionPreset(val: string) {
+  form.value.condition = val
+}
+
+function insertTemplateVar(v: string) {
+  form.value.payload += v
 }
 
 async function load() {
@@ -163,17 +203,29 @@ onMounted(load)
       <div v-if="showForm" class="modal-overlay" @click="showForm = false">
         <div class="modal-box" @click.stop>
           <p class="modal-title">{{ editingHook ? '编辑钩子' : '新建钩子' }}</p>
+
           <div class="form-group">
             <label>事件类型</label>
             <select v-model="form.event">
-              <option v-for="e in eventOptions" :key="e" :value="e">{{ eventLabel(e) }} ({{ e }})</option>
+              <option v-for="e in eventOptions" :key="e.value" :value="e.value">{{ e.label }}</option>
             </select>
+            <span class="form-hint" v-if="currentEventDesc">{{ currentEventDesc }}</span>
           </div>
-          <div class="form-group">
+
+          <div class="form-group" v-if="currentEventConditions.length > 0">
             <label>触发条件</label>
-            <input v-model="form.condition" placeholder="如 content_match:关键词（留空=无条件触发）" />
-            <span class="form-hint">支持: content_match:关键词, count_gt:100, session_id:5</span>
+            <input v-model="form.condition" placeholder="留空 = 无条件触发" />
+            <div class="condition-presets" v-if="currentEventConditions.length">
+              <span v-for="condType in currentEventConditions" :key="condType" class="preset-group">
+                <button v-for="p in conditionPresets[condType]" :key="p.value"
+                  class="preset-btn" :title="p.desc" @click="applyConditionPreset(p.value)">
+                  {{ p.label }}
+                </button>
+              </span>
+            </div>
+            <span class="form-hint" v-if="!form.condition">留空表示该事件发生时无条件触发</span>
           </div>
+
           <div class="form-group">
             <label>目标会话</label>
             <select v-model.number="form.target_session">
@@ -181,11 +233,17 @@ onMounted(load)
               <option v-for="s in sessions" :key="s.id" :value="s.id">#{{ s.id }} {{ s.title }}</option>
             </select>
           </div>
+
           <div class="form-group">
             <label>消息模板</label>
-            <textarea v-model="form.payload" rows="3" placeholder="支持占位符: {content}, {source_session_id}, {event}"></textarea>
-            <span class="form-hint">留空则发送默认通知消息</span>
+            <textarea v-model="form.payload" rows="3" placeholder="钩子触发时发送给目标会话的消息内容"></textarea>
+            <div class="template-vars">
+              <span class="tv-label">插入变量：</span>
+              <button v-for="v in templateVars" :key="v.key" class="tv-btn" :title="v.desc"
+                @click="insertTemplateVar(v.key)">{{ v.key }}</button>
+            </div>
           </div>
+
           <div class="form-group">
             <label class="toggle-label">
               <input type="checkbox" v-model="form.enabled" />
@@ -289,6 +347,25 @@ onMounted(load)
 }
 .form-group textarea { resize: vertical; font-family: inherit; }
 .form-hint { font-size: 11px; color: var(--text-muted); margin-top: 2px; display: block; }
+.condition-presets { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.preset-group { display: flex; flex-wrap: wrap; gap: 4px; }
+.preset-btn {
+  padding: 2px 8px; font-size: 11px; border-radius: 9999px; cursor: pointer;
+  background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border);
+  transition: all var(--transition);
+}
+.preset-btn:hover { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.template-vars {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-top: 6px;
+}
+.tv-label { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+.tv-btn {
+  padding: 2px 6px; font-size: 10px; font-family: 'SF Mono', 'Menlo', monospace;
+  border-radius: 4px; cursor: pointer;
+  background: var(--bg-tertiary); color: var(--accent); border: 1px solid var(--border);
+  transition: all var(--transition);
+}
+.tv-btn:hover { background: var(--accent-soft); border-color: var(--accent); }
 .toggle-label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; color: var(--text-primary); }
 .toggle-label input { width: 14px; height: 14px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }

@@ -18,15 +18,15 @@ func TemplateVars() map[string]string {
 	now := time.Now()
 
 	return map[string]string{
-		"HOME_DIR":      home,
-		"CLAUDE_DIR":    aiHubBase,
-		"MEMORY_DIR":    filepath.Join(aiHubBase, "memory"),
-		"RULES_DIR":     filepath.Join(aiHubBase, "rules"),
-		"OS":            runtime.GOOS,
-		"PORT":          hubPort,
-		"DATE":          now.Format("2006-01-02"),
-		"DATETIME":      now.Format("2006-01-02 15:04:05"),
-		"TIME_BEIJING":  now.In(bjLoc).Format("2006-01-02 15:04:05"),
+		"HOME_DIR":     home,
+		"CLAUDE_DIR":   aiHubBase,
+		"MEMORY_DIR":   filepath.Join(aiHubBase, "memory"),
+		"RULES_DIR":    filepath.Join(aiHubBase, "rules"),
+		"OS":           runtime.GOOS,
+		"PORT":         hubPort,
+		"DATE":         now.Format("2006-01-02"),
+		"DATETIME":     now.Format("2006-01-02 15:04:05"),
+		"TIME_BEIJING": now.In(bjLoc).Format("2006-01-02 15:04:05"),
 		// Runtime-injected vars (populated per session at stream build time).
 		"AI_HUB_SESSION_ID":           "",
 		"AI_HUB_PORT":                 hubPort,
@@ -87,13 +87,24 @@ func TemplateDir() string {
 	return templateDir
 }
 
-// ScopeDir returns the filesystem directory for the given vector scope.
+// ScopeDir returns the filesystem directory for the given scoped memory/rules path.
 // Global scopes (e.g. "memory") resolve to <data-dir>/memory.
 // Team scopes (e.g. "团队名/memory") resolve to <data-dir>/teams/团队名/memory.
 // Session scopes (e.g. "团队名/sessions/21/memory") resolve to <data-dir>/teams/团队名/sessions/21/memory.
 func ScopeDir(scope string) string {
 	baseDir := GetDataDir()
+	if scope == "" {
+		return baseDir
+	}
+
 	parts := strings.Split(scope, "/")
+
+	// If it starts with memory/, it maps directly to memory/
+	if len(parts) >= 1 && parts[0] == "memory" {
+		return filepath.Join(baseDir, filepath.Clean(scope))
+	}
+
+	// Legacy or other scopes
 	// Session-level: <group>/sessions/<id>/<suffix>
 	if len(parts) == 4 && parts[1] == "sessions" {
 		return filepath.Join(baseDir, "teams", parts[0], "sessions", parts[2], parts[3])
@@ -182,85 +193,8 @@ func BuildSystemPromptWithVars(extra map[string]string) string {
 		}
 	}
 
-	// Append Skills summary
-	if summary := buildSkillsSummary(); summary != "" {
-		parts = append(parts, summary)
-	}
-
 	combined := strings.Join(parts, "\n\n---\n\n")
 	return RenderTemplateWithVars(combined, extra)
-}
-
-// buildSkillsSummary scans <data-dir>/skills/*/SKILL.md, extracts YAML
-// frontmatter (name + description), and returns a summary block.
-// ai-hub-core's CLI usage is already injected via CLI-REFERENCE.md in rules/,
-// so it does not prompt "Read SKILL.md". Other skills still prompt Read.
-func buildSkillsSummary() string {
-	skillsDir := filepath.Join(GetDataDir(), "skills")
-	dirs, err := os.ReadDir(skillsDir)
-	if err != nil {
-		return ""
-	}
-	var coreLines []string
-	var otherLines []string
-	for _, d := range dirs {
-		if !d.IsDir() {
-			continue
-		}
-		path := filepath.Join(skillsDir, d.Name(), "SKILL.md")
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		name, desc := parseSkillYAML(string(data))
-		if name == "" {
-			continue
-		}
-		if d.Name() == "ai-hub-core" {
-			coreLines = append(coreLines, fmt.Sprintf("- %s（%s）：%s", name, d.Name(), desc))
-		} else {
-			otherLines = append(otherLines, fmt.Sprintf("- %s（%s）：%s", name, d.Name(), desc))
-		}
-	}
-	allLines := append(coreLines, otherLines...)
-	if len(allLines) == 0 {
-		return ""
-	}
-	var sb strings.Builder
-	if len(coreLines) > 0 {
-		sb.WriteString("可用技能：\n")
-		sb.WriteString(strings.Join(coreLines, "\n"))
-	}
-	if len(otherLines) > 0 {
-		if sb.Len() > 0 {
-			sb.WriteString("\n\n")
-		}
-		sb.WriteString("可用技能（触发后 Read ~/.ai-hub/skills/<目录名>/SKILL.md 获取完整操作手册）：\n")
-		sb.WriteString(strings.Join(otherLines, "\n"))
-	}
-	return sb.String()
-}
-
-// parseSkillYAML extracts name and description from YAML frontmatter.
-func parseSkillYAML(content string) (string, string) {
-	if !strings.HasPrefix(content, "---") {
-		return "", ""
-	}
-	end := strings.Index(content[3:], "---")
-	if end < 0 {
-		return "", ""
-	}
-	header := content[3 : 3+end]
-	var name, desc string
-	for _, line := range strings.Split(header, "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "name:") {
-			name = strings.Trim(strings.TrimPrefix(line, "name:"), " \"")
-		} else if strings.HasPrefix(line, "description:") {
-			desc = strings.Trim(strings.TrimPrefix(line, "description:"), " \"")
-		}
-	}
-	return name, desc
 }
 
 // RenderAllTemplates is kept for backward compatibility but now is a no-op.

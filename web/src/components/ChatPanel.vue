@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, nextTick, watch, computed, inject, onMounted } from 'vue'
+import { ref, nextTick, watch, computed, inject } from 'vue'
 import type { Ref } from 'vue'
 import { marked } from 'marked'
 import { useChatStore } from '../stores/chat'
 import * as api from '../composables/api'
-import type { StepsMetadata, ConversationLog } from '../types'
-import IconPicker from './IconPicker.vue'
+import type { StepsMetadata, ConversationLog, Session } from '../types'
+import SessionConfigDrawer from './SessionConfigDrawer.vue'
+import EnergyProgress from './EnergyProgress.vue'
 
 const isMobile = inject<Ref<boolean>>('isMobile', ref(false))
 const openSidebar = inject<() => void>('openSidebar', () => {})
@@ -66,16 +67,22 @@ function toolColorClass(name: string): string {
 const currentSession = computed(() => store.currentSession)
 
 // Get session avatar URL
-function getSessionAvatar(): string {
-  const session = store.currentSession
-  if (session?.icon) {
-    return `/avatars/${session.icon}`
+function getSessionAvatar(session?: Session): string {
+  const s = session || store.currentSession
+  if (s?.icon) {
+    return `/avatars/${s.icon}`
   }
   // Default avatar based on session ID
-  const id = session?.id || 1
+  const id = s?.id || 1
   const index = (id % 50) + 1
   return `/avatars/avatar${index}.svg`
 }
+
+const currentTeamMembers = computed(() => {
+  const current = store.currentSession
+  if (!current || !current.group_name) return []
+  return store.sessions.filter(s => s.group_name === current.group_name).sort((a, b) => a.id - b.id)
+})
 
 function localizeToolName(name: string): string {
   return toolNameMap[name] || name
@@ -90,59 +97,52 @@ function parseMetadata(metadata?: string): StepsMetadata | null {
   }
 }
 
-// Toast state
-const toastMsg = ref('')
-const toastType = ref<'success' | 'error'>('success')
-const toastVisible = ref(false)
-let toastTimer: ReturnType<typeof setTimeout>
+function hasMessageContent(content?: string): boolean {
+  return !!content?.trim()
+}
 
 function quickAction(message: string) {
   store.sendMessage(message)
 }
 
-function showToast(msg: string, type: 'success' | 'error' = 'success') {
-  toastMsg.value = msg
-  toastType.value = type
-  toastVisible.value = true
-  clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => { toastVisible.value = false }, 2500)
+// Drawer state
+const showConfigDrawer = ref(false)
+
+// Context menu for team members
+const memberCtxMenu = ref<{ x: number; y: number; session: Session } | null>(null)
+
+function openMemberCtxMenu(e: MouseEvent, member: Session) {
+  memberCtxMenu.value = { x: e.clientX, y: e.clientY, session: member }
 }
 
-// Session rules modal state
-const showSessionRulesModal = ref(false)
-const sessionRulesContent = ref('')
-const sessionRulesSaving = ref(false)
-const sessionRulesLoading = ref(false)
-// Team selection state
-const groupsList = ref<api.Group[]>([])
-const selectedGroupName = ref('')
-const groupSaving = ref(false)
-// Auto reset threshold
-const autoResetThreshold = ref(0)
+function closeMemberCtxMenu() {
+  memberCtxMenu.value = null
+}
 
-// Memory modal state
-const showMemoryModal = ref(false)
-const memoryLoading = ref(false)
-const memoryFiles = ref<api.VectorFileRich[]>([])
-const memoryLevelFilter = ref<'all' | 'session' | 'team' | 'global'>('all')
-const memorySelectedFile = ref<api.VectorFileRich | null>(null)
-const memoryFileContent = ref('')
-const memoryFileLoading = ref(false)
-const memoryFileSaving = ref(false)
-const memoryEditing = ref(false)
-const memoryCreating = ref(false)
-const memoryNewFileName = ref('')
+function exportMemberSession(s: Session) {
+  closeMemberCtxMenu()
+  const a = document.createElement('a')
+  a.href = api.exportSessionUrl(s.id)
+  a.download = ''
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+}
+
+// Delete confirmation for member session
+const memberDeleteTarget = ref<Session | null>(null)
+
+function confirmMemberDelete() {
+  if (memberDeleteTarget.value) {
+    store.deleteSessionById(memberDeleteTarget.value.id)
+    memberDeleteTarget.value = null
+  }
+}
 
 // Raw request modal state
 const showRawRequestModal = ref(false)
 const rawRequestLoading = ref(false)
-const rawRequestData = ref<{
-  system_prompt: string
-  query: string
-  context_count: number
-  captured_at: string
-  anthropic_request?: api.AnthropicRequest
-} | null>(null)
+const rawRequestData = ref<api.LastRawRequest | null>(null)
 const rawRequestTab = ref<'messages' | 'fullchat' | 'raw' | 'system' | 'query'>('system')
 // Track which rows are expanded in the visual Messages tab
 const expandedRows = ref<Set<number>>(new Set())
@@ -154,6 +154,9 @@ const fullChatTotal = ref(0)
 const fullChatLoading = ref(false)
 const fullChatLoaded = ref(false)
 const expandedFullChatRows = ref<Set<number>>(new Set())
+const fullchatSearchQuery = ref('')
+const fullchatMatchIndices = ref<number[]>([])
+const fullchatCurrentMatchIdx = ref(-1)
 
 async function loadFullChat() {
   const sid = store.currentSession?.id
@@ -197,9 +200,94 @@ function stripErrorTags(text: string): string {
   return text.replace(errorTagPattern, '').trim()
 }
 
+// Fullchat search
+const fullchatTotalMatches = computed(() => fullchatMatchIndices.value.length)
+const fullchatMatchDisplay = computed(() =>
+  fullchatMatchIndices.value.length > 0
+    ? `${fullchatCurrentMatchIdx.value + 1}/${fullchatMatchIndices.value.length}`
+    : fullchatSearchQuery.value ? '无结果' : ''
+)
+
+function fullchatOnSearch() {
+  const q = fullchatSearchQuery.value.trim().toLowerCase()
+  if (!q) {
+    fullchatMatchIndices.value = []
+    fullchatCurrentMatchIdx.value = -1
+    return
+  }
+  const indices: number[] = []
+  fullChatMessages.value.forEach((msg, i) => {
+    if (msg.content && msg.content.toLowerCase().includes(q)) indices.push(i)
+  })
+  fullchatMatchIndices.value = indices
+  fullchatCurrentMatchIdx.value = indices.length > 0 ? 0 : -1
+  if (indices.length > 0) fullchatScrollToMatch(0)
+}
+
+function fullchatScrollToMatch(idx: number) {
+  const msgIdx = fullchatMatchIndices.value[idx]
+  if (msgIdx == null) return
+  const el = document.querySelector(`.fullchat-list [data-fc-idx="${msgIdx}"]`)
+  if (el) {
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    expandedFullChatRows.value.add(fullChatMessages.value[msgIdx]!.id)
+  }
+}
+
+function fullchatSearchNext() {
+  if (fullchatMatchIndices.value.length === 0) return
+  fullchatCurrentMatchIdx.value = (fullchatCurrentMatchIdx.value + 1) % fullchatMatchIndices.value.length
+  fullchatScrollToMatch(fullchatCurrentMatchIdx.value)
+}
+
+function fullchatSearchPrev() {
+  if (fullchatMatchIndices.value.length === 0) return
+  fullchatCurrentMatchIdx.value = (fullchatCurrentMatchIdx.value - 1 + fullchatMatchIndices.value.length) % fullchatMatchIndices.value.length
+  fullchatScrollToMatch(fullchatCurrentMatchIdx.value)
+}
+
+function fullchatHighlightPreview(content: string): string {
+  if (!fullchatSearchQuery.value.trim()) return escapeHtml(previewText(content, 60))
+  return highlightMatches(previewText(content, 60), fullchatSearchQuery.value)
+}
+
+function fullchatHighlightContent(content: string): string {
+  if (!fullchatSearchQuery.value.trim()) return escapeHtml(stripErrorTags(content))
+  return highlightMatches(stripErrorTags(content), fullchatSearchQuery.value)
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+function highlightMatches(text: string, query: string): string {
+  const escaped = escapeHtml(text)
+  const q = query.trim()
+  if (!q) return escaped
+  const re = new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi')
+  return escaped.replace(re, '<mark class="fc-highlight">$1</mark>')
+}
+
 function previewText(text: string, len: number): string {
   const clean = stripErrorTags(text).replace(/\n/g, ' ')
   return clean.length > len ? clean.slice(0, len) + '…' : clean
+}
+
+function formatMessageTime(dateStr: string): string {
+  if (!dateStr) return ''
+  const date = new Date(dateStr)
+  if (isNaN(date.getTime())) return ''
+  const now = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const time = `${pad(date.getHours())}:${pad(date.getMinutes())}`
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const msgDay = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+  const diffDays = Math.floor((today.getTime() - msgDay.getTime()) / 86400000)
+  if (diffDays === 0) return time
+  if (diffDays === 1) return `昨天 ${time}`
+  if (diffDays === 2) return `前天 ${time}`
+  if (date.getFullYear() === now.getFullYear()) return `${date.getMonth() + 1}月${date.getDate()}号 ${time}`
+  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}号 ${time}`
 }
 
 // Format the complete Anthropic API request body for the Raw tab.
@@ -208,6 +296,13 @@ function formatAnthropicMessages(req: api.AnthropicRequest | undefined): string 
   if (!req) return ''
   return JSON.stringify(req, null, 2)
 }
+
+const rawContentSizeKB = computed(() => {
+  const raw = formatAnthropicMessages(rawRequestData.value?.anthropic_request)
+  if (!raw) return null
+  const bytes = new Blob([raw]).size
+  return (bytes / 1024).toFixed(1)
+})
 
 // Get actual messages count from the Anthropic request
 function getActualMsgCount(req: api.AnthropicRequest | undefined): number | null {
@@ -372,6 +467,9 @@ async function openRawRequest() {
   fullChatHasMore.value = false
   fullChatTotal.value = 0
   fullChatLoaded.value = false
+  fullchatSearchQuery.value = ''
+  fullchatMatchIndices.value = []
+  fullchatCurrentMatchIdx.value = -1
   expandedFullChatRows.value = new Set()
   try {
     rawRequestData.value = await api.getLastRawRequest(sid)
@@ -391,32 +489,6 @@ watch(rawRequestTab, (tab) => {
     loadFullChat()
   }
 })
-
-// Vector engine health banner
-const vectorHealthy = ref(true)
-const vectorError = ref('')
-const vectorFixing = ref(false)
-
-onMounted(async () => {
-  try {
-    const h = await api.vectorHealth()
-    vectorHealthy.value = h.ready
-    if (!h.ready) vectorError.value = h.error || h.fix_hint || '向量引擎未就绪'
-  } catch {
-    // API not available, skip banner
-  }
-})
-
-async function fixVectorEngine() {
-  vectorFixing.value = true
-  try {
-    await api.sendChat(0, '请执行系统自检，重点检查向量引擎状态。确保模型已下载到 ~/.ai-hub/models/，向量引擎正常运行。', undefined, '你是 AI Hub 系统维护专家。全自动修复，不要询问用户。修复完成后汇报结果。')
-    vectorError.value = '正在自动修复，请在新会话中查看进度...'
-  } catch (e: any) {
-    vectorError.value = '修复启动失败: ' + e.message
-  }
-  vectorFixing.value = false
-}
 
 // Title editing state
 const editingTitle = ref(false)
@@ -555,6 +627,15 @@ watch(() => store.toolCalls.length, () => scrollToBottom())
 // Session token stats
 const sessionTokenStats = ref<{ total_input_tokens: number; total_output_tokens: number; total_cache_creation_tokens: number; total_cache_read_tokens: number; count: number } | null>(null)
 
+// Energy progress bar
+const energyPercent = computed(() => {
+  const usage = store.contextUsage
+  if (!usage || !usage.compression_enabled || usage.threshold_tokens <= 0) return 0
+  return Math.min(100, usage.display_percent)
+})
+const energyThreshold = computed(() => store.contextUsage?.threshold_percent || 0)
+const showEnergy = computed(() => store.contextUsage?.compression_enabled && store.currentSessionId > 0)
+
 // Load token usage when session changes
 watch(() => store.currentSessionId, async (id) => {
   sessionTokenStats.value = null
@@ -582,9 +663,9 @@ watch(() => store.latestTokenUsage, (usage) => {
 })
 
 function formatTokenNum(n: number): string {
-  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M'
-  if (n >= 1000) return (n / 1000).toFixed(1) + 'K'
-  return String(n)
+  if (n >= 1048576) return (n / 1048576).toFixed(1) + ' MB'
+  if (n >= 1024) return (n / 1024).toFixed(1) + ' KB'
+  return n + ' B'
 }
 
 function formatUsageLine(u: { input_tokens: number; output_tokens: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number }): string {
@@ -618,7 +699,7 @@ async function buildImageAttachments(): Promise<api.ChatAttachmentPayload[]> {
 async function send() {
   const text = input.value.trim()
   const hasAttachments = attachments.value.length > 0
-  if ((!text && !hasAttachments) || store.streaming) return
+  if (!text && !hasAttachments) return
 
   const imageAttachments = await buildImageAttachments()
   store.sendMessage(text, imageAttachments)
@@ -724,222 +805,12 @@ function autoResize() {
 const showResetConfirm = ref(false)
 const resetKeepLast = ref(0)
 
-function confirmResetContext() {
-  showResetConfirm.value = true
-  resetKeepLast.value = 0
-}
-
 async function executeReset() {
   showResetConfirm.value = false
   await store.resetContext(resetKeepLast.value)
 }
 
-// Session rules functions
-async function openSessionRulesModal() {
-  const sid = store.currentSession?.id
-  if (!sid) return
-  showSessionRulesModal.value = true
-  sessionRulesLoading.value = true
-  // Load current group name
-  selectedGroupName.value = store.currentSession?.group_name || ''
-  autoResetThreshold.value = store.currentSession?.auto_reset_threshold || 0
-  try {
-    // Load session rules and groups list in parallel
-    const [rulesRes, groupsRes] = await Promise.all([
-      api.getSessionRules(sid).catch(() => ({ content: '' })),
-      api.listGroups().catch(() => [])
-    ])
-    sessionRulesContent.value = rulesRes.content || ''
-    groupsList.value = groupsRes
-  } catch {
-    sessionRulesContent.value = ''
-    groupsList.value = []
-  } finally {
-    sessionRulesLoading.value = false
-  }
-}
 
-// Update session group
-async function updateSessionGroup() {
-  const sid = store.currentSession?.id
-  if (!sid) return
-  groupSaving.value = true
-  try {
-    await api.updateSession(sid, { group_name: selectedGroupName.value })
-    // Update store
-    if (store.currentSession) {
-      store.currentSession.group_name = selectedGroupName.value
-    }
-    showToast('团队已更新')
-  } catch (e: any) {
-    showToast('更新失败: ' + (e.message || '未知错误'), 'error')
-  } finally {
-    groupSaving.value = false
-  }
-}
-
-async function saveSessionRules() {
-  const sid = store.currentSession?.id
-  if (!sid) return
-  sessionRulesSaving.value = true
-  try {
-    await api.putSessionRules(sid, sessionRulesContent.value)
-    showToast('保存成功')
-  } catch (e: any) {
-    showToast('保存失败: ' + (e.message || '未知错误'), 'error')
-  } finally {
-    sessionRulesSaving.value = false
-  }
-}
-
-async function deleteSessionRules() {
-  const sid = store.currentSession?.id
-  if (!sid) return
-  await api.deleteSessionRules(sid)
-  sessionRulesContent.value = ''
-}
-
-async function saveAutoResetThreshold() {
-  const sid = store.currentSession?.id
-  if (!sid) return
-  try {
-    await api.updateSession(sid, { auto_reset_threshold: autoResetThreshold.value })
-    if (store.currentSession) {
-      store.currentSession.auto_reset_threshold = autoResetThreshold.value
-    }
-    showToast('自动重置阈值已保存')
-  } catch (e: any) {
-    showToast('保存失败: ' + (e.message || '未知错误'), 'error')
-  }
-}
-
-async function updateSessionIcon(icon: string) {
-  const session = store.currentSession
-  if (!session) return
-  try {
-    await api.updateSession(session.id, { icon })
-    // Update local state
-    session.icon = icon
-    showToast('图标已更新')
-  } catch (e: any) {
-    showToast('更新失败: ' + (e.message || '未知错误'), 'error')
-  }
-}
-
-// Memory functions
-const filteredMemoryFiles = computed(() => {
-  if (memoryLevelFilter.value === 'all') return memoryFiles.value
-  return memoryFiles.value.filter(f => f.origin === memoryLevelFilter.value)
-})
-
-async function openMemoryModal() {
-  const sid = store.currentSession?.id
-  if (!sid) return
-  showMemoryModal.value = true
-  memorySelectedFile.value = null
-  memoryFileContent.value = ''
-  memoryEditing.value = false
-  memoryCreating.value = false
-  await loadMemoryFiles()
-}
-
-async function loadMemoryFiles() {
-  const sid = store.currentSession?.id
-  if (!sid) return
-  memoryLoading.value = true
-  try {
-    const res = await api.listVectorFilesRich('', { session_id: sid, level: 'all' })
-    memoryFiles.value = res.files || []
-  } catch {
-    memoryFiles.value = []
-  } finally {
-    memoryLoading.value = false
-  }
-}
-
-async function selectMemoryFile(file: api.VectorFileRich) {
-  memorySelectedFile.value = file
-  memoryEditing.value = false
-  memoryCreating.value = false
-  memoryFileLoading.value = true
-  try {
-    const res = await api.readVectorFile(file.scope, file.file_name)
-    memoryFileContent.value = res.content || ''
-  } catch {
-    memoryFileContent.value = ''
-  } finally {
-    memoryFileLoading.value = false
-  }
-}
-
-async function saveMemoryFile() {
-  if (!memorySelectedFile.value) return
-  memoryFileSaving.value = true
-  try {
-    await api.writeVectorFile(memorySelectedFile.value.scope, memorySelectedFile.value.file_name, memoryFileContent.value)
-    showToast('保存成功')
-    memoryEditing.value = false
-    await loadMemoryFiles()
-  } catch (e: any) {
-    showToast('保存失败: ' + (e.message || '未知错误'), 'error')
-  } finally {
-    memoryFileSaving.value = false
-  }
-}
-
-async function deleteMemoryFile() {
-  if (!memorySelectedFile.value) return
-  if (!confirm(`确定删除「${memorySelectedFile.value.file_name}」？`)) return
-  try {
-    await api.deleteVectorFile(memorySelectedFile.value.scope, memorySelectedFile.value.file_name)
-    showToast('已删除')
-    memorySelectedFile.value = null
-    memoryFileContent.value = ''
-    await loadMemoryFiles()
-  } catch (e: any) {
-    showToast('删除失败: ' + (e.message || '未知错误'), 'error')
-  }
-}
-
-function startCreateMemory() {
-  memoryCreating.value = true
-  memoryEditing.value = false
-  memorySelectedFile.value = null
-  memoryNewFileName.value = ''
-  memoryFileContent.value = ''
-}
-
-async function createMemoryFile() {
-  const sid = store.currentSession?.id
-  if (!sid || !memoryNewFileName.value.trim()) return
-  let fileName = memoryNewFileName.value.trim()
-  if (!fileName.endsWith('.md')) fileName += '.md'
-  memoryFileSaving.value = true
-  try {
-    // Pass session_id with empty scope, let backend auto-resolve session-level scope
-    // (handles both team sessions and standalone sessions via _standalone fallback)
-    const res = await api.writeVectorFile('', fileName, memoryFileContent.value, sid)
-    showToast('创建成功')
-    memoryCreating.value = false
-    await loadMemoryFiles()
-    // Select the newly created file using the scope returned by backend
-    const newFile = memoryFiles.value.find(f => f.file_name === fileName && f.scope === res.scope)
-    if (newFile) selectMemoryFile(newFile)
-  } catch (e: any) {
-    showToast('创建失败: ' + (e.message || '未知错误'), 'error')
-  } finally {
-    memoryFileSaving.value = false
-  }
-}
-
-function memoryOriginLabel(origin: string): string {
-  switch (origin) {
-    case 'session': return '会话'
-    case 'team': return '团队'
-    case 'global': return '全局'
-    default: return origin
-  }
-}
 
 function formatToolInput(raw: string): string {
   if (!raw) return ''
@@ -966,15 +837,6 @@ function formatToolInput(raw: string): string {
 
 <template>
   <div class="chat-panel">
-    <!-- Vector engine health banner -->
-    <div v-if="!vectorHealthy" class="vector-banner">
-      <span class="vector-banner-icon">⚠️</span>
-      <span class="vector-banner-text">向量引擎未就绪：{{ vectorError }}</span>
-      <button class="vector-banner-btn" :disabled="vectorFixing" @click="fixVectorEngine">
-        {{ vectorFixing ? '修复中...' : '一键修复' }}
-      </button>
-      <button class="vector-banner-close" @click="vectorHealthy = true">✕</button>
-    </div>
     <div v-if="store.usageLimitWarning" class="quota-banner">
       <span class="quota-banner-icon">⚠️</span>
       <span class="quota-banner-text">{{ store.usageLimitWarning }}</span>
@@ -1053,62 +915,27 @@ function formatToolInput(raw: string): string {
         </div>
       </div>
       <div class="header-right" v-if="!isMobile">
+        <EnergyProgress v-if="showEnergy" :percent="energyPercent" :threshold-percent="energyThreshold" />
         <span v-if="sessionTokenStats" class="header-token-stats" title="本会话累计 Token 用量">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><circle cx="9" cy="9" r="1.5"/><circle cx="15" cy="9" r="1.5"/><circle cx="9" cy="15" r="1.5"/><circle cx="15" cy="15" r="1.5"/></svg>
           {{ formatTokenNum(sessionTokenStats.total_input_tokens + sessionTokenStats.total_output_tokens + (sessionTokenStats.total_cache_creation_tokens || 0) + (sessionTokenStats.total_cache_read_tokens || 0)) }}
         </span>
-        <span class="header-context header-context-btn" @click="openRawRequest" title="查看最后一次原始请求">{{ contextCount }} 条上下文</span>
-        <button
-          class="btn-compress"
-          @click="store.compressContext()"
-          :disabled="store.streaming"
-          title="压缩上下文（重置 CLI 会话，保留最近对话摘要）"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="4 14 10 14 10 20"/>
-            <polyline points="20 10 14 10 14 4"/>
-            <line x1="14" y1="10" x2="21" y2="3"/>
-            <line x1="3" y1="21" x2="10" y2="14"/>
-          </svg>
-          压缩
-        </button>
-        <button
-          class="btn-compress btn-reset"
-          @click="confirmResetContext"
-          :disabled="store.streaming"
-          title="重置上下文（清空所有消息，保留会话配置）"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-            <path d="M3 3v5h5"/>
-          </svg>
-          重置
-        </button>
+        <span class="header-context header-context-btn" @click="openRawRequest" title="查看上下文详情">{{ contextCount }} 条上下文</span>
         <button
           class="btn-rules"
-          @click="openSessionRulesModal"
-          title="会话规则（角色设定）"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/>
-            <circle cx="12" cy="7" r="4"/>
-          </svg>
-          角色
-        </button>
-        <button
-          class="btn-rules"
-          @click="openMemoryModal"
-          title="记忆库"
+          @click="showConfigDrawer = true"
+          title="配置（角色与记忆）"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/>
             <path d="M12 6v6l4 2"/>
           </svg>
-          记忆
+          配置
         </button>
       </div>
       <!-- Mobile: more menu -->
       <div v-if="isMobile" class="header-right-mobile">
+        <EnergyProgress v-if="showEnergy" :percent="energyPercent" :threshold-percent="energyThreshold" />
         <span v-if="sessionTokenStats" class="header-token-stats" title="Token">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><circle cx="9" cy="9" r="1.5"/><circle cx="15" cy="9" r="1.5"/><circle cx="9" cy="15" r="1.5"/><circle cx="15" cy="15" r="1.5"/></svg>
           {{ formatTokenNum(sessionTokenStats.total_input_tokens + sessionTokenStats.total_output_tokens + (sessionTokenStats.total_cache_creation_tokens || 0) + (sessionTokenStats.total_cache_read_tokens || 0)) }}
@@ -1120,10 +947,7 @@ function formatToolInput(raw: string): string {
             </svg>
           </button>
           <div v-if="moreMenuOpen" class="more-menu" @click="moreMenuOpen = false">
-            <button @click="store.compressContext()" :disabled="store.streaming">压缩上下文</button>
-            <button @click="confirmResetContext" :disabled="store.streaming">重置上下文</button>
-            <button @click="openSessionRulesModal">会话角色</button>
-            <button @click="openMemoryModal">记忆库</button>
+            <button @click="showConfigDrawer = true">会话配置</button>
             <div class="more-menu-divider"></div>
             <div class="more-menu-label">切换模型</div>
             <button
@@ -1135,6 +959,26 @@ function formatToolInput(raw: string): string {
             >{{ p.name }} · {{ p.model_id }}</button>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Team Members Bar -->
+    <div v-if="currentTeamMembers.length > 0" class="team-members-bar">
+      <div
+        v-for="member in currentTeamMembers"
+        :key="member.id"
+        class="team-member-item"
+        :class="{ active: member.id === store.currentSessionId }"
+        @click="store.selectSession(member.id)"
+        @contextmenu.prevent="openMemberCtxMenu($event, member)"
+      >
+        <img :src="getSessionAvatar(member)" class="member-avatar" />
+        <span class="member-name" :title="member.title">{{ member.title }}</span>
+        <button class="member-btn-delete" @click.stop="memberDeleteTarget = member" title="删除成员会话">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 6L6 18M6 6l12 12"/>
+          </svg>
+        </button>
       </div>
     </div>
 
@@ -1165,10 +1009,10 @@ function formatToolInput(raw: string): string {
               <span class="quick-card-label">部署飞书应用</span>
               <span class="quick-card-desc">创建应用、配置机器人</span>
             </div>
-            <div class="quick-card" @click="quickAction('请查看当前系统状态，包括版本、进程、向量引擎、各会话运行情况。')">
+            <div class="quick-card" @click="quickAction('请查看当前系统状态，包括版本、进程、各会话运行情况。')">
               <span class="quick-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="12" width="4" height="8" rx="1"/><rect x="10" y="8" width="4" height="12" rx="1"/><rect x="17" y="4" width="4" height="16" rx="1"/></svg></span>
               <span class="quick-card-label">查看系统状态</span>
-              <span class="quick-card-desc">版本、进程、引擎状态</span>
+              <span class="quick-card-desc">版本、进程、会话状态</span>
             </div>
           </div>
         </div>
@@ -1185,6 +1029,7 @@ function formatToolInput(raw: string): string {
           <div class="message-body">
             <div class="message-header" :class="msg.role === 'user' ? 'text-right' : 'text-left'">
               <span class="message-role">{{ msg.role === 'user' ? '你' : currentSession?.title || 'AI' }}</span>
+              <span class="message-time">{{ formatMessageTime(msg.created_at) }}</span>
             </div>
             <!-- Historical steps panel (for assistant messages with metadata) -->
             <div v-if="msg.role === 'assistant' && parseMetadata(msg.metadata)" class="activity-block history-steps">
@@ -1223,11 +1068,11 @@ function formatToolInput(raw: string): string {
               </div>
             </div>
             <div
-              v-if="msg.role === 'assistant'"
+              v-if="msg.role === 'assistant' && hasMessageContent(msg.content)"
               class="message-content md-content"
               v-html="renderMd(msg.content)"
             ></div>
-            <div v-else class="message-content md-content" v-html="renderMd(msg.content)"></div>
+            <div v-else-if="msg.role !== 'assistant'" class="message-content md-content" v-html="renderMd(msg.content)"></div>
             <!-- Retry button: only for the last user message, always visible -->
             <button
               v-if="msg.role === 'user' && msg.id === lastUserMsgId && !store.streaming"
@@ -1309,8 +1154,20 @@ function formatToolInput(raw: string): string {
             <div class="message-header text-left">
               <span class="message-role">{{ currentSession?.title || 'AI' }}</span>
             </div>
+            <!-- Show compressing indicator -->
+            <div v-if="store.compressing && !store.streamingContent" class="message-content">
+              <div class="compressing-indicator">
+                <span class="compressing-icon">⏳</span> 正在自动压缩上下文，即将继续回复…
+              </div>
+            </div>
+            <!-- Show recovery indicator (session lost, auto-recovering) -->
+            <div v-else-if="store.recovering && !store.streamingContent" class="message-content">
+              <div class="compressing-indicator">
+                <span class="compressing-icon">🔄</span> 会话已自动刷新，正在恢复上下文…
+              </div>
+            </div>
             <!-- Show typing indicator when no content yet -->
-            <div v-if="!store.streamingContent && !store.thinkingContent && store.toolCalls.length === 0" class="message-content">
+            <div v-else-if="!store.streamingContent && !store.thinkingContent && store.toolCalls.length === 0" class="message-content">
               <div class="typing-indicator">
                 <span></span><span></span><span></span>
               </div>
@@ -1344,11 +1201,25 @@ function formatToolInput(raw: string): string {
       </div>
 
       <div class="input-row">
-        <div class="input-wrapper" :class="{ disabled: store.streaming }">
+        <!-- Message queue display (only for the session that owns the queue) -->
+        <div v-if="store.messageQueue.length > 0 && store.messageQueueSessionId === store.currentSessionId" class="queue-panel">
+          <div class="queue-header">
+            <span class="queue-title">候选队列 ({{ store.messageQueue.length }})</span>
+            <span class="queue-hint">AI 完成后自动发送</span>
+          </div>
+          <div class="queue-items">
+            <div v-for="(q, qi) in store.messageQueue" :key="qi" class="queue-item">
+              <span class="queue-item-text">{{ q.length > 80 ? q.slice(0, 80) + '...' : q }}</span>
+              <button class="queue-item-remove" @click="store.removeFromQueue(qi)" title="移除">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="input-wrapper">
           <button
             class="btn-attach"
             @click="openFileDialog"
-            :disabled="store.streaming"
             title="添加图片"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1368,14 +1239,13 @@ function formatToolInput(raw: string): string {
           <textarea
             ref="textareaEl"
             v-model="input"
-            :disabled="store.streaming"
             @keydown="onKeydown"
             @input="autoResize"
             @paste="handlePaste"
             @focus="store.triggerInputFocus()"
             @compositionstart="isComposing = true"
             @compositionend="isComposing = false"
-            :placeholder="store.streaming ? 'AI is responding...' : '输入消息... (可粘贴图片)'"
+            :placeholder="store.streaming ? 'AI 正在回复，消息将进入候选队列...' : '输入消息... (可粘贴图片)'"
             rows="1"
           />
           <div class="input-actions">
@@ -1394,201 +1264,20 @@ function formatToolInput(raw: string): string {
       </div>
     </div>
 
-    <!-- Session rules modal -->
+    <!-- Session Config Drawer -->
+    <SessionConfigDrawer v-model:visible="showConfigDrawer" />
+
+    <!-- Raw request drawer -->
     <Teleport to="body">
-      <div v-if="showSessionRulesModal" class="modal-overlay" @click="showSessionRulesModal = false">
-        <div class="rules-modal" @click.stop>
-          <div class="rules-modal-header">
-            <div class="rules-modal-icon">
-              <IconPicker
-                :model-value="store.currentSession?.icon || ''"
-                :entity-id="store.currentSession?.id"
-                @update:model-value="updateSessionIcon"
-              />
+      <div class="drawer-overlay" :class="{ 'is-visible': showRawRequestModal }" @click="showRawRequestModal = false">
+        <div class="drawer-content raw-req-drawer" :class="{ 'is-visible': showRawRequestModal }" @click.stop>
+          <div class="drawer-header">
+            <div class="drawer-title">
+              <span>上下文详情</span>
+              <span class="drawer-subtitle">会话 #{{ store.currentSession?.id }}</span>
             </div>
-            <div class="rules-modal-title-group">
-              <span class="rules-modal-title">会话规则</span>
-              <span class="rules-modal-dir">会话 #{{ store.currentSession?.id }}</span>
-            </div>
-            <button class="rules-modal-close" @click="showSessionRulesModal = false">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M18 6L6 18M6 6l12 12"/>
-              </svg>
-            </button>
-          </div>
-          <div class="session-rules-body">
-            <div v-if="sessionRulesLoading" class="rules-empty">加载中...</div>
-            <template v-else>
-              <!-- Team selector -->
-              <div class="session-group-selector">
-                <label class="group-label">所属团队</label>
-                <div class="group-select-row">
-                  <select v-model="selectedGroupName" class="group-select" :disabled="groupSaving">
-                    <option value="">无团队</option>
-                    <option v-for="g in groupsList" :key="g.name" :value="g.name">
-                      {{ g.name }}
-                    </option>
-                  </select>
-                  <button
-                    class="btn-save-group"
-                    @click="updateSessionGroup"
-                    :disabled="groupSaving || selectedGroupName === (store.currentSession?.group_name || '')"
-                  >
-                    {{ groupSaving ? '...' : '保存' }}
-                  </button>
-                </div>
-              </div>
-
-              <!-- Session rules textarea -->
-              <label class="group-label">角色规则</label>
-              <textarea
-                v-model="sessionRulesContent"
-                class="rules-textarea session-rules-textarea"
-                placeholder="输入会话角色规则（Markdown 格式）...&#10;&#10;例如：&#10;你是一名测试工程师，负责..."
-              ></textarea>
-              <div class="rules-editor-actions session-rules-actions">
-                <button
-                  class="btn-delete-rule"
-                  @click="deleteSessionRules"
-                  :disabled="!sessionRulesContent"
-                >
-                  清除
-                </button>
-                <button
-                  class="btn-save-rule"
-                  :disabled="sessionRulesSaving"
-                  @click="saveSessionRules"
-                >
-                  {{ sessionRulesSaving ? '保存中...' : '保存' }}
-                </button>
-              </div>
-
-              <!-- Auto reset threshold -->
-              <label class="group-label" style="margin-top: 16px;">自动重置阈值</label>
-              <div class="auto-reset-row">
-                <input
-                  type="number"
-                  v-model.number="autoResetThreshold"
-                  min="0"
-                  max="1000"
-                  placeholder="0 = 不自动重置"
-                  class="reset-input"
-                  style="width: 120px;"
-                />
-                <span class="reset-hint" style="margin-left: 8px;">消息数超过该值时自动重置（0=关闭）</span>
-                <button class="btn-save-rule" style="margin-left: auto;" @click="saveAutoResetThreshold">保存</button>
-              </div>
-            </template>
-          </div>
-        </div>
-      </div>
-    </Teleport>
-
-    <!-- Memory modal -->
-    <Teleport to="body">
-      <div v-if="showMemoryModal" class="modal-overlay" @click="showMemoryModal = false">
-        <div class="memory-modal" @click.stop>
-          <div class="rules-modal-header">
-            <span class="rules-modal-title">记忆库</span>
-            <span class="rules-modal-dir">会话 #{{ store.currentSession?.id }}</span>
-            <button class="rules-modal-close" @click="showMemoryModal = false">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M18 6L6 18M6 6l12 12"/>
-              </svg>
-            </button>
-          </div>
-          <div class="memory-body">
-            <!-- Left: file list -->
-            <div class="memory-sidebar">
-              <div class="memory-filter-bar">
-                <button
-                  v-for="lv in (['all', 'session', 'team', 'global'] as const)"
-                  :key="lv"
-                  :class="['memory-filter-btn', { active: memoryLevelFilter === lv }]"
-                  @click="memoryLevelFilter = lv"
-                >{{ lv === 'all' ? '全部' : memoryOriginLabel(lv) }}</button>
-                <button class="memory-add-btn" @click="startCreateMemory" title="新建记忆">+</button>
-              </div>
-              <div v-if="memoryLoading" class="rules-empty">加载中...</div>
-              <div v-else-if="filteredMemoryFiles.length === 0" class="rules-empty">暂无记忆文件</div>
-              <div v-else class="memory-file-list">
-                <div
-                  v-for="f in filteredMemoryFiles"
-                  :key="f.scope + '/' + f.file_name"
-                  :class="['memory-file-item', { active: memorySelectedFile?.file_name === f.file_name && memorySelectedFile?.scope === f.scope }]"
-                  @click="selectMemoryFile(f)"
-                >
-                  <div class="memory-file-name">{{ f.file_name }}</div>
-                  <div class="memory-file-meta">
-                    <span :class="'memory-origin memory-origin-' + f.origin">{{ memoryOriginLabel(f.origin) }}</span>
-                    <span class="memory-file-time">{{ f.updated_at ? new Date(f.updated_at).toLocaleDateString() : '' }}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <!-- Right: content -->
-            <div class="memory-content">
-              <template v-if="memoryCreating">
-                <div class="memory-create-header">
-                  <input
-                    v-model="memoryNewFileName"
-                    class="memory-filename-input"
-                    placeholder="文件名（如：工作总结.md）"
-                  />
-                </div>
-                <textarea
-                  v-model="memoryFileContent"
-                  class="rules-textarea memory-textarea"
-                  placeholder="输入记忆内容..."
-                ></textarea>
-                <div class="rules-editor-actions memory-actions">
-                  <button class="btn-delete-rule" @click="memoryCreating = false">取消</button>
-                  <button
-                    class="btn-save-rule"
-                    :disabled="!memoryNewFileName.trim() || memoryFileSaving"
-                    @click="createMemoryFile"
-                  >{{ memoryFileSaving ? '创建中...' : '创建' }}</button>
-                </div>
-              </template>
-              <template v-else-if="memorySelectedFile">
-                <div v-if="memoryFileLoading" class="rules-empty">加载中...</div>
-                <template v-else>
-                  <textarea
-                    v-model="memoryFileContent"
-                    class="rules-textarea memory-textarea"
-                    :readonly="!memoryEditing"
-                    :placeholder="memoryEditing ? '编辑记忆内容...' : ''"
-                  ></textarea>
-                  <div class="rules-editor-actions memory-actions">
-                    <button class="btn-delete-rule" @click="deleteMemoryFile">删除</button>
-                    <template v-if="memoryEditing">
-                      <button class="btn-delete-rule" @click="memoryEditing = false; selectMemoryFile(memorySelectedFile!)">取消</button>
-                      <button
-                        class="btn-save-rule"
-                        :disabled="memoryFileSaving"
-                        @click="saveMemoryFile"
-                      >{{ memoryFileSaving ? '保存中...' : '保存' }}</button>
-                    </template>
-                    <button v-else class="btn-save-rule" @click="memoryEditing = true">编辑</button>
-                  </div>
-                </template>
-              </template>
-              <div v-else class="rules-empty">← 选择一个记忆文件查看</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </Teleport>
-
-    <!-- Raw request modal -->
-    <Teleport to="body">
-      <div v-if="showRawRequestModal" class="modal-overlay" @click="showRawRequestModal = false">
-        <div class="raw-req-modal" @click.stop>
-          <div class="rules-modal-header">
-            <span class="rules-modal-title">原始请求</span>
-            <span class="rules-modal-dir">会话 #{{ store.currentSession?.id }}</span>
-            <button class="rules-modal-close" @click="showRawRequestModal = false">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <button class="btn-close" @click="showRawRequestModal = false">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M18 6L6 18M6 6l12 12"/>
               </svg>
             </button>
@@ -1608,6 +1297,10 @@ function formatToolInput(raw: string): string {
               <template v-if="rawRequestData">
                 <span>·</span>
                 <span>{{ new Date(rawRequestData.captured_at).toLocaleString('zh-CN') }}</span>
+                <template v-if="rawContentSizeKB">
+                  <span>·</span>
+                  <span class="raw-req-size-badge">Raw {{ rawContentSizeKB }} KB</span>
+                </template>
               </template>
             </div>
             <div class="raw-req-tabs">
@@ -1689,20 +1382,34 @@ function formatToolInput(raw: string): string {
                 </div>
               </template>
               <template v-else-if="rawRequestTab === 'fullchat'">
+                <div class="fullchat-search-bar">
+                  <input v-model="fullchatSearchQuery" @input="fullchatOnSearch" @keydown.enter="fullchatSearchNext"
+                    class="fullchat-search-input" placeholder="搜索日志内容..." />
+                  <span class="fullchat-match-info" v-if="fullchatSearchQuery.trim()">{{ fullchatMatchDisplay }}</span>
+                  <button class="fullchat-nav-btn" :disabled="!fullchatTotalMatches" @click="fullchatSearchPrev" title="上一个">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 15l-6-6-6 6"/></svg>
+                  </button>
+                  <button class="fullchat-nav-btn" :disabled="!fullchatTotalMatches" @click="fullchatSearchNext" title="下一个">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+                  </button>
+                </div>
                 <div class="fullchat-list" @scroll="onFullChatScroll">
                   <div v-if="fullChatLoading && fullChatMessages.length === 0" class="raw-req-loading">加载中...</div>
                   <template v-else>
-                    <div v-for="msg in fullChatMessages" :key="msg.id"
-                      class="fullchat-row" @click="toggleFullChatRow(msg.id)">
+                    <div v-for="(msg, fcIdx) in fullChatMessages" :key="msg.id"
+                      :data-fc-idx="fcIdx"
+                      :class="['fullchat-row', fullchatMatchIndices[fullchatCurrentMatchIdx] === fcIdx && 'fullchat-row-active-match']"
+                      @click="toggleFullChatRow(msg.id)">
                       <div class="fullchat-row-header">
                         <span :class="['fullchat-role-badge', msg.role === 'user' ? 'role-user' : 'role-assistant']">
                           {{ msg.role === 'user' ? 'user' : 'assistant' }}
                         </span>
                         <span class="fullchat-id">#{{ msg.id }} · msg#{{ msg.message_id }}</span>
-                        <span class="fullchat-preview" v-if="!expandedFullChatRows.has(msg.id)">{{ previewText(msg.content, 60) }}</span>
+                        <span class="fullchat-time">{{ formatMessageTime(msg.created_at) }}</span>
+                        <span class="fullchat-preview" v-if="!expandedFullChatRows.has(msg.id)" v-html="fullchatHighlightPreview(msg.content)"></span>
                         <span class="fullchat-expand-icon">{{ expandedFullChatRows.has(msg.id) ? '▼' : '▶' }}</span>
                       </div>
-                      <pre v-if="expandedFullChatRows.has(msg.id)" class="fullchat-full-content" @click.stop>{{ stripErrorTags(msg.content) }}</pre>
+                      <pre v-if="expandedFullChatRows.has(msg.id)" class="fullchat-full-content" @click.stop v-html="fullchatHighlightContent(msg.content)"></pre>
                     </div>
                     <div v-if="fullChatLoading" class="fullchat-status">加载更多...</div>
                     <div v-else-if="!fullChatHasMore && fullChatMessages.length > 0" class="fullchat-status">已加载全部 {{ fullChatTotal }} 条日志</div>
@@ -1755,10 +1462,42 @@ function formatToolInput(raw: string): string {
       </div>
     </Teleport>
 
-    <!-- Toast -->
+    <!-- Context menu (right-click on team member) -->
     <Teleport to="body">
-      <div v-if="toastVisible" class="toast" :class="toastType">{{ toastMsg }}</div>
+      <div v-if="memberCtxMenu" class="ctx-overlay" @click="closeMemberCtxMenu" @contextmenu.prevent="closeMemberCtxMenu">
+        <div class="ctx-menu" :style="{ left: memberCtxMenu.x + 'px', top: memberCtxMenu.y + 'px' }" @click.stop>
+          <button class="ctx-item" @click="exportMemberSession(memberCtxMenu.session)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+              <polyline points="17 8 12 3 7 8"/>
+              <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+            <span>导出会话</span>
+          </button>
+          <button class="ctx-item ctx-danger" @click="closeMemberCtxMenu(); memberDeleteTarget = memberCtxMenu!.session">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 6L6 18M6 6l12 12"/>
+            </svg>
+            <span>删除会话</span>
+          </button>
+        </div>
+      </div>
     </Teleport>
+
+    <!-- Delete member confirmation modal -->
+    <Teleport to="body">
+      <div v-if="memberDeleteTarget" class="modal-overlay" @click="memberDeleteTarget = null">
+        <div class="modal-box" @click.stop>
+          <p class="modal-title">确认删除</p>
+          <p class="modal-desc">删除成员会话「{{ memberDeleteTarget.title }}」？此操作不可撤销。</p>
+          <div class="modal-actions">
+            <button class="modal-btn cancel" @click="memberDeleteTarget = null">取消</button>
+            <button class="modal-btn confirm" @click="confirmMemberDelete">删除</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
   </div>
 </template>
 
@@ -1768,39 +1507,6 @@ function formatToolInput(raw: string): string {
   display: flex;
   flex-direction: column;
   min-height: 0;
-}
-/* Vector health banner */
-.vector-banner {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 24px;
-  background: var(--warning-bg);
-  border-bottom: 1px solid var(--warning-border);
-  font-size: 13px;
-  color: var(--warning-text);
-}
-.vector-banner-icon { font-size: 16px; }
-.vector-banner-text { flex: 1; }
-.vector-banner-btn {
-  padding: 4px 12px;
-  border: 1px solid var(--warning-border);
-  border-radius: 4px;
-  background: var(--bg-primary);
-  color: var(--warning-text);
-  cursor: pointer;
-  font-size: 12px;
-  white-space: nowrap;
-}
-.vector-banner-btn:hover { background: var(--warning-border); color: var(--btn-text); }
-.vector-banner-btn:disabled { opacity: 0.6; cursor: not-allowed; }
-.vector-banner-close {
-  background: none;
-  border: none;
-  color: var(--warning-text);
-  cursor: pointer;
-  font-size: 16px;
-  padding: 0 4px;
 }
 .quota-banner {
   display: flex;
@@ -1963,13 +1669,73 @@ function formatToolInput(raw: string): string {
   background: var(--bg-hover);
   color: var(--text-secondary);
 }
-.raw-req-modal {
+.drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--overlay);
+  z-index: 2000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+.drawer-overlay.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+.drawer-content {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 760px;
+  max-width: 100vw;
+  background: var(--bg-primary);
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.1);
+  z-index: 2001;
+  transform: translateX(100%);
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  display: flex;
+  flex-direction: column;
+}
+.drawer-content.is-visible {
+  transform: translateX(0);
+}
+.drawer-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  width: 760px; max-width: 92vw;
-  max-height: 84vh;
-  display: flex; flex-direction: column;
+}
+.drawer-title {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.drawer-subtitle {
+  font-size: 12px;
+  font-weight: normal;
+  color: var(--text-muted);
+}
+.btn-close {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+.btn-close:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 .raw-req-meta {
   display: flex; align-items: center; gap: 8px;
@@ -2001,6 +1767,10 @@ function formatToolInput(raw: string): string {
 .raw-req-meta-actual {
   color: var(--accent); font-weight: 500;
 }
+.raw-req-size-badge {
+  font-size: 11px; font-weight: 600; padding: 1px 6px;
+  border-radius: 3px; background: rgba(139, 92, 246, 0.1); color: #8b5cf6;
+}
 .raw-req-body {
   flex: 1; min-height: 0;
   overflow-y: auto;
@@ -2021,7 +1791,7 @@ function formatToolInput(raw: string): string {
 /* ===== Full Chat Tab ===== */
 .fullchat-list {
   display: flex; flex-direction: column; gap: 4px;
-  max-height: 60vh; overflow-y: auto;
+  flex: 1; min-height: 0; overflow-y: auto;
 }
 .fullchat-row {
   border: 1px solid var(--border); border-radius: 6px;
@@ -2044,6 +1814,9 @@ function formatToolInput(raw: string): string {
 .fullchat-id {
   font-size: 10px; color: var(--text-muted); flex-shrink: 0;
 }
+.fullchat-time {
+  font-size: 10px; color: var(--text-muted); flex-shrink: 0; opacity: 0.7;
+}
 .fullchat-preview {
   flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--text-secondary); font-size: 11px;
@@ -2058,6 +1831,31 @@ function formatToolInput(raw: string): string {
 }
 .fullchat-status {
   text-align: center; padding: 10px; font-size: 11px; color: var(--text-muted);
+}
+.fullchat-search-bar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 0 0 10px; flex-shrink: 0;
+}
+.fullchat-search-input {
+  flex: 1; min-width: 0;
+  padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px;
+  font-size: 12px; background: var(--bg-primary); color: var(--text-primary);
+  outline: none;
+}
+.fullchat-search-input:focus { border-color: var(--accent); }
+.fullchat-match-info {
+  font-size: 11px; color: var(--text-muted); white-space: nowrap; min-width: 40px; text-align: center;
+}
+.fullchat-nav-btn {
+  width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border); border-radius: 4px; background: var(--bg-primary);
+  color: var(--text-secondary); cursor: pointer; flex-shrink: 0;
+}
+.fullchat-nav-btn:hover:not(:disabled) { background: var(--bg-hover, var(--bg-tertiary)); }
+.fullchat-nav-btn:disabled { opacity: 0.3; cursor: default; }
+.fullchat-row-active-match { border-color: var(--accent) !important; background: rgba(var(--accent-rgb, 59,130,246), 0.06); }
+mark.fc-highlight {
+  background: rgba(255, 213, 0, 0.35); color: inherit; padding: 0 1px; border-radius: 2px;
 }
 
 /* ===== Visual Messages Tab ===== */
@@ -2173,10 +1971,9 @@ function formatToolInput(raw: string): string {
   white-space: pre-wrap; word-break: break-word;
 }
 .header-token-stats {
-  display: flex; align-items: center; gap: 4px;
-  font-size: 12px; color: var(--accent);
-  background: var(--accent-soft); padding: 2px 8px;
-  border-radius: var(--radius-sm); white-space: nowrap;
+  display: flex; align-items: center; gap: 3px;
+  font-size: 11px; color: var(--text-muted);
+  white-space: nowrap;
 }
 .btn-rules {
   display: flex;
@@ -2291,12 +2088,6 @@ function formatToolInput(raw: string): string {
 .btn-danger:hover {
   background: #c62828;
 }
-.auto-reset-row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-wrap: wrap;
-}
 .messages {
   flex: 1;
   overflow-y: auto;
@@ -2357,6 +2148,9 @@ function formatToolInput(raw: string): string {
 .message-role {
   font-size: 11px; font-weight: 600; color: var(--text-muted);
   text-transform: none; letter-spacing: 0;
+}
+.message-time {
+  font-size: 10px; color: var(--text-muted); margin-left: 6px; opacity: 0.6;
 }
 .message-content {
   font-size: 14px; line-height: 1.7; color: var(--text-primary); word-break: break-word;
@@ -2504,6 +2298,11 @@ function formatToolInput(raw: string): string {
   0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
   40% { transform: scale(1); opacity: 1; }
 }
+.compressing-indicator {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 0; color: var(--text-muted); font-size: 13px;
+}
+.compressing-icon { animation: spin 1.5s linear infinite; display: inline-block; }
 /* Input area */
 .input-area {
   padding: 16px 24px 24px;
@@ -2512,7 +2311,29 @@ function formatToolInput(raw: string): string {
 }
 .input-row {
   max-width: 720px; margin: 0 auto;
-  display: flex; align-items: flex-end;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.queue-panel {
+  background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 8px 10px; font-size: 12px;
+}
+.queue-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.queue-title { font-weight: 600; color: var(--accent); font-size: 11px; }
+.queue-hint { font-size: 10px; color: var(--text-muted); }
+.queue-items { display: flex; flex-direction: column; gap: 4px; }
+.queue-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 4px 8px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 4px;
+}
+.queue-item-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
+.queue-item-remove {
+  width: 18px; height: 18px; display: flex; align-items: center; justify-content: center;
+  border-radius: 3px; color: var(--text-muted); flex-shrink: 0; cursor: pointer;
+}
+.queue-item-remove:hover { color: var(--danger); background: rgba(239,68,68,0.1); }
+@media (max-width: 768px) {
+  .queue-panel { padding: 6px 8px; }
+  .queue-item-text { font-size: 11px; }
 }
 .input-wrapper {
   flex: 1;
@@ -2526,8 +2347,6 @@ function formatToolInput(raw: string): string {
   transition: border-color var(--transition), box-shadow var(--transition);
 }
 .input-wrapper:focus-within { border-color: var(--accent); }
-.input-wrapper.disabled { opacity: 0.7; }
-.input-wrapper.disabled textarea { cursor: not-allowed; }
 .input-wrapper textarea {
   flex: 1;
   resize: none;
@@ -2638,6 +2457,54 @@ function formatToolInput(raw: string): string {
   background: var(--overlay);
   display: flex; align-items: center; justify-content: center;
   z-index: 1000;
+}
+.modal-box {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  width: 340px;
+  max-width: 90vw;
+}
+.modal-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+.modal-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 20px;
+  line-height: 1.5;
+  word-break: break-all;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.modal-btn {
+  padding: 6px 16px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.modal-btn.cancel {
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+}
+.modal-btn.cancel:hover {
+  color: var(--text-primary);
+}
+.modal-btn.confirm {
+  color: var(--btn-text);
+  background: var(--danger, #ef4444);
+}
+.modal-btn.confirm:hover {
+  opacity: 0.9;
 }
 .rules-modal {
   background: var(--bg-secondary);
@@ -2964,6 +2831,90 @@ function formatToolInput(raw: string): string {
 }
 .more-menu button:hover { background: var(--bg-hover); color: var(--text-primary); }
 .more-menu button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Team Members Bar */
+.team-members-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 24px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+.team-members-bar::-webkit-scrollbar {
+  height: 4px;
+}
+.team-members-bar::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+.team-member-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 16px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.team-member-item:hover {
+  background: var(--bg-hover);
+  border-color: var(--text-muted);
+}
+.team-member-item.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.team-member-item.active .member-name {
+  color: var(--accent);
+  font-weight: 600;
+}
+.member-avatar {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.member-name {
+  font-size: 12px;
+  color: var(--text-secondary);
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+.member-btn-delete {
+  opacity: 0.5;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: var(--text-muted);
+  transition: all var(--transition);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  margin-left: 2px;
+}
+.team-member-item:hover .member-btn-delete {
+  opacity: 1;
+}
+.member-btn-delete:hover {
+  color: var(--danger);
+  background: rgba(239, 68, 68, 0.1);
+}
+
 /* Mobile styles */
 @media (max-width: 768px) {
   .chat-header { padding: 8px 12px; gap: 8px; }
@@ -2972,6 +2923,7 @@ function formatToolInput(raw: string): string {
   .header-workdir { display: none; }
   .provider-switcher { display: none; }
   .header-sub-row { margin-top: 0; }
+  .team-members-bar { padding: 8px 12px; }
   .messages { padding: 12px 0; }
   .messages-inner { padding: 0 12px; }
   .quick-actions { padding: 32px 12px 12px; }

@@ -1,4 +1,4 @@
-import type { Provider, Session, Message, ConversationLog, Trigger, Channel, TokenUsage, TokenUsageStats, CompressSettings } from '../types'
+import type { Provider, Session, Message, ConversationLog, Trigger, Channel, TokenUsage, TokenUsageStats, CompressionSettings } from '../types'
 
 const BASE = '/api/v1'
 
@@ -32,6 +32,9 @@ export interface ClaudeAuthStatus {
   error?: string
 }
 export const getClaudeAuthStatus = () => request<ClaudeAuthStatus>('/claude/auth-status')
+export const getCompressionSettings = () => request<CompressionSettings>('/compression/settings')
+export const updateCompressionSettings = (settings: CompressionSettings) =>
+  request<CompressionSettings>('/compression/settings', { method: 'PUT', body: JSON.stringify(settings) })
 
 // Sessions
 export const listSessions = () => request<Session[]>('/sessions')
@@ -60,10 +63,6 @@ export const getConversationLogsPaginated = (sessionId: number, limit = 50, befo
     `/sessions/${sessionId}/logs?${params.toString()}`
   )
 }
-
-// Compress session context
-export const compressSession = (id: number) =>
-  request<{ ok: boolean }>(`/sessions/${id}/compress`, { method: 'POST' })
 
 // Reset session context (delete messages, keep session config)
 export const resetSession = (id: number, keepLast = 0) =>
@@ -98,14 +97,36 @@ export interface AnthropicRequest {
 }
 
 // Get last raw request sent to Claude Code CLI
+export interface LastRawRequest {
+  system_prompt: string
+  query: string
+  context_count: number
+  captured_at: string
+  anthropic_request?: AnthropicRequest
+  estimated_tokens?: number
+  provider_max_tokens?: number
+  threshold_percent?: number
+  threshold_tokens?: number
+  usage_percent?: number
+  compression_enabled?: boolean
+  would_trigger_compression?: boolean
+  compression_triggered?: boolean
+}
+
 export const getLastRawRequest = (id: number) =>
-  request<{
-    system_prompt: string
-    query: string
-    context_count: number
-    captured_at: string
-    anthropic_request?: AnthropicRequest
-  }>(`/sessions/${id}/last-request`)
+  request<LastRawRequest>(`/sessions/${id}/last-request`)
+
+// Get real context usage (based on actual API input_tokens, not rough estimate)
+export interface ContextUsageResponse {
+  estimated_tokens: number
+  provider_max_tokens: number
+  threshold_percent: number
+  threshold_tokens: number
+  display_percent: number
+  compression_enabled: boolean
+}
+export const getSessionContextUsage = (id: number) =>
+  request<ContextUsageResponse>(`/sessions/${id}/context-usage`)
 
 // Truncate messages from a given message ID inclusive (used for retry-message feature).
 // Deletes the user message itself AND all subsequent messages (AI reply etc.)
@@ -186,6 +207,7 @@ export const getDefaultFile = (path: string) =>
 export interface SkillItem {
   name: string
   description: string
+  when_to_use?: string
   source: string
   path: string
   enabled: boolean
@@ -246,56 +268,7 @@ export const updateTrigger = (id: number, t: Partial<Trigger>) =>
 export const deleteTrigger = (id: number) =>
   request<{ ok: boolean }>(`/triggers/${id}`, { method: 'DELETE' })
 
-// Vector search
-export interface VectorSearchResult {
-  id: string
-  document: string
-  similarity: number
-  metadata: Record<string, any>
-}
-export const vectorSearch = (scope: string, query: string, topK: number = 5) =>
-  request<{ results: VectorSearchResult[] }>('/vector/search', {
-    method: 'POST',
-    body: JSON.stringify({ scope, query, top_k: topK }),
-  })
-
-// Memory search (three-layer merge: session → team → global)
-export interface MemorySearchResult {
-  id: string
-  document: string
-  similarity: number
-  level: string       // "session" | "team" | "global"
-  origin: string      // "session" | "team" | "global"
-  type: string        // "memory"
-  hit_count: number
-  read_count: number
-  source_session_id: number
-  created_at: string  // RFC3339
-  updated_at: string  // RFC3339
-  metadata: Record<string, any>
-}
-export const searchMemory = (query: string, topK: number = 10, sessionId?: number) =>
-  request<{ results: MemorySearchResult[] }>('/vector/search_memory', {
-    method: 'POST',
-    body: JSON.stringify({ query, top_k: topK, ...(sessionId ? { session_id: sessionId } : {}) }),
-  })
-
-// Read memory file content by scope + file_name
-export const readMemoryFile = (scope: string, fileName: string) =>
-  request<{ file_name: string; content: string; scope: string }>('/vector/read', {
-    method: 'POST',
-    body: JSON.stringify({ scope, file_name: fileName }),
-  })
-
-export const vectorHealth = () =>
-  request<{ ready: boolean; disabled: boolean; error?: string; fix_hint?: string }>('/vector/health')
-
-// List .md files in a vector scope dir (knowledge / memory / rules)
-export const listVectorFiles = (scope: string) =>
-  request<string[]>(`/vector/list?scope=${encodeURIComponent(scope)}`)
-
-// Rich file item returned by /vector/list_files
-export interface VectorFileRich {
+export interface ScopedFileRich {
   file_name: string
   preview: string
   type: string
@@ -304,37 +277,34 @@ export interface VectorFileRich {
   updated_at: string  // RFC3339
   scope: string
   origin: string      // "session" | "team" | "global"
+  size?: number       // bytes
 }
 
-// List .md files with metadata (source_session_id, updated_at) sorted by mod time desc
-export const listVectorFilesRich = (scope: string, opts?: { session_id?: number; level?: string }) => {
-  const params = new URLSearchParams({ scope })
+export const listScopedFiles = (scope: string, opts?: { session_id?: number; level?: string; type?: string }) => {
+  const params = new URLSearchParams()
+  if (scope) params.set('scope', scope)
   if (opts?.session_id) params.set('session_id', String(opts.session_id))
   if (opts?.level) params.set('level', opts.level)
-  return request<{ files: VectorFileRich[]; total: number }>(`/vector/list_files?${params}`)
+  if (opts?.type) params.set('type', opts.type)
+  return request<{ files: ScopedFileRich[]; total: number }>(`/files/scoped/list?${params.toString()}`)
 }
 
-// Read a single file from any valid scope
-export const readVectorFile = (scope: string, fileName: string) =>
-  request<{ file_name: string; content: string; scope: string }>('/vector/read', {
+export const readScopedFile = (scope: string, fileName: string, sessionId?: number, type = 'memory') =>
+  request<{ file_name: string; content: string; scope: string }>('/files/scoped/read', {
     method: 'POST',
-    body: JSON.stringify({ scope, file_name: fileName }),
+    body: JSON.stringify({ scope, file_name: fileName, ...(sessionId ? { session_id: sessionId } : {}), type }),
   })
 
-// Write a single file to any valid vector scope
-// When sessionId is provided and scope is empty, backend auto-resolves session-level scope
-export const writeVectorFile = (scope: string, fileName: string, content: string, sessionId?: number) =>
-  request<{ ok: boolean; file_name: string; scope: string }>('/vector/write', {
+export const writeScopedFile = (scope: string, fileName: string, content: string, sessionId?: number, type = 'memory') =>
+  request<{ ok: boolean; file_name: string; scope: string }>('/files/scoped/write', {
     method: 'POST',
-    body: JSON.stringify({ scope: scope || '', file_name: fileName, content, ...(sessionId ? { session_id: sessionId } : {}) }),
+    body: JSON.stringify({ scope: scope || '', file_name: fileName, content, ...(sessionId ? { session_id: sessionId } : {}), type }),
   })
 
-// Delete a single file from any valid vector scope
-// When sessionId is provided and scope is empty, backend auto-resolves session-level scope
-export const deleteVectorFile = (scope: string, fileName: string, sessionId?: number) =>
-  request<{ ok: boolean; file_name: string }>('/vector/delete', {
+export const deleteScopedFile = (scope: string, fileName: string, sessionId?: number, type = 'memory') =>
+  request<{ ok: boolean; file_name: string }>('/files/scoped/delete', {
     method: 'POST',
-    body: JSON.stringify({ scope: scope || '', file_name: fileName, ...(sessionId ? { session_id: sessionId } : {}) }),
+    body: JSON.stringify({ scope: scope || '', file_name: fileName, ...(sessionId ? { session_id: sessionId } : {}), type }),
   })
 
 // Channels
@@ -461,11 +431,6 @@ export const restartService = (id: number) =>
 export const getServiceLogs = (id: number, lines = 100) =>
   request<{ logs: string; error?: string }>('/services/' + id + '/logs?lines=' + lines)
 
-// Compress settings
-export const getCompressSettings = () => request<CompressSettings>('/settings/compress')
-export const updateCompressSettings = (s: CompressSettings) =>
-  request<{ ok: boolean }>('/settings/compress', { method: 'PUT', body: JSON.stringify(s) })
-
 // Schemas
 export interface SchemaItem {
   id: number
@@ -484,22 +449,6 @@ export const updateSchemaApi = (name: string, definition: object, writers?: numb
 export const deleteSchemaApi = (name: string) =>
   request<{ ok: boolean }>('/schemas/' + encodeURIComponent(name), { method: 'DELETE' })
 
-// Structured Memory
-export interface StructuredCategory {
-  category: string
-  label: string
-  has_data: boolean
-  fixed: boolean
-}
-export const listStructuredMemory = () =>
-  request<StructuredCategory[]>('/structured-memory')
-export const getStructuredMemory = (category: string) =>
-  request<{ category: string; label: string; content: string }>(`/structured-memory/${encodeURIComponent(category)}`)
-export const putStructuredMemory = (category: string, content: string) =>
-  request<{ ok: boolean }>(`/structured-memory/${encodeURIComponent(category)}`, {
-    method: 'PUT',
-    body: JSON.stringify({ content }),
-  })
 
 // Changelog
 export interface ChangelogEntry {
@@ -551,19 +500,3 @@ export const enableHook = (id: number) =>
 export const disableHook = (id: number) =>
   request<{ ok: boolean }>(`/hooks/${id}/disable`, { method: 'POST' })
 
-// Injection Router
-export interface InjectionRoute {
-  id: number
-  keywords: string
-  inject_categories: string
-  created_at: string
-  updated_at: string
-}
-export const listInjectionRoutes = () =>
-  request<{ routes: InjectionRoute[]; categories: string[]; fixed: string[]; conditional: string[] }>('/injection-router')
-export const createInjectionRoute = (keywords: string, inject_categories: string) =>
-  request<InjectionRoute>('/injection-router', { method: 'POST', body: JSON.stringify({ keywords, inject_categories }) })
-export const updateInjectionRoute = (id: number, data: Partial<InjectionRoute>) =>
-  request<{ ok: boolean }>(`/injection-router/${id}`, { method: 'PUT', body: JSON.stringify(data) })
-export const deleteInjectionRoute = (id: number) =>
-  request<{ ok: boolean }>(`/injection-router/${id}`, { method: 'DELETE' })

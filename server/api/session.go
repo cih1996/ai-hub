@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -424,117 +423,10 @@ func TruncateMessages(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
-// CompressSession handles POST /api/v1/sessions/:id/compress
-// Supports query param ?mode=intelligent|simple|auto (overrides global setting).
-func CompressSession(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid session id"})
-		return
-	}
-
-	if IsSessionStreaming(id) {
-		c.JSON(http.StatusConflict, gin.H{"error": "session is currently streaming"})
-		return
-	}
-
-	session, err := store.GetSession(id)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
-		return
-	}
-
-	// Allow caller to override mode via query param
-	mode := c.Query("mode")
-	if mode == "" {
-		if cfg, e := store.GetCompressSettings(); e == nil {
-			mode = cfg.Mode
-		}
-	}
-	if mode == "" {
-		mode = "auto"
-	}
-
-	compressMode, err := doCompress(session, mode)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"ok": true, "message": "context compressed, session reset", "compress_mode": compressMode})
-}
-
-// doCompress performs the core compression logic: builds recovery seed, resets session UUID,
-// kills pool process, marks force-fresh, and saves the system message.
-// Returns the actual compress mode used ("intelligent" or "simple").
-func doCompress(session *model.Session, mode string) (string, error) {
-	msgs, _ := store.GetMessages(session.ID)
-
-	seed, actualMode := buildCompressedSeed(msgs, session, mode)
-	if seed != "" {
-		setPendingRecoverySeed(session.ID, seed)
-	}
-
-	newUUID := uuid.New().String()
-	core.Pool.Kill(session.ID)
-	if err := store.UpdateClaudeSessionID(session.ID, newUUID); err != nil {
-		return "", fmt.Errorf("failed to update session id: %w", err)
-	}
-	markForceFreshRun(session.ID)
-	session.ClaudeSessionID = newUUID
-
-	sysMsg := &model.Message{
-		SessionID: session.ID,
-		Role:      "user",
-		Content:   fmt.Sprintf("【系统】上下文已压缩（%s 模式），会话已重置。", actualMode),
-	}
-	store.AddMessage(sysMsg)
-
-	// Record the compress point so subsequent auto-compress only counts incremental data
-	if sysMsg.ID > 0 {
-		store.UpdateLastCompressMsgID(session.ID, sysMsg.ID)
-		session.LastCompressMsgID = sysMsg.ID
-	}
-
-	// Notify all WS clients
-	broadcast(WSMessage{Type: "auto_compressed", SessionID: session.ID, Content: actualMode})
-	return actualMode, nil
-}
-
-// buildCompressedSeed picks intelligent or simple mode, with auto-fallback.
-// Returns the seed string and the mode actually used.
-func buildCompressedSeed(msgs []model.Message, session *model.Session, mode string) (string, string) {
-	if len(msgs) == 0 {
-		return "", "simple"
-	}
-
-	tryIntelligent := mode == "intelligent" || mode == "auto"
-
-	if tryIntelligent {
-		provider, err := store.GetProvider(session.ProviderID)
-		if err != nil || provider == nil {
-			log.Printf("[compress] session %d: provider not found, falling back to simple", session.ID)
-			return buildRecoverySeed(msgs, "上下文压缩后恢复"), "simple"
-		}
-		seed, err := core.BuildIntelligentRecoverySeed(msgs, provider, session.ID)
-		if err == nil && seed != "" {
-			return seed, "intelligent"
-		}
-		log.Printf("[compress] session %d: intelligent failed (%v), falling back to simple", session.ID, err)
-		if mode == "intelligent" {
-			// strict mode: don't fallback
-			return "", "intelligent"
-		}
-		// auto: fallback to simple
-	}
-
-	return buildRecoverySeed(msgs, "上下文压缩后恢复"), "simple"
-}
-
 // buildRecoverySeed takes recent messages and builds a condensed prompt for context recovery.
 func buildRecoverySeed(msgs []model.Message, reason string) string {
-	const maxMsgs = 10
-	const maxContentLen = 500
+	const maxMsgs = 50
+	const maxContentLen = 4000
 
 	start := 0
 	if len(msgs) > maxMsgs {
@@ -546,7 +438,7 @@ func buildRecoverySeed(msgs []model.Message, reason string) string {
 	if strings.TrimSpace(reason) == "" {
 		reason = "会话重置后恢复"
 	}
-	sb.WriteString(fmt.Sprintf("【上下文恢复】本轮因\"%s\"进入新会话。请先基于以下历史记录恢复上下文，再继续处理当前用户请求。\n\n", reason))
+	sb.WriteString(fmt.Sprintf("【上下文恢复】本轮因「%s」进入新会话。以下是 AI 生成的智能压缩摘要，请基于此继续任务。\n\n", reason))
 
 	for _, m := range recent {
 		role := "用户"
@@ -561,54 +453,47 @@ func buildRecoverySeed(msgs []model.Message, reason string) string {
 		sb.WriteString(fmt.Sprintf("[%s]: %s\n\n", role, content))
 	}
 
-	sb.WriteString(fmt.Sprintf("\n---\n如需完整历史，请调用：GET /api/v1/sessions/%d/messages（不要使用不存在的接口）。\n", msgs[len(msgs)-1].SessionID))
+	sb.WriteString(fmt.Sprintf("\n---\n如需完整历史，请调用：GET /api/v1/sessions/%d/logs\n", msgs[len(msgs)-1].SessionID))
 	sb.WriteString("请继续处理上面最后一条用户消息的请求；若存在未完成任务，延续执行。")
 	return sb.String()
 }
 
-// maybeAutoCompress checks auto-compress settings and triggers compression if both
-// the token threshold AND the minimum turn count are exceeded (dual-condition).
-// Called asynchronously after each successful runStream; must not block.
-func maybeAutoCompress(session *model.Session, newInputTokens int64) {
-	cfg, err := store.GetCompressSettings()
-	if err != nil || !cfg.AutoEnabled {
-		return
-	}
+// buildRecoverySeedFromLogs builds a rich recovery seed directly from conversation_logs.
+// Used when intelligent compression fails — provides the full recent history instead
+// of a lossy summary, so the new session can pick up where it left off.
+func buildRecoverySeedFromLogs(logs []model.ConversationLog, reason string) string {
+	const maxLogs = 80
+	const maxContentLen = 6000
 
-	// Use last_compress_msg_id for incremental counting (only data since last compress)
-	afterMsgID := session.LastCompressMsgID
-
-	// Condition 1: incremental input tokens since last compress must exceed threshold
-	stats, err := store.GetSessionTokenStats(session.ID, afterMsgID)
-	if err != nil {
-		return
+	start := 0
+	if len(logs) > maxLogs {
+		start = len(logs) - maxLogs
 	}
-	totalInput := stats.TotalInput
-	if totalInput < int64(cfg.Threshold) {
-		return
-	}
+	recent := logs[start:]
 
-	// Condition 2: conversation turns since last compress must reach MinTurns
-	if cfg.MinTurns > 0 {
-		turns := store.CountUserMessages(session.ID, afterMsgID)
-		if turns < cfg.MinTurns {
-			log.Printf("[compress] auto-compress skipped for session %d: turns=%d < min_turns=%d (tokens=%d, afterMsgID=%d)",
-				session.ID, turns, cfg.MinTurns, totalInput, afterMsgID)
-			return
+	var sb strings.Builder
+	if strings.TrimSpace(reason) == "" {
+		reason = "会话重置后恢复"
+	}
+	sb.WriteString(fmt.Sprintf("【上下文恢复】本轮因「%s」进入新会话。以下是 AI 生成的智能压缩摘要，请基于此继续任务。\n\n", reason))
+
+	for _, m := range recent {
+		role := "用户"
+		if m.Role == "assistant" {
+			role = "助手"
 		}
+		content := m.Content
+		runes := []rune(content)
+		if len(runes) > maxContentLen {
+			content = string(runes[:maxContentLen]) + "...(已截断)"
+		}
+		sb.WriteString(fmt.Sprintf("[%s]: %s\n\n", role, content))
 	}
 
-	// Don't compress if streaming is in progress
-	if IsSessionStreaming(session.ID) {
-		return
-	}
-
-	log.Printf("[compress] auto-compress triggered for session %d: total_input=%d threshold=%d turns>=%d afterMsgID=%d",
-		session.ID, totalInput, cfg.Threshold, cfg.MinTurns, afterMsgID)
-
-	if _, err := doCompress(session, cfg.Mode); err != nil {
-		log.Printf("[compress] auto-compress failed for session %d: %v", session.ID, err)
-	}
+	sessionID := recent[len(recent)-1].SessionID
+	sb.WriteString(fmt.Sprintf("\n---\n如需完整历史，请调用：GET /api/v1/sessions/%d/logs\n", sessionID))
+	sb.WriteString("请继续处理上面最后一条用户消息的请求；若存在未完成任务，延续执行。")
+	return sb.String()
 }
 
 // SwitchProvider handles PUT /api/v1/sessions/:id/provider
@@ -735,9 +620,6 @@ func ResetSession(c *gin.Context) {
 	newUUID := uuid.New().String()
 	store.UpdateClaudeSessionID(id, newUUID)
 	markForceFreshRun(id)
-	// Reset compress tracking
-	store.UpdateLastCompressMsgID(id, 0)
-
 	// Broadcast context reset to WS clients
 	broadcast(WSMessage{Type: "context_reset", SessionID: id, Content: fmt.Sprintf("deleted:%d", deleted)})
 
@@ -747,84 +629,4 @@ func ResetSession(c *gin.Context) {
 		"deleted_count": deleted,
 		"kept_count":    body.KeepLast,
 	})
-}
-
-// maybeAutoReset checks if a session's message count exceeds auto_reset_threshold
-// and triggers a reset if so. Called after each successful message processing.
-func maybeAutoReset(session *model.Session) {
-	if session.AutoResetThreshold <= 0 {
-		return
-	}
-
-	count, err := store.GetMessagesCount(session.ID)
-	if err != nil || count <= int64(session.AutoResetThreshold) {
-		return
-	}
-
-	// Don't reset if currently streaming; runStream may have just spawned queued processing.
-	if IsSessionStreaming(session.ID) {
-		log.Printf("[auto-reset] session %d: skipped, currently streaming", session.ID)
-		return
-	}
-
-	lastUserID := store.GetLastUserMessageID(session.ID)
-	pending, err := store.GetPendingUserMessages(session.ID, lastUserID)
-	if err != nil {
-		log.Printf("[auto-reset] session %d: pending check failed: %v", session.ID, err)
-		return
-	}
-	if len(pending) > 0 {
-		log.Printf("[auto-reset] session %d: skipped, pending_count=%d", session.ID, len(pending))
-		return
-	}
-
-	log.Printf("[auto-reset] session %d: message count %d exceeds threshold %d, scheduling guarded reset",
-		session.ID, count, session.AutoResetThreshold)
-
-	go func(threshold int, expectedLastUserID int64) {
-		// Short guard window: if a queued/user turn starts right after scheduling, do not reset.
-		time.Sleep(2 * time.Second)
-
-		if IsSessionStreaming(session.ID) {
-			log.Printf("[auto-reset] session %d: abort reset, stream started", session.ID)
-			return
-		}
-		if store.GetLastUserMessageID(session.ID) != expectedLastUserID {
-			log.Printf("[auto-reset] session %d: abort reset, new user message detected", session.ID)
-			return
-		}
-		pending, err := store.GetPendingUserMessages(session.ID, expectedLastUserID)
-		if err != nil {
-			log.Printf("[auto-reset] session %d: abort reset, pending recheck failed: %v", session.ID, err)
-			return
-		}
-		if len(pending) > 0 {
-			log.Printf("[auto-reset] session %d: abort reset, pending_count=%d", session.ID, len(pending))
-			return
-		}
-		count, err := store.GetMessagesCount(session.ID)
-		if err != nil || count <= int64(threshold) {
-			return
-		}
-
-		// Execute reset only while idle and queue-free. Keep recent visible messages; full logs remain in conversation_logs.
-		deleted, err := store.ResetSessionMessages(session.ID, 2)
-		if err != nil {
-			log.Printf("[auto-reset] session %d: reset failed: %v", session.ID, err)
-			return
-		}
-
-		log.Printf("[auto-reset] session %d: deleted %d messages", session.ID, deleted)
-
-		// Kill only idle pool process and reset UUID for next user turn.
-		core.Pool.Kill(session.ID)
-		newUUID := uuid.New().String()
-		store.UpdateClaudeSessionID(session.ID, newUUID)
-		markForceFreshRun(session.ID)
-		store.UpdateLastCompressMsgID(session.ID, 0)
-		setPendingRecoverySeed(session.ID, "【系统】上下文已自动重置（消息数超过自动重置阈值）。请从记忆库读取工作状态继续。")
-
-		// Broadcast to WS
-		broadcast(WSMessage{Type: "context_reset", SessionID: session.ID, Content: fmt.Sprintf("auto_reset:deleted:%d", deleted)})
-	}(session.AutoResetThreshold, lastUserID)
 }
