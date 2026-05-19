@@ -142,7 +142,7 @@ func GetSessionContextUsage(c *gin.Context) {
 	displayPct := 0.0
 
 	if provider != nil {
-		providerMaxSize = provider.MaxTokens // MaxTokens repurposed as max request size in bytes
+		providerMaxSize = providerMaxRequestBodyBytes(provider) // bytes, fallback to default when provider is unset
 	}
 	if settings.Enabled && settings.ThresholdPercent > 0 {
 		compressionEnabled = true

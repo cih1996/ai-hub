@@ -255,6 +255,9 @@ func main() {
 
 		// Skills
 		v1.GET("/skills", api.ListSkills)
+		v1.GET("/skill-export/:name", api.ExportSkill)
+		v1.POST("/skill-import/preview", api.PreviewSkillImport)
+		v1.POST("/skill-import", api.ImportSkills)
 		v1.GET("/skills/:name", api.GetSkillContent)
 		v1.POST("/skills", api.CreateSkill)
 		v1.PUT("/skills/:name", api.UpdateSkill)
@@ -330,8 +333,6 @@ func main() {
 		v1.GET("/transfer/list", api.TransferList)
 		v1.GET("/transfer/download/:id", api.TransferDownload)
 		v1.DELETE("/transfer/delete/:id", api.TransferDelete)
-
-
 
 		// Hooks (Issue #211: event hook system)
 		v1.GET("/hooks", api.ListHooks)

@@ -327,6 +327,15 @@ func estimateMessagesBytes(msgs []model.Message) int {
 	return total
 }
 
+const defaultMaxRequestBodyBytes = 2 * 1024 * 1024
+
+func providerMaxRequestBodyBytes(provider *model.Provider) int {
+	if provider != nil && provider.MaxTokens > 0 {
+		return provider.MaxTokens
+	}
+	return defaultMaxRequestBodyBytes
+}
+
 // estimateOutgoingBytes returns the estimated byte size of the outgoing message.
 func estimateOutgoingBytes(content string, attachments []model.ChatAttachment) int {
 	total := len(content) + roughPerMessageBytes
@@ -355,7 +364,7 @@ func buildRequestTokenEstimate(provider *model.Provider, activeMsgs []model.Mess
 			estimateSystemPromptBytes(sessionID, groupName) + roughToolDefBytes,
 	}
 	if provider != nil {
-		estimate.ProviderMaxTokens = provider.MaxTokens // MaxTokens now represents max request size in bytes
+		estimate.ProviderMaxTokens = providerMaxRequestBodyBytes(provider) // max request size in bytes, fallback to default when unset
 	}
 
 	settings, err := store.GetCompressionSettings()
@@ -523,7 +532,7 @@ func maybeAutoCompressSession(session *model.Session, provider *model.Provider, 
 	if session == nil || provider == nil {
 		return result, nil
 	}
-	if provider.MaxTokens <= 0 {
+	if providerMaxRequestBodyBytes(provider) <= 0 {
 		return result, nil
 	}
 	if compressionSettings == nil {
@@ -800,14 +809,15 @@ func SendChat(c *gin.Context) {
 		// Only fall back to rough estimate when no proxy data exists (new sessions).
 		compressionSettings, _ := store.GetCompressionSettings()
 		var requestEstimate *requestTokenEstimate
-		if compressionSettings != nil && compressionSettings.Enabled && provider != nil && provider.MaxTokens > 0 {
-			thresholdBytes := provider.MaxTokens * compressionSettings.ThresholdPercent / 100
+		if compressionSettings != nil && compressionSettings.Enabled && provider != nil && providerMaxRequestBodyBytes(provider) > 0 {
+			providerMaxBytes := providerMaxRequestBodyBytes(provider)
+			thresholdBytes := providerMaxBytes * compressionSettings.ThresholdPercent / 100
 			if lastBodySize, err := store.GetLatestRequestBodySize(session.ID); err == nil && lastBodySize > 0 && thresholdBytes > 0 && lastBodySize >= int64(thresholdBytes) {
 				// Last proxy body already at/over threshold — compress NOW using real data
 				log.Printf("[compress] session %d: last proxy body %d >= threshold %d, triggering compression before send", session.ID, lastBodySize, thresholdBytes)
 				requestEstimate = &requestTokenEstimate{
 					EstimatedTokens:    int(lastBodySize),
-					ProviderMaxTokens:  provider.MaxTokens,
+					ProviderMaxTokens:  providerMaxBytes,
 					ThresholdPercent:   compressionSettings.ThresholdPercent,
 					ThresholdTokens:    int(thresholdBytes),
 					CompressionEnabled: true,
@@ -1220,9 +1230,9 @@ func runStream(session *model.Session, query string, isNewSession bool, triggerM
 	// Re-broadcast context usage after streaming completes using ACTUAL request body size from proxy.
 	// Falls back gracefully if proxy body size not available (e.g. claude-code provider).
 	if proxyRequestBodySize > 0 {
-		if provider := resolveSessionProviderForSend(session); provider != nil && provider.MaxTokens > 0 {
+		if provider := resolveSessionProviderForSend(session); provider != nil && providerMaxRequestBodyBytes(provider) > 0 {
 			if settings, err := store.GetCompressionSettings(); err == nil && settings.Enabled && settings.ThresholdPercent > 0 {
-				thresholdBytes := int64(provider.MaxTokens) * int64(settings.ThresholdPercent) / 100
+				thresholdBytes := int64(providerMaxRequestBodyBytes(provider)) * int64(settings.ThresholdPercent) / 100
 				displayPct := float64(proxyRequestBodySize) * 100 / float64(thresholdBytes)
 				if displayPct > 100 {
 					displayPct = 100

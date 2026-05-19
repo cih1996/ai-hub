@@ -2,11 +2,16 @@ package api
 
 import (
 	"ai-hub/server/core"
+	"archive/zip"
+	"bytes"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -32,6 +37,29 @@ type ToggleSkillRequest struct {
 	Name   string `json:"name"`
 	Source string `json:"source"`
 	Enable bool   `json:"enable"`
+}
+
+type SkillImportCandidate struct {
+	ID          string   `json:"id"`
+	DirName     string   `json:"dir_name"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	WhenToUse   string   `json:"when_to_use,omitempty"`
+	FileCount   int      `json:"file_count"`
+	Files       []string `json:"files"`
+	Exists      bool     `json:"exists"`
+}
+
+type SkillImportPreviewResponse struct {
+	ArchiveName string                 `json:"archive_name"`
+	Mode        string                 `json:"mode"`
+	Candidates  []SkillImportCandidate `json:"candidates"`
+	Warnings    []string               `json:"warnings"`
+}
+
+type SkillImportConfirmRequest struct {
+	Skills    []string `form:"skills"`
+	Overwrite bool     `form:"overwrite"`
 }
 
 func parseSkillFrontmatter(path string) (name, desc, whenToUse string) {
@@ -425,6 +453,363 @@ func DeleteSkill(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
+func safeZipPath(name string) (string, bool) {
+	name = filepath.ToSlash(strings.TrimSpace(name))
+	name = strings.TrimPrefix(name, "/")
+	if name == "" || strings.Contains(name, "..") || filepath.IsAbs(name) || strings.HasPrefix(name, "__MACOSX/") {
+		return "", false
+	}
+	return name, true
+}
+
+func zipRootEntries(files map[string][]byte) []string {
+	set := map[string]bool{}
+	for p := range files {
+		parts := strings.Split(p, "/")
+		if parts[0] != "" {
+			set[parts[0]] = true
+		}
+	}
+	var roots []string
+	for r := range set {
+		roots = append(roots, r)
+	}
+	sort.Strings(roots)
+	return roots
+}
+
+func stripCommonRoot(files map[string][]byte) map[string][]byte {
+	roots := zipRootEntries(files)
+	if len(roots) != 1 {
+		return files
+	}
+	root := roots[0]
+	prefix := root + "/"
+	for p := range files {
+		if p == root || strings.HasPrefix(p, prefix) {
+			continue
+		}
+		return files
+	}
+	stripped := map[string][]byte{}
+	for p, data := range files {
+		if p == root {
+			continue
+		}
+		stripped[strings.TrimPrefix(p, prefix)] = data
+	}
+	if len(stripped) == 0 {
+		return files
+	}
+	return stripped
+}
+
+func readSkillZip(file io.ReaderAt, size int64, archiveName string) (SkillImportPreviewResponse, map[string]map[string][]byte, error) {
+	zr, err := zip.NewReader(file, size)
+	if err != nil {
+		return SkillImportPreviewResponse{}, nil, fmt.Errorf("invalid zip format")
+	}
+	allFiles := map[string][]byte{}
+	for _, f := range zr.File {
+		if f.FileInfo().IsDir() {
+			continue
+		}
+		name, ok := safeZipPath(f.Name)
+		if !ok {
+			continue
+		}
+		if f.UncompressedSize64 > 5*1024*1024 {
+			return SkillImportPreviewResponse{}, nil, fmt.Errorf("file too large: %s", name)
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return SkillImportPreviewResponse{}, nil, err
+		}
+		data, err := io.ReadAll(io.LimitReader(rc, 5*1024*1024+1))
+		rc.Close()
+		if err != nil {
+			return SkillImportPreviewResponse{}, nil, err
+		}
+		allFiles[name] = data
+	}
+	if len(allFiles) == 0 {
+		return SkillImportPreviewResponse{}, nil, fmt.Errorf("archive has no files")
+	}
+
+	baseName := strings.TrimSuffix(filepath.Base(archiveName), filepath.Ext(archiveName))
+	baseName = sanitizeSkillName(baseName)
+	if baseName == "" {
+		baseName = fmt.Sprintf("skill-%d", time.Now().Unix())
+	}
+
+	preview := SkillImportPreviewResponse{ArchiveName: archiveName, Warnings: []string{}}
+	skillFiles := []string{}
+	for p := range allFiles {
+		if strings.EqualFold(filepath.Base(p), "SKILL.md") {
+			skillFiles = append(skillFiles, p)
+		}
+	}
+	sort.Strings(skillFiles)
+	if len(skillFiles) == 0 {
+		return SkillImportPreviewResponse{}, nil, fmt.Errorf("SKILL.md not found in archive")
+	}
+
+	bundles := map[string]map[string][]byte{}
+	if _, ok := allFiles["SKILL.md"]; ok {
+		preview.Mode = "single-root-file"
+		bundles[baseName] = allFiles
+	} else {
+		rootsWithSkill := map[string]bool{}
+		for _, sf := range skillFiles {
+			parts := strings.Split(sf, "/")
+			if len(parts) > 1 {
+				rootsWithSkill[parts[0]] = true
+			}
+		}
+		if len(rootsWithSkill) == 1 {
+			var root string
+			for r := range rootsWithSkill {
+				root = r
+			}
+			prefix := root + "/"
+			sub := map[string][]byte{}
+			for p, data := range allFiles {
+				if strings.HasPrefix(p, prefix) {
+					sub[strings.TrimPrefix(p, prefix)] = data
+				}
+			}
+			dirName := sanitizeSkillName(root)
+			if dirName == "" {
+				dirName = baseName
+			}
+			preview.Mode = "single-folder"
+			bundles[dirName] = sub
+		} else {
+			preview.Mode = "multi-skill"
+			for root := range rootsWithSkill {
+				prefix := root + "/"
+				sub := map[string][]byte{}
+				for p, data := range allFiles {
+					if strings.HasPrefix(p, prefix) {
+						sub[strings.TrimPrefix(p, prefix)] = data
+					}
+				}
+				dirName := sanitizeSkillName(root)
+				if dirName == "" {
+					dirName = root
+				}
+				bundles[dirName] = sub
+			}
+		}
+	}
+
+	for dir, files := range bundles {
+		files = stripCommonRoot(files)
+		bundles[dir] = files
+		skillData, ok := files["SKILL.md"]
+		if !ok {
+			preview.Warnings = append(preview.Warnings, fmt.Sprintf("%s 缺少 SKILL.md，已跳过", dir))
+			delete(bundles, dir)
+			continue
+		}
+		tmp, err := os.CreateTemp("", "skill-import-*.md")
+		name, desc, when := dir, "", ""
+		if err == nil {
+			tmp.Write(skillData)
+			tmp.Close()
+			name, desc, when = parseSkillFrontmatter(tmp.Name())
+			os.Remove(tmp.Name())
+		}
+		if name == "" {
+			name = dir
+		}
+		fileList := make([]string, 0, len(files))
+		for p := range files {
+			fileList = append(fileList, p)
+		}
+		sort.Strings(fileList)
+		if len(fileList) > 20 {
+			fileList = fileList[:20]
+		}
+		preview.Candidates = append(preview.Candidates, SkillImportCandidate{
+			ID: dir, DirName: dir, Name: name, Description: desc, WhenToUse: when,
+			FileCount: len(files), Files: fileList,
+			Exists: dirExists(filepath.Join(core.GetDataDir(), "skills", dir)),
+		})
+	}
+	sort.Slice(preview.Candidates, func(i, j int) bool { return preview.Candidates[i].DirName < preview.Candidates[j].DirName })
+	if len(preview.Candidates) == 0 {
+		return SkillImportPreviewResponse{}, nil, fmt.Errorf("no valid skill found")
+	}
+	return preview, bundles, nil
+}
+
+func dirExists(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && st.IsDir()
+}
+
+func writeSkillBundle(destDir string, files map[string][]byte, overwrite bool) error {
+	if dirExists(destDir) {
+		if !overwrite {
+			return fmt.Errorf("skill already exists: %s", filepath.Base(destDir))
+		}
+		if err := os.RemoveAll(destDir); err != nil {
+			return err
+		}
+	}
+	for rel, data := range files {
+		rel, ok := safeZipPath(rel)
+		if !ok {
+			continue
+		}
+		dest := filepath.Join(destDir, filepath.FromSlash(rel))
+		if !strings.HasPrefix(dest, destDir+string(os.PathSeparator)) && dest != destDir {
+			return fmt.Errorf("invalid path: %s", rel)
+		}
+		if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(dest, data, 0644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ExportSkill(c *gin.Context) {
+	name := c.Param("name")
+	dirName := resolveSkillDirName(name)
+	if dirName == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "skill not found"})
+		return
+	}
+	skillDir := filepath.Join(core.GetDataDir(), "skills", dirName)
+	buf := new(bytes.Buffer)
+	zw := zip.NewWriter(buf)
+	err := filepath.WalkDir(skillDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		rel, err := filepath.Rel(skillDir, path)
+		if err != nil {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		h, err := zip.FileInfoHeader(info)
+		if err != nil {
+			return err
+		}
+		h.Name = filepath.ToSlash(filepath.Join(dirName, rel))
+		h.Method = zip.Deflate
+		w, err := zw.CreateHeader(h)
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		_, err = w.Write(data)
+		return err
+	})
+	if closeErr := zw.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to export skill"})
+		return
+	}
+	filename := sanitizeSkillName(dirName) + ".zip"
+	c.Header("Content-Type", "application/zip")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	c.Data(http.StatusOK, "application/zip", buf.Bytes())
+}
+
+func PreviewSkillImport(c *gin.Context) {
+	fh, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
+		return
+	}
+	f, err := fh.Open()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to open file"})
+		return
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, 50*1024*1024+1))
+	if err != nil || len(data) > 50*1024*1024 {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "archive too large"})
+		return
+	}
+	preview, _, err := readSkillZip(bytes.NewReader(data), int64(len(data)), fh.Filename)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, preview)
+}
+
+func ImportSkills(c *gin.Context) {
+	fh, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
+		return
+	}
+	selected := c.PostFormArray("skills")
+	overwrite := c.PostForm("overwrite") == "true"
+	f, err := fh.Open()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to open file"})
+		return
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, 50*1024*1024+1))
+	if err != nil || len(data) > 50*1024*1024 {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "archive too large"})
+		return
+	}
+	preview, bundles, err := readSkillZip(bytes.NewReader(data), int64(len(data)), fh.Filename)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	selectedSet := map[string]bool{}
+	if len(selected) == 0 && len(preview.Candidates) == 1 {
+		selectedSet[preview.Candidates[0].ID] = true
+	} else {
+		for _, id := range selected {
+			selectedSet[id] = true
+		}
+	}
+	if len(selectedSet) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no skill selected"})
+		return
+	}
+	imported := []string{}
+	warnings := append([]string{}, preview.Warnings...)
+	for _, cand := range preview.Candidates {
+		if !selectedSet[cand.ID] {
+			continue
+		}
+		files := bundles[cand.ID]
+		if files == nil {
+			continue
+		}
+		dest := filepath.Join(core.GetDataDir(), "skills", cand.DirName)
+		if err := writeSkillBundle(dest, files, overwrite); err != nil {
+			warnings = append(warnings, err.Error())
+			continue
+		}
+		imported = append(imported, cand.DirName)
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "imported": imported, "warnings": warnings})
+}
+
 // sanitizeSkillName converts a skill name to a safe directory name
 func sanitizeSkillName(name string) string {
 	// Replace spaces and special chars with hyphens
@@ -483,6 +868,3 @@ func findPluginSkillDir(name string) string {
 	}
 	return ""
 }
-
-
-

@@ -221,6 +221,48 @@ export const toggleSkill = (name: string, source: string, enable: boolean) =>
     body: JSON.stringify({ name, source, enable }),
   })
 
+export interface SkillImportCandidate {
+  id: string
+  dir_name: string
+  name: string
+  description: string
+  when_to_use?: string
+  file_count: number
+  files: string[]
+  exists: boolean
+}
+export interface SkillImportPreview {
+  archive_name: string
+  mode: string
+  candidates: SkillImportCandidate[]
+  warnings: string[]
+}
+export async function previewSkillImport(file: File): Promise<SkillImportPreview> {
+  const fd = new FormData()
+  fd.append('file', file)
+  const res = await fetch(BASE + '/skill-import/preview', { method: 'POST', body: fd })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error(err.error || res.statusText)
+  }
+  return res.json()
+}
+export async function importSkills(file: File, skills: string[], overwrite = false): Promise<{ ok: boolean; imported: string[]; warnings: string[] }> {
+  const fd = new FormData()
+  fd.append('file', file)
+  for (const s of skills) fd.append('skills', s)
+  fd.append('overwrite', overwrite ? 'true' : 'false')
+  const res = await fetch(BASE + '/skill-import', { method: 'POST', body: fd })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error(err.error || res.statusText)
+  }
+  return res.json()
+}
+export function skillExportUrl(name: string) {
+  return `${BASE}/skill-export/${encodeURIComponent(name)}`
+}
+
 // MCP
 export interface McpServerItem {
   name: string
