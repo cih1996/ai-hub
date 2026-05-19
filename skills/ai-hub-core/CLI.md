@@ -233,16 +233,13 @@ ai-hub rules delete custom.md --level global
 
 ---
 
-## 8. 笔记、定时器、钩子
+## 8. 笔记文件、定时器、钩子
 
-### 8.1 笔记
+### 8.1 笔记文件
 
-```bash
-ai-hub notes list
-ai-hub notes read todo.md
-ai-hub notes write todo.md --content "# TODO\n- item 1"
-ai-hub notes delete todo.md
-```
+- `notes` 专用 CLI 已移除，不再提供 `ai-hub notes *`
+- AI 处理笔记时直接读写 `~/.ai-hub/notes/`
+- 需要通过服务接口访问时，直接走通用文件 API：`scope=notes`
 
 ### 8.2 定时器
 

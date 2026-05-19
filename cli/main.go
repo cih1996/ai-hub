@@ -145,8 +145,6 @@ func Run(args []string) int {
 		return commands.RunSend(c, commandArgs)
 	case "rules":
 		return commands.RunRules(c, commandArgs)
-	case "notes":
-		return commands.RunNotes(c, commandArgs)
 	case "triggers":
 		return commands.RunTriggers(c, commandArgs)
 	case "errors":
@@ -288,7 +286,6 @@ Schemas:
 
 System:
   rules              Manage session rules (get/set/delete)
-  notes              Manage notes (list/read/write/delete)
   triggers           Manage triggers (list/create/update/delete)
   status             System status
   version            Show version

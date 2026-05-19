@@ -26,7 +26,6 @@
 | `errors` | `/sessions/:id/errors` / `/stats/errors` |
 | `groups` | `/groups*` |
 | `rules`（会话级） | `/session-rules/:id` |
-| `notes` | `/files?scope=notes` / `/files/content?scope=notes` |
 | `triggers` | `/triggers*` |
 | `hooks` | `/hooks*` |
 | `services` | `/services*` |
@@ -41,6 +40,7 @@
 例外：
 
 - `rules --level team|global` 直接读写文件，不走 HTTP
+- `notes` 专用 CLI 已移除；笔记通过文件系统或通用 `/files` 接口访问
 - `daemon` 只有探活/关停时会用到 `/version` 或 `/shutdown`
 
 ---
