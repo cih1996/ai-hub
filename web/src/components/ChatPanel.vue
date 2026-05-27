@@ -2464,9 +2464,8 @@ mark.fc-highlight {
   padding: 24px 0;
 }
 .messages-inner {
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 0 24px;
+  max-width: 100%;
+  padding: 0 50px;
 }
 .load-more-hint {
   text-align: center;
