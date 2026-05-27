@@ -16,7 +16,7 @@ const emit = defineEmits<{
 const store = useChatStore()
 
 // Tabs
-const activeTab = ref<'role' | 'memory'>('role')
+const activeTab = ref<'role' | 'teamRules' | 'memory'>('role')
 
 // --- Role State ---
 const sessionRulesContent = ref('')
@@ -27,8 +27,25 @@ const selectedGroupName = ref('')
 const groupSaving = ref(false)
 
 // --- Team Rules State ---
-const teamRulesContent = ref('')
 const teamRulesLoading = ref(false)
+const teamRuleFiles = ref<api.ScopedFileRich[]>([])
+const teamRuleSelectedFile = ref<api.ScopedFileRich | null>(null)
+const teamRuleFileContent = ref('')
+const teamRuleFileLoading = ref(false)
+const teamRuleSaving = ref(false)
+const teamRuleEditing = ref(false)
+const teamRuleCreating = ref(false)
+const teamRuleNewFileName = ref('CLAUDE.md')
+const teamRuleSearchQuery = ref('')
+const teamRuleTree = ref<FileNode[]>([])
+
+const filteredTeamRuleTree = computed(() => {
+  if (!teamRuleSearchQuery.value.trim()) return teamRuleTree.value
+  const query = teamRuleSearchQuery.value.toLowerCase()
+  return teamRuleTree.value.map(node => filterFileNode(node, query)).filter(Boolean) as FileNode[]
+})
+
+const flatTeamRuleTree = computed(() => flattenFileTree(filteredTeamRuleTree.value))
 
 // --- Memory State ---
 const memoryLoading = ref(false)
@@ -52,36 +69,37 @@ const filteredMemoryTree = computed(() => {
     return memoryTree.value
   }
   const query = memorySearchQuery.value.toLowerCase()
-  
-  const filterNode = (node: FileNode): FileNode | null => {
-    if (node.isFile) {
-      return node.name.toLowerCase().includes(query) ? node : null
-    }
-    if (node.children) {
-      const filteredChildren = node.children.map(filterNode).filter(Boolean) as FileNode[]
-      if (filteredChildren.length > 0) {
-        return { ...node, children: filteredChildren, isOpen: true } // auto expand if matched
-      }
-    }
-    return null
-  }
-  
-  return memoryTree.value.map(filterNode).filter(Boolean) as FileNode[]
+  return memoryTree.value.map(node => filterFileNode(node, query)).filter(Boolean) as FileNode[]
 })
 
-const flatMemoryTree = computed(() => {
+function filterFileNode(node: FileNode, query: string): FileNode | null {
+  if (node.isFile) {
+    return node.name.toLowerCase().includes(query) ? node : null
+  }
+  if (node.children) {
+    const filteredChildren = node.children.map(child => filterFileNode(child, query)).filter(Boolean) as FileNode[]
+    if (filteredChildren.length > 0) {
+      return { ...node, children: filteredChildren, isOpen: true }
+    }
+  }
+  return null
+}
+
+function flattenFileTree(nodes: FileNode[]) {
   const result: { node: FileNode, depth: number }[] = []
-  function traverse(nodes: FileNode[], depth: number) {
-    for (const node of nodes) {
+  function traverse(items: FileNode[], depth: number) {
+    for (const node of items) {
       result.push({ node, depth })
       if (!node.isFile && node.isOpen && node.children) {
         traverse(node.children, depth + 1)
       }
     }
   }
-  traverse(filteredMemoryTree.value, 0)
+  traverse(nodes, 0)
   return result
-})
+}
+
+const flatMemoryTree = computed(() => flattenFileTree(filteredMemoryTree.value))
 
 const memorySelectedFile = ref<api.ScopedFileRich | null>(null)
 const memoryFileContent = ref('')
@@ -121,6 +139,8 @@ watch(activeTab, async (tab) => {
   if (!props.visible) return
   if (tab === 'memory') {
     await loadMemoryData()
+  } else if (tab === 'teamRules') {
+    await loadTeamRules()
   }
 })
 
@@ -149,33 +169,137 @@ async function loadRoleData() {
 
 async function loadTeamRules() {
   const groupName = store.currentSession?.group_name || ''
-  if (!groupName) {
-    teamRulesContent.value = ''
-    return
-  }
+  teamRuleFiles.value = []
+  teamRuleTree.value = []
+  teamRuleSelectedFile.value = null
+  teamRuleFileContent.value = ''
+  teamRuleEditing.value = false
+  teamRuleCreating.value = false
+  teamRuleNewFileName.value = 'CLAUDE.md'
+
+  if (!groupName) return
+
   teamRulesLoading.value = true
   try {
     const res = await api.listScopedFiles(`${groupName}/rules`, { type: 'rules' })
-    const files = res.files || []
-    if (files.length === 0) {
-      teamRulesContent.value = ''
-      return
+    teamRuleFiles.value = res.files || []
+    buildTeamRuleTree()
+    const firstFile = teamRuleFiles.value[0]
+    if (firstFile) {
+      await selectTeamRuleFile(firstFile)
     }
-    // Concatenate all team rule files
-    const parts: string[] = []
-    for (const f of files) {
-      try {
-        const content = await api.readScopedFile(`${groupName}/rules`, f.file_name, undefined, 'rules')
-        if (content.content?.trim()) {
-          parts.push(content.content.trim())
-        }
-      } catch { /* skip unreadable files */ }
-    }
-    teamRulesContent.value = parts.join('\n\n---\n\n')
   } catch {
-    teamRulesContent.value = ''
+    teamRuleFiles.value = []
+    teamRuleTree.value = []
   } finally {
     teamRulesLoading.value = false
+  }
+}
+
+function buildTeamRuleTree() {
+  const rootNode: FileNode = { name: store.currentSession?.group_name || '团队规则', path: 'team-rules', isFile: false, children: [], isOpen: true, origin: 'team' }
+  appendFilesToTree(rootNode, teamRuleFiles.value)
+  teamRuleTree.value = rootNode.children && rootNode.children.length > 0 ? [rootNode] : []
+}
+
+function appendFilesToTree(root: FileNode, files: api.ScopedFileRich[]) {
+  for (const f of files) {
+    const parts = f.file_name.split('/')
+    let currentParent = root
+    for (let i = 0; i < parts.length - 1; i++) {
+      const folderName = parts[i] || ''
+      let folderNode = currentParent.children!.find(c => c.name === folderName && !c.isFile)
+      if (!folderNode) {
+        folderNode = {
+          name: folderName,
+          path: parts.slice(0, i + 1).join('/'),
+          isFile: false,
+          children: [],
+          isOpen: true,
+          origin: f.origin
+        }
+        currentParent.children!.push(folderNode)
+      }
+      currentParent = folderNode as FileNode
+    }
+    currentParent.children!.push({
+      name: parts[parts.length - 1] || '',
+      path: f.file_name,
+      isFile: true,
+      origin: f.origin,
+      file: f
+    })
+  }
+}
+
+function toggleTeamRuleNode(node: FileNode) {
+  if (!node.isFile) {
+    node.isOpen = !node.isOpen
+  } else if (node.file) {
+    selectTeamRuleFile(node.file)
+  }
+}
+
+async function selectTeamRuleFile(file: api.ScopedFileRich) {
+  teamRuleSelectedFile.value = file
+  teamRuleEditing.value = false
+  teamRuleCreating.value = false
+  teamRuleFileLoading.value = true
+  try {
+    const res = await api.readScopedFile(file.scope, file.file_name, undefined, 'rules')
+    teamRuleFileContent.value = res.content || ''
+  } catch {
+    teamRuleFileContent.value = ''
+  } finally {
+    teamRuleFileLoading.value = false
+  }
+}
+
+async function saveTeamRuleFile() {
+  if (!teamRuleSelectedFile.value) return
+  teamRuleSaving.value = true
+  try {
+    await api.writeScopedFile(teamRuleSelectedFile.value.scope, teamRuleSelectedFile.value.file_name, teamRuleFileContent.value, undefined, 'rules')
+    showToast('团队规则已保存')
+    teamRuleEditing.value = false
+    await loadTeamRules()
+  } catch (e: any) {
+    showToast('保存失败: ' + (e.message || '未知错误'), 'error')
+  } finally {
+    teamRuleSaving.value = false
+  }
+}
+
+async function createTeamRuleFile() {
+  const groupName = store.currentSession?.group_name || ''
+  if (!groupName || !teamRuleNewFileName.value.trim()) return
+  let fileName = teamRuleNewFileName.value.trim()
+  if (!fileName.endsWith('.md')) fileName += '.md'
+  const scope = `${groupName}/rules`
+  teamRuleSaving.value = true
+  try {
+    await api.writeScopedFile(scope, fileName, teamRuleFileContent.value, undefined, 'rules')
+    showToast('团队规则已创建')
+    teamRuleCreating.value = false
+    await loadTeamRules()
+    const newFile = teamRuleFiles.value.find(f => f.file_name === fileName)
+    if (newFile) await selectTeamRuleFile(newFile)
+  } catch (e: any) {
+    showToast('创建失败: ' + (e.message || '未知错误'), 'error')
+  } finally {
+    teamRuleSaving.value = false
+  }
+}
+
+async function deleteTeamRuleFile() {
+  if (!teamRuleSelectedFile.value) return
+  if (!confirm(`确定删除团队规则「${teamRuleSelectedFile.value.file_name}」？`)) return
+  try {
+    await api.deleteScopedFile(teamRuleSelectedFile.value.scope, teamRuleSelectedFile.value.file_name, undefined, 'rules')
+    showToast('团队规则已删除')
+    await loadTeamRules()
+  } catch (e: any) {
+    showToast('删除失败: ' + (e.message || '未知错误'), 'error')
   }
 }
 
@@ -189,6 +313,7 @@ async function updateSessionGroup() {
       store.currentSession.group_name = selectedGroupName.value
     }
     showToast('团队已更新')
+    await loadTeamRules()
     await loadMemoryData() // Team change might affect memory scope
   } catch (e: any) {
     showToast('更新失败: ' + (e.message || '未知错误'), 'error')
@@ -255,42 +380,18 @@ function buildMemoryTree() {
     { name: '团队记忆', path: 'team', isFile: false, children: [], isOpen: true },
     { name: '全局记忆', path: 'global', isFile: false, children: [], isOpen: true },
   ]
-  
+
   for (const f of memoryFiles.value) {
     let parentNode: FileNode | undefined
     if (f.origin === 'session') parentNode = rootNodes[0]
     else if (f.origin === 'team') parentNode = rootNodes[1]
     else if (f.origin === 'global') parentNode = rootNodes[2]
-    
+
     if (parentNode) {
-      const parts = f.file_name.split('/')
-      let currentParent = parentNode
-      for (let i = 0; i < parts.length - 1; i++) {
-        const folderName = parts[i] || ''
-        let folderNode = currentParent.children!.find(c => c.name === folderName && !c.isFile)
-        if (!folderNode) {
-          folderNode = {
-            name: folderName,
-            path: parts.slice(0, i + 1).join('/'),
-            isFile: false,
-            children: [],
-            isOpen: true,
-            origin: f.origin
-          }
-          currentParent.children!.push(folderNode)
-        }
-        currentParent = folderNode as FileNode
-      }
-      currentParent.children!.push({
-        name: parts[parts.length - 1] || '',
-        path: f.file_name,
-        isFile: true,
-        origin: f.origin,
-        file: f
-      })
+      appendFilesToTree(parentNode, [f])
     }
   }
-  
+
   // Filter out empty roots
   memoryTree.value = rootNodes.filter(n => n.children && n.children.length > 0)
 }
@@ -417,8 +518,16 @@ function renderMd(text: string): string {
           >
             角色规则
           </button>
-          <button 
-            class="drawer-tab" 
+          <button
+            v-if="store.currentSession?.group_name"
+            class="drawer-tab"
+            :class="{ active: activeTab === 'teamRules' }"
+            @click="activeTab = 'teamRules'"
+          >
+            团队规则
+          </button>
+          <button
+            class="drawer-tab"
             :class="{ active: activeTab === 'memory' }"
             @click="activeTab = 'memory'"
           >
@@ -448,16 +557,6 @@ function renderMd(text: string): string {
                     {{ groupSaving ? '...' : '保存' }}
                   </button>
                 </div>
-              </div>
-
-              <!-- Team Rules (read-only) -->
-              <div v-if="teamRulesLoading" class="form-group">
-                <label class="form-label">团队规则</label>
-                <div class="drawer-loading">加载中...</div>
-              </div>
-              <div v-else-if="teamRulesContent" class="form-group">
-                <label class="form-label">团队规则</label>
-                <div class="team-rules-display memory-markdown" v-html="renderMd(teamRulesContent)"></div>
               </div>
 
               <div class="form-group flex-1" style="display: flex; flex-direction: column; min-height: 0;">
@@ -502,6 +601,112 @@ function renderMd(text: string): string {
                 <div class="danger-zone-hint">清空所有消息，保留会话配置</div>
               </div>
             </template>
+          </div>
+
+          <!-- Team Rules Tab -->
+          <div v-show="activeTab === 'teamRules'" class="tab-pane memory-pane">
+            <div v-if="!store.currentSession?.group_name" class="drawer-empty flex-1 flex-center">当前会话未加入团队</div>
+            <div v-else class="memory-layout">
+              <div class="memory-tree-sidebar">
+                <div class="memory-sidebar-header">
+                  <div class="search-input-wrapper">
+                    <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                    </svg>
+                    <input
+                      v-model="teamRuleSearchQuery"
+                      class="memory-search-input"
+                      placeholder="搜索团队规则..."
+                    />
+                  </div>
+                  <button
+                    class="btn-secondary btn-full"
+                    @click="teamRuleCreating = true; teamRuleEditing = true; teamRuleSelectedFile = null; teamRuleFileContent = ''; teamRuleNewFileName = 'CLAUDE.md'"
+                  >新建团队规则</button>
+                </div>
+                <div class="memory-tree">
+                  <div v-if="teamRulesLoading" class="drawer-loading">加载中...</div>
+                  <div v-else-if="filteredTeamRuleTree.length === 0" class="drawer-empty">暂无团队规则</div>
+                  <template v-else>
+                    <div v-for="item in flatTeamRuleTree" :key="item.node.path" class="tree-node">
+                      <div
+                        class="tree-node-row"
+                        @click="toggleTeamRuleNode(item.node)"
+                        :class="{ 'is-file': item.node.isFile, 'active': teamRuleSelectedFile && teamRuleSelectedFile.file_name === item.node.file?.file_name && teamRuleSelectedFile.scope === item.node.file?.scope }"
+                        :style="{ paddingLeft: `${16 + item.depth * 20}px` }"
+                      >
+                        <span class="tree-icon">
+                          <svg v-if="!item.node.isFile" :class="{ 'is-open': item.node.isOpen }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="9 18 15 12 9 6"/>
+                          </svg>
+                          <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                          </svg>
+                        </span>
+                        <span class="tree-name">{{ item.node.name }}</span>
+                        <span class="tree-size" v-if="item.node.isFile && item.node.file?.size !== undefined">{{ formatFileSize(item.node.file?.size) }}</span>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </div>
+
+              <div class="memory-editor">
+                <template v-if="teamRuleCreating">
+                  <div class="editor-header">
+                    <input
+                      v-model="teamRuleNewFileName"
+                      class="form-input"
+                      placeholder="规则文件名（如：CLAUDE.md）"
+                    />
+                  </div>
+                  <textarea
+                    v-model="teamRuleFileContent"
+                    class="form-textarea flex-1"
+                    placeholder="输入团队规则内容..."
+                  ></textarea>
+                  <div class="drawer-actions">
+                    <button class="btn-secondary" @click="teamRuleCreating = false; teamRuleFileContent = ''; teamRuleNewFileName = 'CLAUDE.md'">取消</button>
+                    <button
+                      class="btn-primary"
+                      :disabled="!teamRuleNewFileName.trim() || teamRuleSaving"
+                      @click="createTeamRuleFile"
+                    >{{ teamRuleSaving ? '创建中...' : '创建' }}</button>
+                  </div>
+                </template>
+                <template v-else-if="teamRuleSelectedFile">
+                  <div v-if="teamRuleFileLoading" class="drawer-loading">加载中...</div>
+                  <template v-else>
+                    <div class="editor-header team-rule-editor-header">
+                      <span class="editor-filename">{{ teamRuleSelectedFile.file_name }}</span>
+                      <span class="team-rule-scope">{{ teamRuleSelectedFile.scope }}</span>
+                    </div>
+                    <template v-if="!teamRuleEditing">
+                      <div class="memory-markdown flex-1" v-html="renderMd(teamRuleFileContent)"></div>
+                    </template>
+                    <template v-else>
+                      <textarea
+                        v-model="teamRuleFileContent"
+                        class="form-textarea flex-1"
+                        placeholder="编辑团队规则内容..."
+                      ></textarea>
+                    </template>
+                    <div class="drawer-actions">
+                      <button class="btn-danger-outline" @click="deleteTeamRuleFile">删除</button>
+                      <template v-if="teamRuleEditing">
+                        <button class="btn-secondary" @click="teamRuleEditing = false; selectTeamRuleFile(teamRuleSelectedFile!)">取消</button>
+                        <button class="btn-primary" :disabled="teamRuleSaving" @click="saveTeamRuleFile">
+                          {{ teamRuleSaving ? '保存中...' : '保存' }}
+                        </button>
+                      </template>
+                      <button v-else class="btn-primary" @click="teamRuleEditing = true">编辑</button>
+                    </div>
+                  </template>
+                </template>
+                <div v-else class="drawer-empty flex-1 flex-center">← 选择一个团队规则文件查看，或新建规则</div>
+              </div>
+            </div>
           </div>
 
           <!-- Memory Tab -->
@@ -770,13 +975,18 @@ function renderMd(text: string): string {
   padding-right: 8px;
 }
 
-.team-rules-display {
-  max-height: 200px;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  padding: 10px 12px;
-  background: var(--bg-secondary);
-  margin-bottom: 4px;
+.team-rule-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.team-rule-scope {
+  color: var(--text-muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .memory-markdown :deep(h1),
 .memory-markdown :deep(h2),
@@ -946,6 +1156,15 @@ function renderMd(text: string): string {
 .memory-sidebar-header {
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.btn-full {
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 13px;
 }
 
 .search-input-wrapper {

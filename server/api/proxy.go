@@ -174,6 +174,12 @@ func HandleAnthropicProxy(c *gin.Context) {
 	if realBaseURL == "" {
 		realBaseURL = "https://api.anthropic.com"
 	}
+	if provider != nil {
+		keyLen := len(provider.APIKey)
+		log.Printf("[proxy] session=%d provider=%s auth_mode=%s base_url=%s api_key_len=%d", sessionID, provider.Name, provider.AuthMode, provider.BaseURL, keyLen)
+	} else {
+		log.Printf("[proxy] session=%d provider=NOT_FOUND fallback=anthropic", sessionID)
+	}
 
 	// Build target URL
 	targetURL := strings.TrimRight(realBaseURL, "/") + subPath

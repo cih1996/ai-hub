@@ -277,7 +277,9 @@ func (p *ProcessPool) spawnProcess(req ClaudeCodeRequest, isResume bool) (*Persi
 	// Applies to ALL auth modes (including OAuth): the proxy forwards all headers
 	// including the OAuth Bearer token, so authentication is not affected.
 	// This enables capturing the full Anthropic API request (messages history) for diagnostics.
-	if port := GetPort(); port != "" && req.HubSessionID > 0 {
+	port := GetPort()
+	log.Printf("[pool] session %d: GetPort()='%s', HubSessionID=%d", req.HubSessionID, port, req.HubSessionID)
+	if port != "" && req.HubSessionID > 0 {
 		proxyURL := fmt.Sprintf("http://localhost:%s/api/v1/proxy/s/%d/anthropic", port, req.HubSessionID)
 		cmd.Env = append(cmd.Env, "ANTHROPIC_BASE_URL="+proxyURL)
 	} else if req.AuthMode != "oauth" && req.BaseURL != "" {

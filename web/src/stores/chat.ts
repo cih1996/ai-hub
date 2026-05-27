@@ -4,6 +4,8 @@ import type { Session, Message, Provider, WSMessage, ToolCall, StepsMetadata, To
 import * as api from '../composables/api'
 import router from '../router'
 
+const MESSAGE_PAGE_SIZE = 20
+
 export const useChatStore = defineStore('chat', () => {
   const sessions = ref<Session[]>([])
   const currentSessionId = ref<number>(0)
@@ -21,9 +23,8 @@ export const useChatStore = defineStore('chat', () => {
   const contextUsage = ref<ContextUsage | null>(null)
   const hasMoreMessages = ref(false)
   const loadingMore = ref(false)
-  // Message queue: messages typed while AI is streaming, sent as batch when done
-  const messageQueue = ref<string[]>([])
-  const messageQueueSessionId = ref<number>(0) // session the queue belongs to
+  // Pending queue count: messages sent to backend while AI was streaming
+  const pendingQueueCount = ref(0)
   const ws = ref<WebSocket | null>(null)
   const wsConnected = ref(false)
   let wsReconnectDelay = 1000 // exponential backoff: 1s → 2s → 4s → ... → 30s
@@ -190,8 +191,8 @@ export const useChatStore = defineStore('chat', () => {
             streamingContent.value = ''
             thinkingContent.value = ''
             toolCalls.value = []
-            flushQueue()
-            api.getMessagesPaginated(msg.session_id, 50).then((resp) => {
+            pendingQueueCount.value = 0
+            api.getMessagesPaginated(msg.session_id, MESSAGE_PAGE_SIZE).then((resp) => {
               messages.value = filterVisibleMessages(resp.messages)
               hasMoreMessages.value = resp.has_more
             })
@@ -255,7 +256,7 @@ export const useChatStore = defineStore('chat', () => {
           streaming.value = false
           streamingContent.value = ''
           contextUsage.value = null // reset energy bar after compression
-          api.getMessagesPaginated(msg.session_id, 50).then((resp) => {
+          api.getMessagesPaginated(msg.session_id, MESSAGE_PAGE_SIZE).then((resp) => {
             messages.value = filterVisibleMessages(resp.messages)
             hasMoreMessages.value = resp.has_more
           })
@@ -370,8 +371,8 @@ export const useChatStore = defineStore('chat', () => {
           thinkingContent.value = ''
           toolCalls.value = []
           streaming.value = false
-          // Flush queued messages (typed while AI was streaming)
-          flushQueue()
+          // Backend processes its own queue — no frontend flush needed
+          pendingQueueCount.value = 0
           break
         }
         case 'error': {
@@ -542,7 +543,7 @@ export const useChatStore = defineStore('chat', () => {
     loadingMore.value = true
     try {
       const oldestId = messages.value.length > 0 ? messages.value[0]!.id : 0
-      const resp = await api.getMessagesPaginated(currentSessionId.value, 50, oldestId)
+      const resp = await api.getMessagesPaginated(currentSessionId.value, MESSAGE_PAGE_SIZE, oldestId)
       const visibleMessages = filterVisibleMessages(resp.messages)
       if (visibleMessages.length > 0) {
         messages.value = [...visibleMessages, ...messages.value]
@@ -580,11 +581,13 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function sendMessage(content: string, attachments?: api.ChatAttachmentPayload[]) {
-    // If currently streaming, queue the message for later
+    // If currently streaming, send directly to backend (server-side queue)
     if (streaming.value) {
-      messageQueue.value.push(content)
-      if (!messageQueueSessionId.value) {
-        messageQueueSessionId.value = currentSessionId.value
+      pendingQueueCount.value++
+      try {
+        await api.sendChat(currentSessionId.value, content, workDir.value || undefined, undefined, undefined, undefined, attachments)
+      } catch {
+        pendingQueueCount.value = Math.max(0, pendingQueueCount.value - 1)
       }
       return
     }
@@ -652,25 +655,12 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function removeFromQueue(index: number) {
-    messageQueue.value.splice(index, 1)
+  function removeFromQueue(_index: number) {
+    // No-op: backend manages the queue now
   }
 
   function flushQueue() {
-    if (messageQueue.value.length === 0 || !messageQueueSessionId.value) return
-    const targetSession = messageQueueSessionId.value
-    const queued = messageQueue.value.splice(0) // take all and clear
-    messageQueueSessionId.value = 0
-    const combined = queued.length === 1 ? (queued[0] || '') : queued.map((q, i) => `[消息 ${i + 1}] ${q}`).join('\n\n')
-    // Temporarily switch to the queue's session for sending
-    const savedSession = currentSessionId.value
-    currentSessionId.value = targetSession
-    sendMessage(combined)
-    // Restore if user had switched away
-    if (savedSession !== targetSession) {
-      // Don't restore — the sendMessage already updated state for targetSession.
-      // User will see the target session's messages after flush.
-    }
+    // No-op: backend processes its own queue via processQueuedMessages()
   }
 
   function stopStreaming() {
@@ -798,8 +788,7 @@ export const useChatStore = defineStore('chat', () => {
     clearUsageLimitWarning,
     inputFocusTrigger,
     triggerInputFocus,
-    messageQueue,
-    messageQueueSessionId,
+    pendingQueueCount,
     removeFromQueue,
     flushQueue,
   }

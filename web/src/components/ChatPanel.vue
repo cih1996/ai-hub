@@ -20,6 +20,37 @@ const stepsExpanded = ref(false)
 const isComposing = ref(false)
 const moreMenuOpen = ref(false)
 const providerDropdownOpen = ref(false)
+const mobilePlusPanelOpen = ref(false)
+const slashItems = ref<api.SkillItem[]>([])
+const slashLoading = ref(false)
+const slashSelectedIndex = ref(0)
+const slashMenuOpen = ref(false)
+const slashSpacePressed = ref(false) // 标记用户是否按了空格
+const isPasting = ref(false) // 标记是否正在粘贴
+const providerDropdownLoading = ref(false)
+
+const isInputFocused = ref(false)
+
+function handleInputFocus() {
+  isInputFocused.value = true
+  store.triggerInputFocus()
+}
+
+function handleInputBlur() {
+  isInputFocused.value = false
+}
+
+// Slash tags state
+interface SlashTag {
+  id: string
+  name: string
+  source: string
+}
+const slashTags = ref<SlashTag[]>([])
+
+function removeSlashTag(id: string) {
+  slashTags.value = slashTags.value.filter(t => t.id !== id)
+}
 
 // Attachments state
 interface Attachment {
@@ -66,6 +97,45 @@ function toolColorClass(name: string): string {
 // Get current session for template
 const currentSession = computed(() => store.currentSession)
 
+// Draft management - save/restore input per session
+const DRAFT_KEY_PREFIX = 'chat_draft_'
+
+function saveDraft(sessionId: number) {
+  if (input.value.trim()) {
+    localStorage.setItem(DRAFT_KEY_PREFIX + sessionId, input.value)
+  } else {
+    localStorage.removeItem(DRAFT_KEY_PREFIX + sessionId)
+  }
+}
+
+function loadDraft(sessionId: number): string {
+  return localStorage.getItem(DRAFT_KEY_PREFIX + sessionId) || ''
+}
+
+watch(currentSession, (newSession, oldSession) => {
+  // Save draft for old session
+  if (oldSession?.id) {
+    saveDraft(oldSession.id)
+  }
+
+  // Load draft for new session
+  if (newSession?.id) {
+    input.value = loadDraft(newSession.id)
+    nextTick(() => autoResize())
+  }
+}, { immediate: true })
+
+// Save draft on input change (debounced)
+let saveTimer: ReturnType<typeof setTimeout> | null = null
+watch(input, () => {
+  if (saveTimer) clearTimeout(saveTimer)
+  saveTimer = setTimeout(() => {
+    if (currentSession.value?.id) {
+      saveDraft(currentSession.value.id)
+    }
+  }, 500)
+})
+
 // Get session avatar URL
 function getSessionAvatar(session?: Session): string {
   const s = session || store.currentSession
@@ -77,6 +147,142 @@ function getSessionAvatar(session?: Session): string {
   const index = (id % 50) + 1
   return `/avatars/avatar${index}.svg`
 }
+
+// 获取光标所在的斜杠上下文
+function getSlashContext() {
+  if (slashSpacePressed.value) return null
+
+  const ta = textareaEl.value
+  if (!ta) return null
+  const val = input.value
+  const cursor = ta.selectionStart ?? val.length
+  const textBefore = val.slice(0, cursor)
+
+  // 查找光标前最近的斜杠
+  const slashIdx = textBefore.lastIndexOf('/')
+  if (slashIdx === -1) return null
+
+  // 提取斜杠后的查询文本
+  const afterSlash = textBefore.slice(slashIdx + 1)
+  const spaceIdx = afterSlash.indexOf(' ')
+  const query = (spaceIdx === -1 ? afterSlash : afterSlash.slice(0, spaceIdx)).toLowerCase()
+
+  return {
+    lineStart: slashIdx,
+    lineEnd: cursor,
+    query
+  }
+}
+
+const slashQuery = computed(() => getSlashContext()?.query || '')
+
+const showSlashMenu = computed(() => slashMenuOpen.value && isInputFocused.value)
+
+const filteredSlashItems = computed(() => {
+  const query = slashQuery.value
+  const enabled = slashItems.value.filter(item => item.enabled)
+  const filtered = query
+    ? enabled.filter(item => {
+        const haystack = `${item.name} ${item.description || ''} ${item.when_to_use || ''}`.toLowerCase()
+        return haystack.includes(query)
+      })
+    : enabled
+  return filtered
+    .sort((a, b) => {
+      if (a.source === 'command' && b.source !== 'command') return -1
+      if (a.source !== 'command' && b.source === 'command') return 1
+      return a.name.localeCompare(b.name)
+    })
+    .slice(0, 12)
+})
+
+async function ensureSlashItemsLoaded() {
+  if (slashItems.value.length > 0 || slashLoading.value) return
+  slashLoading.value = true
+  try {
+    slashItems.value = await api.listSkills()
+  } catch {
+    slashItems.value = []
+  } finally {
+    slashLoading.value = false
+  }
+}
+
+function slashItemType(item: api.SkillItem) {
+  return item.source === 'command' ? '命令' : '技能'
+}
+
+function scrollSlashActiveIntoView() {
+  nextTick(() => {
+    const menu = document.querySelector('.slash-command-menu') as HTMLElement | null
+    const active = document.querySelector('.slash-command-item.active') as HTMLElement | null
+    if (!menu || !active) return
+    active.scrollIntoView({ block: 'nearest' })
+  })
+}
+
+function applySlashItem(item: api.SkillItem) {
+  // 添加标签
+  slashTags.value.push({
+    id: generateId(),
+    name: item.name,
+    source: item.source
+  })
+
+  // 清除输入框中的斜杠文本
+  const ctx = getSlashContext()
+  if (ctx) {
+    input.value = input.value.slice(0, ctx.lineStart) + input.value.slice(ctx.lineEnd)
+  }
+
+  // 关闭菜单
+  slashMenuOpen.value = false
+  slashSelectedIndex.value = 0
+  slashSpacePressed.value = true
+
+  nextTick(() => {
+    textareaEl.value?.focus()
+  })
+}
+
+// 光标移动时重新检测斜杠状态
+function updateSlashOnCursorMove() {
+  // 如果已按空格，不打开菜单
+  if (slashSpacePressed.value) {
+    slashMenuOpen.value = false
+    return
+  }
+
+  const ctx = getSlashContext()
+  slashMenuOpen.value = !!ctx
+  if (ctx) {
+    ensureSlashItemsLoaded()
+  }
+}
+
+watch(input, () => {
+  // 粘贴时不弹出菜单
+  if (isPasting.value) return
+
+  const ctx = getSlashContext()
+
+  // 如果最后一个字符是 /，重置标志
+  if (input.value.endsWith('/')) {
+    slashSpacePressed.value = false
+  }
+
+  slashMenuOpen.value = !!ctx
+  if (ctx) {
+    ensureSlashItemsLoaded()
+    slashSelectedIndex.value = 0
+    scrollSlashActiveIntoView()
+  }
+})
+
+watch(filteredSlashItems, (items) => {
+  if (slashSelectedIndex.value >= items.length) slashSelectedIndex.value = 0
+  scrollSlashActiveIntoView()
+})
 
 const currentTeamMembers = computed(() => {
   const current = store.currentSession
@@ -572,13 +778,7 @@ const hasActivity = computed(() =>
 
 const contextCount = computed(() => store.messages.length)
 
-const displayWorkDir = computed(() => {
-  const wd = store.currentSession?.work_dir
-  if (!wd) return '~ (系统默认)'
-  const home = '~'
-  // Try to shorten with ~ prefix
-  return wd.replace(/^\/Users\/[^/]+/, home)
-})
+
 
 function scrollToBottom(retry = true) {
   nextTick(() => {
@@ -699,12 +899,23 @@ async function buildImageAttachments(): Promise<api.ChatAttachmentPayload[]> {
 async function send() {
   const text = input.value.trim()
   const hasAttachments = attachments.value.length > 0
-  if (!text && !hasAttachments) return
+  const hasTags = slashTags.value.length > 0
+  if (!text && !hasAttachments && !hasTags) return
+
+  // 合并标签和文本
+  let finalText = ''
+  if (hasTags) {
+    finalText = slashTags.value.map(t => `/${t.name}`).join(' ')
+    if (text) finalText += ' ' + text
+  } else {
+    finalText = text
+  }
 
   const imageAttachments = await buildImageAttachments()
-  store.sendMessage(text, imageAttachments)
+  store.sendMessage(finalText.trim(), imageAttachments)
   input.value = ''
   attachments.value = []
+  slashTags.value = []
   stepsExpanded.value = false
   autoResize()
 }
@@ -753,6 +964,12 @@ function handlePaste(e: ClipboardEvent) {
   const items = e.clipboardData?.items
   if (!items) return
 
+  // 标记正在粘贴，防止触发斜杠菜单
+  isPasting.value = true
+  nextTick(() => {
+    isPasting.value = false
+  })
+
   for (const item of Array.from(items)) {
     if (item.type.startsWith('image/')) {
       e.preventDefault()
@@ -782,12 +999,79 @@ function openFileDialog() {
   fileInputEl.value?.click()
 }
 
+async function toggleProviderDropdown() {
+  if (store.streaming || store.providerSwitching) return
+  providerDropdownOpen.value = !providerDropdownOpen.value
+  if (providerDropdownOpen.value && store.providers.length === 0 && !providerDropdownLoading.value) {
+    providerDropdownLoading.value = true
+    try {
+      await store.loadProviders()
+    } finally {
+      providerDropdownLoading.value = false
+    }
+  }
+}
+
 async function onSwitchProvider(providerId: string) {
   providerDropdownOpen.value = false
   await store.switchProviderForSession(providerId)
 }
 
+// 点击外部关闭模型下拉
+watch(providerDropdownOpen, (open) => {
+  if (open) {
+    nextTick(() => {
+      document.addEventListener('click', closeProviderDropdown, true)
+    })
+  } else {
+    document.removeEventListener('click', closeProviderDropdown, true)
+  }
+})
+function closeProviderDropdown(e: MouseEvent) {
+  const el = e.target as HTMLElement
+  if (!el.closest('.provider-switcher')) {
+    providerDropdownOpen.value = false
+  }
+}
+
 function onKeydown(e: KeyboardEvent) {
+  if (showSlashMenu.value && filteredSlashItems.value.length > 0) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      slashSelectedIndex.value = (slashSelectedIndex.value + 1) % filteredSlashItems.value.length
+      scrollSlashActiveIntoView()
+      return
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      slashSelectedIndex.value = (slashSelectedIndex.value - 1 + filteredSlashItems.value.length) % filteredSlashItems.value.length
+      scrollSlashActiveIntoView()
+      return
+    }
+    if (e.key === 'Tab') {
+      e.preventDefault()
+      applySlashItem(filteredSlashItems.value[slashSelectedIndex.value]!)
+      return
+    }
+    if (e.key === 'Enter' && !e.shiftKey && !isComposing.value) {
+      e.preventDefault()
+      applySlashItem(filteredSlashItems.value[slashSelectedIndex.value]!)
+      return
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      slashMenuOpen.value = false
+      return
+    }
+    // 空格键关闭菜单并标记
+    if (e.key === ' ') {
+      e.preventDefault()
+      slashSpacePressed.value = true
+      slashMenuOpen.value = false
+      return
+    }
+  }
+
   if (e.key === 'Enter' && !e.shiftKey && !isComposing.value) {
     e.preventDefault()
     send()
@@ -892,35 +1176,11 @@ function formatToolInput(raw: string): string {
               </svg>
               {{ store.currentSession.group_name }}
             </span>
-            <div class="header-workdir">{{ displayWorkDir }}</div>
-            <div class="provider-switcher" v-if="store.currentProvider">
-              <button class="provider-badge" @click="providerDropdownOpen = !providerDropdownOpen" :disabled="store.streaming || store.providerSwitching" title="切换模型">
-                {{ store.currentProvider.name }} · {{ store.currentProvider.model_id }}
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
-              </button>
-              <div v-if="providerDropdownOpen" class="provider-dropdown">
-                <button
-                  v-for="p in store.providers"
-                  :key="p.id"
-                  class="provider-option"
-                  :class="{ active: String(p.id) === String(store.currentSession.provider_id) }"
-                  @click="onSwitchProvider(String(p.id))"
-                >
-                  <span class="provider-option-name">{{ p.name }}</span>
-                  <span class="provider-option-model">{{ p.model_id }}</span>
-                </button>
-              </div>
-            </div>
           </div>
         </div>
       </div>
       <div class="header-right" v-if="!isMobile">
         <EnergyProgress v-if="showEnergy" :percent="energyPercent" :threshold-percent="energyThreshold" />
-        <span v-if="sessionTokenStats" class="header-token-stats" title="本会话累计 Token 用量">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><circle cx="9" cy="9" r="1.5"/><circle cx="15" cy="9" r="1.5"/><circle cx="9" cy="15" r="1.5"/><circle cx="15" cy="15" r="1.5"/></svg>
-          {{ formatTokenNum(sessionTokenStats.total_input_tokens + sessionTokenStats.total_output_tokens + (sessionTokenStats.total_cache_creation_tokens || 0) + (sessionTokenStats.total_cache_read_tokens || 0)) }}
-        </span>
-        <span class="header-context header-context-btn" @click="openRawRequest" title="查看上下文详情">{{ contextCount }} 条上下文</span>
         <button
           class="btn-rules"
           @click="showConfigDrawer = true"
@@ -936,10 +1196,6 @@ function formatToolInput(raw: string): string {
       <!-- Mobile: more menu -->
       <div v-if="isMobile" class="header-right-mobile">
         <EnergyProgress v-if="showEnergy" :percent="energyPercent" :threshold-percent="energyThreshold" />
-        <span v-if="sessionTokenStats" class="header-token-stats" title="Token">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><circle cx="9" cy="9" r="1.5"/><circle cx="15" cy="9" r="1.5"/><circle cx="9" cy="15" r="1.5"/><circle cx="15" cy="15" r="1.5"/></svg>
-          {{ formatTokenNum(sessionTokenStats.total_input_tokens + sessionTokenStats.total_output_tokens + (sessionTokenStats.total_cache_creation_tokens || 0) + (sessionTokenStats.total_cache_read_tokens || 0)) }}
-        </span>
         <div class="more-menu-wrapper">
           <button class="btn-more" @click="moreMenuOpen = !moreMenuOpen">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
@@ -1200,65 +1456,179 @@ function formatToolInput(raw: string): string {
         </div>
       </div>
 
-      <div class="input-row">
-        <!-- Message queue display (only for the session that owns the queue) -->
-        <div v-if="store.messageQueue.length > 0 && store.messageQueueSessionId === store.currentSessionId" class="queue-panel">
-          <div class="queue-header">
-            <span class="queue-title">候选队列 ({{ store.messageQueue.length }})</span>
-            <span class="queue-hint">AI 完成后自动发送</span>
-          </div>
-          <div class="queue-items">
-            <div v-for="(q, qi) in store.messageQueue" :key="qi" class="queue-item">
-              <span class="queue-item-text">{{ q.length > 80 ? q.slice(0, 80) + '...' : q }}</span>
-              <button class="queue-item-remove" @click="store.removeFromQueue(qi)" title="移除">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
-              </button>
+      <!-- Pending queue indicator -->
+      <div v-if="store.pendingQueueCount > 0" class="queue-panel">
+        <div class="queue-header">
+          <span class="queue-title">{{ store.pendingQueueCount }} 条消息排队中</span>
+          <span class="queue-hint">AI 完成后自动处理</span>
+        </div>
+      </div>
+
+      <div class="unified-input-container" :class="{ 'is-focused': isInputFocused, 'is-mobile': isMobile }">
+        
+        <!-- Mobile Left: Plus Button -->
+        <button v-if="isMobile" class="mobile-plus-btn" @click="mobilePlusPanelOpen = !mobilePlusPanelOpen" title="更多功能">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="16"/>
+            <line x1="8" y1="12" x2="16" y2="12"/>
+          </svg>
+        </button>
+
+        <div class="textarea-wrapper">
+          <div v-if="showSlashMenu" class="slash-command-menu">
+            <div class="slash-menu-header">
+              <span>可用命令</span>
+              <small v-if="slashLoading">加载中...</small>
+              <small v-else>{{ filteredSlashItems.length }} 项</small>
             </div>
+            <div v-if="!slashLoading && filteredSlashItems.length === 0" class="slash-menu-empty">没有匹配的命令或技能</div>
+            <button
+              v-for="(item, idx) in filteredSlashItems"
+              :key="item.source + ':' + item.name"
+              class="slash-command-item"
+              :class="{ active: idx === slashSelectedIndex }"
+              @mousedown.prevent="applySlashItem(item)"
+            >
+              <div class="slash-command-main">
+                <span class="slash-command-name">/{{ item.name }}</span>
+                <span class="slash-command-type" :class="item.source">{{ slashItemType(item) }}</span>
+              </div>
+              <div class="slash-command-desc">{{ item.when_to_use || item.description || '无说明' }}</div>
+            </button>
+            <div class="slash-menu-hint">↑↓ 选择 · Enter/Tab 插入 · Esc 清空</div>
+          </div>
+          <div class="textarea-with-tags">
+            <div v-if="slashTags.length > 0" class="tags-overlay">
+              <span v-for="tag in slashTags" :key="tag.id" class="inline-tag" @click="removeSlashTag(tag.id)">
+                {{ tag.name }} ×
+              </span>
+            </div>
+            <textarea
+              ref="textareaEl"
+              v-model="input"
+              @keydown="onKeydown"
+              @keyup="updateSlashOnCursorMove"
+              @click="updateSlashOnCursorMove"
+              @input="autoResize"
+              @paste="handlePaste"
+              @focus="handleInputFocus"
+              @blur="handleInputBlur"
+              @compositionstart="isComposing = true"
+              @compositionend="isComposing = false"
+              :placeholder="store.streaming ? 'AI 正在回复，输入的消息将排队等待...' : (isMobile ? '输入消息...' : '输入消息... (可粘贴图片)')"
+              rows="1"
+              :class="{ 'has-tags': slashTags.length > 0 }"
+            />
           </div>
         </div>
-        <div class="input-wrapper">
-          <button
-            class="btn-attach"
-            @click="openFileDialog"
-            title="添加图片"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-              <circle cx="8.5" cy="8.5" r="1.5"/>
-              <polyline points="21 15 16 10 5 21"/>
-            </svg>
+
+        <!-- Mobile Right: Send/Stop -->
+        <div v-if="isMobile" class="mobile-send-wrapper">
+          <button v-if="store.streaming" class="send-btn stop" @click="store.stopStreaming()" title="停止">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
           </button>
-          <input
-            ref="fileInputEl"
-            type="file"
-            accept="image/*"
-            multiple
-            style="display: none"
-            @change="handleFileSelect"
-          />
-          <textarea
-            ref="textareaEl"
-            v-model="input"
-            @keydown="onKeydown"
-            @input="autoResize"
-            @paste="handlePaste"
-            @focus="store.triggerInputFocus()"
-            @compositionstart="isComposing = true"
-            @compositionend="isComposing = false"
-            :placeholder="store.streaming ? 'AI 正在回复，消息将进入候选队列...' : '输入消息... (可粘贴图片)'"
-            rows="1"
-          />
-          <div class="input-actions">
-            <button v-if="store.streaming" class="btn-stop" @click="store.stopStreaming()" title="Stop">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                <rect x="6" y="6" width="12" height="12" rx="2"/>
+          <button v-else class="send-btn" :class="{ 'active': input.trim() || attachments.length > 0 }" :disabled="!input.trim() && attachments.length === 0" @click="send" title="发送">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </button>
+        </div>
+
+        <!-- Desktop Toolbar -->
+        <div v-if="!isMobile" class="unified-bottom-toolbar">
+          <div class="toolbar-left">
+            <div class="provider-switcher" v-if="store.currentProvider">
+              <button class="model-badge" @click="toggleProviderDropdown" :disabled="store.streaming || store.providerSwitching" title="切换模型">
+                <span class="model-name-text">{{ store.currentProvider.model_id }}</span>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+              </button>
+              <div v-if="providerDropdownOpen" class="model-dropdown">
+                <div v-if="providerDropdownLoading" class="provider-empty">加载模型中...</div>
+                <div v-else-if="store.providers.length === 0" class="provider-empty">暂无可用模型，请先到设置里添加供应商</div>
+                <button
+                  v-for="p in store.providers"
+                  :key="p.id"
+                  class="provider-option"
+                  :class="{ active: String(p.id) === String(store.currentSession?.provider_id) }"
+                  @click="onSwitchProvider(String(p.id))"
+                >
+                  <span class="provider-option-name">{{ p.name }}</span>
+                  <span class="provider-option-model">{{ p.model_id }}</span>
+                </button>
+              </div>
+            </div>
+
+            <button class="tool-btn" @click="openFileDialog" title="添加附件">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
               </svg>
             </button>
-            <button v-else class="btn-send" :disabled="!input.trim() && attachments.length === 0" @click="send" title="Send">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+            <input ref="fileInputEl" type="file" accept="image/*" multiple style="display: none" @change="handleFileSelect" />
+          </div>
+
+          <div class="toolbar-right">
+            <span class="context-badge" @click="openRawRequest" title="查看上下文详情">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+                <line x1="16" y1="13" x2="8" y2="13"/>
+                <line x1="16" y1="17" x2="8" y2="17"/>
+                <polyline points="10 9 9 9 8 9"/>
               </svg>
+              {{ contextCount }} 条上下文
+            </span>
+
+            <button v-if="store.streaming" class="send-btn stop" @click="store.stopStreaming()" title="停止">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
             </button>
+            <button v-else class="send-btn" :class="{ 'active': input.trim() || attachments.length > 0 }" :disabled="!input.trim() && attachments.length === 0" @click="send" title="发送">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Mobile Floating Panel -->
+        <div v-if="isMobile && mobilePlusPanelOpen" class="mobile-plus-panel">
+          <div class="mobile-panel-grid">
+            <div class="mobile-panel-item" @click="openFileDialog(); mobilePlusPanelOpen = false">
+              <div class="mobile-panel-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
+                </svg>
+              </div>
+              <span>发图片</span>
+            </div>
+            <div class="mobile-panel-item" @click="openRawRequest(); mobilePlusPanelOpen = false">
+              <div class="mobile-panel-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                  <polyline points="14 2 14 8 20 8"/>
+                  <line x1="16" y1="13" x2="8" y2="13"/>
+                  <line x1="16" y1="17" x2="8" y2="17"/>
+                  <polyline points="10 9 9 9 8 9"/>
+                </svg>
+              </div>
+              <span>上下文</span>
+            </div>
+            <div class="mobile-panel-item" @click="toggleProviderDropdown">
+              <div class="mobile-panel-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+              </div>
+              <span>切换模型</span>
+            </div>
+          </div>
+          <div v-if="providerDropdownOpen" class="mobile-provider-list">
+             <div v-if="providerDropdownLoading" class="provider-empty">加载模型中...</div>
+             <div v-else-if="store.providers.length === 0" class="provider-empty">暂无可用模型，请先到设置里添加供应商</div>
+             <button
+                v-for="p in store.providers"
+                :key="p.id"
+                class="mobile-provider-option"
+                :class="{ active: String(p.id) === String(store.currentSession?.provider_id) }"
+                @click="onSwitchProvider(String(p.id)); providerDropdownOpen = false; mobilePlusPanelOpen = false"
+              >
+                <span class="provider-option-name">{{ p.name }}</span>
+                <span class="provider-option-model">{{ p.model_id }}</span>
+              </button>
           </div>
         </div>
       </div>
@@ -2335,62 +2705,470 @@ mark.fc-highlight {
   .queue-panel { padding: 6px 8px; }
   .queue-item-text { font-size: 11px; }
 }
-.input-wrapper {
-  flex: 1;
-  display: flex;
-  align-items: flex-end;
-  gap: 4px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: 8px 12px;
-  transition: border-color var(--transition), box-shadow var(--transition);
-}
-.input-wrapper:focus-within { border-color: var(--accent); }
-.input-wrapper textarea {
-  flex: 1;
-  resize: none;
-  font-size: 14px;
-  line-height: 1.5;
-  padding: 4px 0;
-  max-height: 200px;
+
+/* === Unified Input Area === */
+.unified-input-container {
   background: transparent;
-  color: var(--text-primary);
+  border: none;
+  border-radius: 0;
+  padding: 4px 0 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  position: relative;
+  overflow: visible;
 }
-.input-wrapper textarea::placeholder { color: var(--text-muted); }
-.input-actions {
-  flex-shrink: 0;
+.unified-input-container.is-focused {
+  /* No outline to blend in */
+}
+[data-theme="dark"] .unified-input-container {
+  background: transparent;
+  box-shadow: none;
+}
+[data-theme="dark"] .unified-input-container.is-focused {
+  box-shadow: none;
+}
+
+.unified-input-container .textarea-wrapper {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  position: relative;
+}
+
+.slash-command-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 10px);
+  z-index: 120;
+  max-height: min(420px, 55vh);
+  overflow-y: auto;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.16);
+  padding: 8px;
+}
+.slash-menu-header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px 8px;
+  color: var(--text-muted);
+  font-size: 12px;
 }
-.btn-send, .btn-stop {
+.slash-menu-empty {
+  padding: 18px 10px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.slash-command-item {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  padding: 9px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.slash-command-item:hover,
+.slash-command-item.active {
+  background: var(--bg-hover);
+}
+.slash-command-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 3px;
+}
+.slash-command-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.slash-command-type {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 7px;
+}
+.slash-command-type.command {
+  color: var(--accent);
+}
+.slash-command-desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.slash-menu-hint {
+  padding: 8px 8px 2px;
+  color: var(--text-muted);
+  font-size: 11px;
+  border-top: 1px solid var(--border);
+  margin-top: 6px;
+}
+
+.unified-input-container textarea {
+  width: 100%;
+  resize: none;
+  font-size: 15px;
+  line-height: 1.6;
+  padding: 4px;
+  max-height: 240px;
+  background: transparent;
+  color: var(--text-primary);
+  border: none;
+  outline: none;
+  min-height: 48px;
+}
+.unified-input-container textarea::placeholder {
+  color: var(--text-muted);
+}
+.unified-input-container textarea.has-tags {
+  padding-top: 32px;
+}
+
+/* Textarea with tags */
+.textarea-with-tags {
+  position: relative;
+  width: 100%;
+}
+.tags-overlay {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  right: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  z-index: 1;
+}
+.inline-tag {
+  display: inline-block;
+  background: #3b82f6;
+  color: #fff;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s;
+}
+.inline-tag:hover {
+  background: #2563eb;
+}
+
+.unified-bottom-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0;
+  gap: 12px;
+}
+
+/* === Mobile Unified Input Area Overrides === */
+.unified-input-container.is-mobile {
+  flex-direction: row;
+  align-items: flex-end;
+  padding: 8px 0;
+  gap: 10px;
+}
+
+.mobile-plus-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 50%;
+  margin-bottom: 2px;
+}
+.mobile-plus-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.unified-input-container.is-mobile .textarea-wrapper {
+  background: var(--bg-secondary);
+  border-radius: 20px;
+  padding: 4px 12px;
+  min-height: 36px;
+  display: flex;
+  align-items: stretch;
+}
+
+.unified-input-container.is-mobile .slash-command-menu {
+  left: -46px;
+  right: -46px;
+  max-height: 50vh;
+}
+
+.unified-input-container.is-mobile textarea {
+  min-height: 24px;
+  padding: 2px 0;
+  margin: 0;
+}
+
+.mobile-send-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 2px;
+}
+
+.mobile-plus-panel {
+  position: absolute;
+  bottom: calc(100% + 12px);
+  left: -12px;
+  right: -12px;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border);
+  border-radius: 16px 16px 0 0;
+  padding: 20px 16px;
+  box-shadow: 0 -4px 20px rgba(0,0,0,0.08);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.mobile-panel-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+.mobile-panel-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.mobile-panel-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: var(--bg-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-primary);
+}
+
+.mobile-provider-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 160px;
+  overflow-y: auto;
+  background: var(--bg-primary);
+  border-radius: 12px;
+  padding: 8px;
+}
+
+.mobile-provider-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  text-align: left;
+}
+.mobile-provider-option.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.mobile-provider-option .provider-option-name {
+  font-weight: 500;
+}
+.mobile-provider-option .provider-option-model {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.tool-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+.tool-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.model-badge {
+  background: var(--bg-secondary);
+  border: 1px solid transparent;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  max-width: 100%;
+}
+.model-badge:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.model-badge svg {
+  flex-shrink: 0;
+}
+.model-name-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-dropdown {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.15), 0 4px 12px rgba(0,0,0,0.08);
+  border: 1px solid rgba(var(--border-rgb, 100,100,100), 0.2);
+  border-radius: 12px;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  background: rgba(var(--bg-primary-rgb, 255,255,255), 0.92);
+  padding: 6px;
+  min-width: 260px;
+  max-width: 360px;
+  max-height: 400px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+[data-theme="dark"] .model-dropdown {
+  background: rgba(30,30,30, 0.92);
+  border: 1px solid rgba(255,255,255, 0.1);
+}
+.model-dropdown .provider-option {
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+.model-dropdown .provider-option:hover {
+  background: var(--bg-hover);
+}
+.model-dropdown .provider-option.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.model-dropdown .provider-option-name {
+  font-weight: 600;
+}
+.model-dropdown .provider-option-model {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.model-dropdown .provider-empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.context-badge {
+  font-size: 12px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  transition: color 0.2s;
+  padding: 4px 8px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+.context-badge:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.send-btn {
   width: 32px;
   height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius);
-  transition: all var(--transition);
-}
-.btn-send { color: var(--accent); }
-.btn-send:hover:not(:disabled) { background: var(--accent-soft); }
-.btn-send:disabled { color: var(--text-muted); cursor: not-allowed; }
-.btn-stop { color: var(--danger); }
-.btn-stop:hover { background: rgba(239, 68, 68, 0.1); }
-.btn-attach {
-  flex-shrink: 0;
-  width: 32px; height: 32px;
-  display: flex; align-items: center; justify-content: center;
-  border-radius: var(--radius);
-  color: var(--text-secondary);
-  transition: all var(--transition);
+  border-radius: 50%;
+  border: none;
   cursor: pointer;
+  background: rgba(var(--text-primary-rgb, 0,0,0), 0.05);
+  color: var(--text-muted);
+  transition: all 0.2s ease;
 }
-.btn-attach:hover:not(:disabled) {
-  background: var(--bg-hover);
-  color: var(--text-primary);
+[data-theme="dark"] .send-btn {
+  background: rgba(255,255,255, 0.1);
 }
-.btn-attach:disabled { opacity: 0.5; cursor: not-allowed; }
+.send-btn.active {
+  background: var(--text-primary);
+  color: var(--bg-primary);
+}
+[data-theme="dark"] .send-btn.active {
+  background: #fff;
+  color: #000;
+}
+.send-btn.active:hover {
+  transform: scale(1.05);
+  opacity: 0.9;
+}
+.send-btn.stop {
+  background: var(--text-primary);
+  color: var(--bg-primary);
+}
 
 /* Attachments preview */
 .attachments-preview {
@@ -2795,6 +3573,13 @@ mark.fc-highlight {
 .provider-option.active { color: var(--accent); background: var(--accent-soft); }
 .provider-option-name { font-weight: 500; }
 .provider-option-model { font-size: 11px; color: var(--text-muted); }
+.provider-empty {
+  padding: 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
+  white-space: nowrap;
+}
 /* More menu extras */
 .more-menu-divider { height: 1px; background: var(--border); margin: 4px 0; }
 .more-menu-label { padding: 6px 14px; font-size: 11px; color: var(--text-muted); font-weight: 600; }
@@ -2937,7 +3722,6 @@ mark.fc-highlight {
   .rules-file-item { white-space: nowrap; }
   .message { gap: 8px; margin-bottom: 16px; }
 }
-
 
 
 </style>
