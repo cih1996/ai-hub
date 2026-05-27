@@ -2510,7 +2510,7 @@ mark.fc-highlight {
   object-fit: cover;
   background: var(--bg-secondary);
 }
-.message-body { flex: 1; min-width: 0; max-width: 80%; }
+.message-body { flex: 1; min-width: 120px; max-width: 680px; }
 .message-header { margin-bottom: 4px; }
 .message-header.text-right { text-align: right; }
 .message-header.text-left { text-align: left; }
