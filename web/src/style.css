@@ -27,6 +27,9 @@
   --warning-bg: #fef3cd;
   --warning-border: #ffc107;
   --warning-text: #856404;
+  --user-bubble-bg: #ffffff;
+  --user-bubble-text: #1a1a1a;
+  --user-bubble-code-bg: rgba(0,0,0,0.08);
 }
 
 [data-theme="light"] {
@@ -54,6 +57,9 @@
   --warning-bg: #fef9c3;
   --warning-border: #facc15;
   --warning-text: #854d0e;
+  --user-bubble-bg: #2a2a2a;
+  --user-bubble-text: #f0f0f0;
+  --user-bubble-code-bg: rgba(255,255,255,0.12);
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }

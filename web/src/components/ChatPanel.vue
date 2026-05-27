@@ -2528,14 +2528,14 @@ mark.fc-highlight {
   border-radius: 12px;
   box-shadow: 0 1px 2px rgba(0,0,0,0.05);
 }
-/* User message: purple bubble, right-aligned */
+/* User message: themed bubble, right-aligned */
 .message.user .message-content {
-  background: var(--accent);
-  color: white;
+  background: var(--user-bubble-bg);
+  color: var(--user-bubble-text);
   border-radius: 12px 4px 12px 12px;
 }
-.message.user .message-content :deep(a) { color: white; text-decoration: underline; }
-.message.user .message-content :deep(code) { background: rgba(255,255,255,0.2); color: white; }
+.message.user .message-content :deep(a) { color: var(--accent); text-decoration: underline; }
+.message.user .message-content :deep(code) { background: var(--user-bubble-code-bg); color: var(--user-bubble-text); }
 .message.user .message-content :deep(img),
 .message.user .md-content :deep(img) {
   max-width: 300px !important;
